@@ -20,9 +20,12 @@ const UI = (function () {
 
   /**
    * Confirmacao para acoes destrutivas. Retorna Promise<boolean>.
-   * (Fase 1: usa confirm nativo; sera substituido por modal proprio depois.)
+   * Usa o modal proprio quando disponivel; cai para confirm nativo se preciso.
    */
-  function confirmar(mensagem) {
+  function confirmar(mensagem, opcoes = {}) {
+    if (window.Modal && Modal.confirmar) {
+      return Modal.confirmar({ mensagem, ...opcoes });
+    }
     return Promise.resolve(window.confirm(mensagem));
   }
 

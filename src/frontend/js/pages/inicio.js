@@ -3,7 +3,7 @@
 /**
  * Pagina inicial: mostra que o sistema esta funcionando e um resumo rapido.
  */
-const PaginaInicio = {
+window.PaginaInicio = {
   titulo: 'Início',
 
   async render(container) {

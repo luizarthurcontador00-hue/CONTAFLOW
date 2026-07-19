@@ -1,0 +1,406 @@
+'use strict';
+
+/**
+ * Pagina de Produtos: listagem (cards) com busca, filtro por categoria e
+ * alerta de estoque baixo; cadastro/edicao com foto; detalhe com imagem
+ * ampliada, historico de movimentacoes e ajuste de estoque.
+ */
+window.PaginaProdutos = (function () {
+  let categorias = [];
+  let fornecedores = [];
+  let filtros = { busca: '', categoria_id: '', estoque_baixo: false };
+
+  async function render(container) {
+    container.innerHTML = `
+      <div class="barra-ferramentas">
+        <input type="search" id="pf-busca" class="cresce" placeholder="Buscar por nome ou código de barras…" />
+        <select id="pf-categoria"><option value="">Todas as categorias</option></select>
+        <label class="flex gap-12" style="align-items:center;font-size:14px">
+          <input type="checkbox" id="pf-baixo" /> Só estoque baixo
+        </label>
+        <button class="btn btn--secundario" id="btn-categorias">🏷️ Categorias</button>
+        <button class="btn btn--secundario" id="btn-fornecedores">🚚 Fornecedores</button>
+        <button class="btn" id="btn-novo">+ Novo produto</button>
+      </div>
+      <div id="produtos-lista"><div class="card">Carregando…</div></div>
+    `;
+
+    await carregarAuxiliares();
+    preencherSelectCategorias(container.querySelector('#pf-categoria'));
+
+    const busca = container.querySelector('#pf-busca');
+    busca.addEventListener('input', debounce((e) => { filtros.busca = e.target.value; listar(); }, 250));
+    container.querySelector('#pf-categoria').addEventListener('change', (e) => { filtros.categoria_id = e.target.value; listar(); });
+    container.querySelector('#pf-baixo').addEventListener('change', (e) => { filtros.estoque_baixo = e.target.checked; listar(); });
+    container.querySelector('#btn-novo').addEventListener('click', () => abrirFormProduto());
+    container.querySelector('#btn-categorias').addEventListener('click', abrirGerenciadorCategorias);
+    container.querySelector('#btn-fornecedores').addEventListener('click', abrirGerenciadorFornecedores);
+
+    await listar();
+  }
+
+  async function carregarAuxiliares() {
+    [categorias, fornecedores] = await Promise.all([
+      API.get('/api/categorias'),
+      API.get('/api/fornecedores'),
+    ]);
+  }
+
+  function preencherSelectCategorias(select, selecionado) {
+    select.innerHTML = (select.id === 'pf-categoria' ? '<option value="">Todas as categorias</option>' : '<option value="">Sem categoria</option>')
+      + categorias.map((c) => `<option value="${c.id}" ${String(selecionado) === String(c.id) ? 'selected' : ''}>${UI.escapar(c.nome)}</option>`).join('');
+  }
+
+  async function listar() {
+    const alvo = document.getElementById('produtos-lista');
+    if (!alvo) return;
+    const params = new URLSearchParams();
+    if (filtros.busca) params.set('busca', filtros.busca);
+    if (filtros.categoria_id) params.set('categoria_id', filtros.categoria_id);
+    if (filtros.estoque_baixo) params.set('estoque_baixo', '1');
+
+    let itens;
+    try {
+      itens = await API.get('/api/produtos?' + params.toString());
+    } catch (e) {
+      alvo.innerHTML = `<div class="card"><span class="badge badge--erro">Erro</span> ${UI.escapar(e.message)}</div>`;
+      return;
+    }
+
+    if (!itens.length) {
+      alvo.innerHTML = `<div class="card vazio">Nenhum produto encontrado.
+        <div class="mt-16"><button class="btn" onclick="document.getElementById('btn-novo').click()">Cadastrar o primeiro produto</button></div></div>`;
+      return;
+    }
+
+    alvo.innerHTML = `<div class="produtos-grid">${itens.map(cardProduto).join('')}</div>`;
+    alvo.querySelectorAll('[data-produto]').forEach((el) => {
+      el.addEventListener('click', () => abrirDetalhe(Number(el.dataset.produto)));
+    });
+  }
+
+  function cardProduto(p) {
+    const baixo = Number(p.estoque_atual) <= Number(p.estoque_minimo);
+    const fotoHTML = p.foto_path
+      ? `<img src="/uploads/produtos/${encodeURIComponent(p.foto_path)}" alt="">`
+      : '📦';
+    return `
+      <div class="produto-card ${baixo ? 'estoque-baixo' : ''}" data-produto="${p.id}">
+        <div class="produto-card__foto">${fotoHTML}</div>
+        <div class="produto-card__body">
+          <div class="produto-card__nome">${UI.escapar(p.nome)}</div>
+          <div class="produto-card__preco">${UI.moeda(p.preco_venda)}</div>
+          <div class="produto-card__estoque">
+            Estoque: ${UI.numero(p.estoque_atual)} ${UI.escapar(p.unidade)}
+            ${baixo ? '<span class="badge badge--alerta" style="margin-left:6px">baixo</span>' : ''}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  // ----------------------- Formulario de produto -----------------------
+  function abrirFormProduto(produto) {
+    const ehEdicao = !!produto;
+    const p = produto || {};
+    const corpo = `
+      <form id="form-produto" class="form-grid">
+        <div class="campo col-2">
+          <label>Nome *</label>
+          <input name="nome" required value="${UI.escapar(p.nome || '')}" />
+        </div>
+        <div class="campo">
+          <label>Código de barras (EAN)</label>
+          <input name="codigo_barras" value="${UI.escapar(p.codigo_barras || '')}" />
+        </div>
+        <div class="campo">
+          <label>Unidade</label>
+          <input name="unidade" value="${UI.escapar(p.unidade || 'UN')}" />
+        </div>
+        <div class="campo">
+          <label>Categoria</label>
+          <select name="categoria_id" id="fp-categoria"></select>
+        </div>
+        <div class="campo">
+          <label>Fornecedor</label>
+          <select name="fornecedor_id" id="fp-fornecedor"></select>
+        </div>
+        <div class="campo">
+          <label>Custo (R$)</label>
+          <input name="custo" type="number" step="0.01" min="0" value="${p.custo != null ? p.custo : ''}" />
+        </div>
+        <div class="campo">
+          <label>Markup (%) <span class="dica">(opcional)</span></label>
+          <input name="markup" type="number" step="0.01" min="0" value="${p.markup != null ? p.markup : ''}" />
+        </div>
+        <div class="campo">
+          <label>Preço de venda (R$)</label>
+          <input name="preco_venda" type="number" step="0.01" min="0" value="${p.preco_venda != null ? p.preco_venda : ''}" />
+          <span class="dica">Deixe em branco para calcular pelo markup.</span>
+        </div>
+        <div class="campo">
+          <label>Estoque ${ehEdicao ? 'atual' : 'inicial'}</label>
+          <input name="estoque_atual" type="number" step="0.001" min="0" value="${p.estoque_atual != null ? p.estoque_atual : 0}" ${ehEdicao ? 'disabled' : ''} />
+          ${ehEdicao ? '<span class="dica">Use "Ajustar estoque" no detalhe.</span>' : ''}
+        </div>
+        <div class="campo">
+          <label>Estoque mínimo</label>
+          <input name="estoque_minimo" type="number" step="0.001" min="0" value="${p.estoque_minimo != null ? p.estoque_minimo : 0}" />
+        </div>
+        <div class="campo col-2">
+          <label>Descrição</label>
+          <textarea name="descricao">${UI.escapar(p.descricao || '')}</textarea>
+        </div>
+        <div class="campo col-2">
+          <label>Foto do produto</label>
+          <div class="flex gap-12" style="align-items:center">
+            <div class="foto-preview" id="fp-preview">${p.foto_path ? `<img src="/uploads/produtos/${encodeURIComponent(p.foto_path)}">` : '📷'}</div>
+            <div>
+              <input type="file" name="foto" id="fp-foto" accept="image/*" />
+              ${p.foto_path ? '<div class="mt-16"><label class="dica"><input type="checkbox" id="fp-remover"> Remover foto atual</label></div>' : ''}
+            </div>
+          </div>
+        </div>
+      </form>`;
+
+    Modal.abrir({
+      titulo: ehEdicao ? 'Editar produto' : 'Novo produto',
+      tamanho: 'modal--grande',
+      corpoHTML: corpo,
+      textoConfirmar: 'Salvar',
+      aoAbrir: (el) => {
+        preencherSelectCategorias(el.querySelector('#fp-categoria'), p.categoria_id);
+        const selF = el.querySelector('#fp-fornecedor');
+        selF.innerHTML = '<option value="">Sem fornecedor</option>' +
+          fornecedores.map((f) => `<option value="${f.id}" ${String(p.fornecedor_id) === String(f.id) ? 'selected' : ''}>${UI.escapar(f.nome)}</option>`).join('');
+        const foto = el.querySelector('#fp-foto');
+        foto.addEventListener('change', () => {
+          const arq = foto.files[0];
+          if (arq) el.querySelector('#fp-preview').innerHTML = `<img src="${URL.createObjectURL(arq)}">`;
+        });
+      },
+      aoConfirmar: async (el) => {
+        const form = el.querySelector('#form-produto');
+        if (!form.nome.value.trim()) { UI.erro('Informe o nome do produto.'); return false; }
+        const fd = new FormData(form);
+        const remover = el.querySelector('#fp-remover');
+        if (remover && remover.checked) fd.set('remover_foto', '1');
+        // Nao enviar arquivo vazio
+        if (!el.querySelector('#fp-foto').files.length) fd.delete('foto');
+        try {
+          if (ehEdicao) {
+            await enviarMultipart('PUT', `/api/produtos/${produto.id}`, fd);
+            UI.sucesso('Produto atualizado.');
+          } else {
+            await enviarMultipart('POST', '/api/produtos', fd);
+            UI.sucesso('Produto cadastrado.');
+          }
+          await carregarAuxiliares();
+          await listar();
+        } catch (e) {
+          UI.erro(e.message); return false;
+        }
+      },
+    });
+  }
+
+  // ----------------------- Detalhe do produto -----------------------
+  async function abrirDetalhe(id) {
+    let p, movs;
+    try {
+      [p, movs] = await Promise.all([
+        API.get(`/api/produtos/${id}`),
+        API.get(`/api/produtos/${id}/movimentacoes`),
+      ]);
+    } catch (e) { UI.erro(e.message); return; }
+
+    const baixo = Number(p.estoque_atual) <= Number(p.estoque_minimo);
+    const corpo = `
+      <div class="flex gap-12" style="align-items:flex-start;flex-wrap:wrap">
+        <div class="foto-preview" style="width:180px;height:180px">
+          ${p.foto_path ? `<img src="/uploads/produtos/${encodeURIComponent(p.foto_path)}">` : '📦'}
+        </div>
+        <div style="flex:1;min-width:220px">
+          <table class="tabela">
+            <tr><th>Preço de venda</th><td>${UI.moeda(p.preco_venda)}</td></tr>
+            <tr><th>Custo</th><td>${UI.moeda(p.custo)}</td></tr>
+            <tr><th>Estoque</th><td>${UI.numero(p.estoque_atual)} ${UI.escapar(p.unidade)} ${baixo ? '<span class="badge badge--alerta">baixo</span>' : ''}</td></tr>
+            <tr><th>Estoque mínimo</th><td>${UI.numero(p.estoque_minimo)}</td></tr>
+            <tr><th>Categoria</th><td>${UI.escapar(p.categoria_nome || '—')}</td></tr>
+            <tr><th>Fornecedor</th><td>${UI.escapar(p.fornecedor_nome || '—')}</td></tr>
+            <tr><th>Cód. barras</th><td>${UI.escapar(p.codigo_barras || '—')}</td></tr>
+          </table>
+          ${p.descricao ? `<p class="muted mt-16">${UI.escapar(p.descricao)}</p>` : ''}
+        </div>
+      </div>
+      <h3 class="mt-16">Histórico de movimentações</h3>
+      <div style="max-height:220px;overflow:auto">
+        ${movs.length ? `<table class="tabela">
+          <thead><tr><th>Data</th><th>Tipo</th><th>Qtd</th><th>Saldo</th><th>Origem</th><th>Obs.</th></tr></thead>
+          <tbody>${movs.map((m) => `<tr>
+            <td>${UI.dataHora(m.data)}</td>
+            <td>${m.tipo === 'entrada' ? '⬆️ entrada' : '⬇️ saída'}</td>
+            <td>${UI.numero(m.quantidade)}</td>
+            <td>${UI.numero(m.estoque_apos)}</td>
+            <td>${UI.escapar(m.origem)}</td>
+            <td>${UI.escapar(m.observacao || '')}</td>
+          </tr>`).join('')}</tbody>
+        </table>` : '<p class="muted">Sem movimentações.</p>'}
+      </div>`;
+
+    Modal.abrir({
+      titulo: p.nome,
+      tamanho: 'modal--grande',
+      corpoHTML: corpo,
+      mostrarConfirmar: false,
+      aoAbrir: (el) => {
+        const foot = el.querySelector('.modal__foot');
+        foot.innerHTML = `
+          <button class="btn btn--perigo" data-excluir>Excluir</button>
+          <button class="btn btn--secundario" data-ajustar>Ajustar estoque</button>
+          <button class="btn" data-editar>Editar</button>`;
+        foot.querySelector('[data-editar]').addEventListener('click', () => { el.remove(); abrirFormProduto(p); });
+        foot.querySelector('[data-ajustar]').addEventListener('click', () => { el.remove(); abrirAjusteEstoque(p); });
+        foot.querySelector('[data-excluir]').addEventListener('click', async () => {
+          const ok = await UI.confirmar(`Excluir o produto "${p.nome}"? Se houver histórico, ele será apenas inativado.`, { titulo: 'Excluir produto', textoConfirmar: 'Excluir' });
+          if (!ok) return;
+          try {
+            const r = await API.del(`/api/produtos/${p.id}`);
+            UI.sucesso(r.inativado ? 'Produto inativado (tinha histórico).' : 'Produto excluído.');
+            el.remove(); await listar();
+          } catch (e) { UI.erro(e.message); }
+        });
+      },
+    });
+  }
+
+  function abrirAjusteEstoque(p) {
+    Modal.abrir({
+      titulo: `Ajustar estoque — ${p.nome}`,
+      tamanho: 'modal--pequeno',
+      corpoHTML: `
+        <div class="campo">
+          <label>Estoque atual</label>
+          <input value="${UI.numero(p.estoque_atual)} ${UI.escapar(p.unidade)}" disabled />
+        </div>
+        <div class="campo mt-16">
+          <label>Nova quantidade contada *</label>
+          <input id="aj-qtd" type="number" step="0.001" min="0" value="${p.estoque_atual}" />
+        </div>
+        <div class="campo mt-16">
+          <label>Motivo</label>
+          <input id="aj-motivo" placeholder="Ex.: inventário, perda, quebra" />
+        </div>`,
+      textoConfirmar: 'Salvar ajuste',
+      aoConfirmar: async (el) => {
+        const qtd = el.querySelector('#aj-qtd').value;
+        try {
+          await API.post(`/api/produtos/${p.id}/estoque`, { quantidade: Number(qtd), motivo: el.querySelector('#aj-motivo').value });
+          UI.sucesso('Estoque ajustado.');
+          await listar();
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
+  // ----------------------- Gerenciadores auxiliares -----------------------
+  async function abrirGerenciadorCategorias() {
+    await carregarAuxiliares();
+    const corpo = `
+      <form id="form-cat" class="barra-ferramentas" style="margin-bottom:16px">
+        <input name="nome" class="cresce" placeholder="Nome da categoria" required />
+        <input name="markup_padrao" type="number" step="0.01" min="0" placeholder="Markup % (opcional)" style="width:150px" />
+        <button class="btn" type="submit">Adicionar</button>
+      </form>
+      <div id="lista-cat"></div>`;
+    Modal.abrir({
+      titulo: 'Categorias', tamanho: 'modal--grande', corpoHTML: corpo, mostrarConfirmar: false,
+      aoAbrir: (el) => {
+        const render = () => {
+          el.querySelector('#lista-cat').innerHTML = categorias.length ? `<table class="tabela">
+            <thead><tr><th>Nome</th><th>Markup padrão</th><th>Produtos</th><th></th></tr></thead>
+            <tbody>${categorias.map((c) => `<tr>
+              <td>${UI.escapar(c.nome)}</td>
+              <td>${c.markup_padrao != null ? c.markup_padrao + '%' : '—'}</td>
+              <td>${c.total_produtos}</td>
+              <td style="text-align:right"><button class="btn btn--secundario" data-del="${c.id}" ${c.total_produtos > 0 ? 'disabled title="Há produtos nesta categoria"' : ''}>Excluir</button></td>
+            </tr>`).join('')}</tbody></table>` : '<p class="muted">Nenhuma categoria.</p>';
+          el.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+            const ok = await UI.confirmar('Excluir esta categoria?', { titulo: 'Excluir categoria', textoConfirmar: 'Excluir' });
+            if (!ok) return;
+            try { await API.del(`/api/categorias/${b.dataset.del}`); categorias = await API.get('/api/categorias'); render(); UI.sucesso('Categoria excluída.'); }
+            catch (e) { UI.erro(e.message); }
+          }));
+        };
+        render();
+        el.querySelector('#form-cat').addEventListener('submit', async (ev) => {
+          ev.preventDefault();
+          const f = ev.target;
+          try {
+            await API.post('/api/categorias', { nome: f.nome.value, markup_padrao: f.markup_padrao.value });
+            f.reset(); categorias = await API.get('/api/categorias'); render(); UI.sucesso('Categoria adicionada.');
+          } catch (e) { UI.erro(e.message); }
+        });
+      },
+    });
+  }
+
+  async function abrirGerenciadorFornecedores() {
+    await carregarAuxiliares();
+    const corpo = `
+      <form id="form-forn" class="form-grid" style="margin-bottom:16px">
+        <div class="campo col-2"><label>Nome / Razão social *</label><input name="nome" required /></div>
+        <div class="campo"><label>CNPJ</label><input name="cnpj" /></div>
+        <div class="campo"><label>Telefone</label><input name="telefone" /></div>
+        <div class="campo"><label>Contato</label><input name="contato" /></div>
+        <div class="campo"><label>E-mail</label><input name="email" type="email" /></div>
+        <div class="campo col-2"><button class="btn" type="submit">Adicionar fornecedor</button></div>
+      </form>
+      <div id="lista-forn"></div>`;
+    Modal.abrir({
+      titulo: 'Fornecedores', tamanho: 'modal--grande', corpoHTML: corpo, mostrarConfirmar: false,
+      aoAbrir: (el) => {
+        const render = () => {
+          el.querySelector('#lista-forn').innerHTML = fornecedores.length ? `<table class="tabela">
+            <thead><tr><th>Nome</th><th>CNPJ</th><th>Telefone</th><th></th></tr></thead>
+            <tbody>${fornecedores.map((f) => `<tr>
+              <td>${UI.escapar(f.nome)}</td><td>${UI.escapar(f.cnpj || '—')}</td><td>${UI.escapar(f.telefone || '—')}</td>
+              <td style="text-align:right"><button class="btn btn--secundario" data-del="${f.id}">Excluir</button></td>
+            </tr>`).join('')}</tbody></table>` : '<p class="muted">Nenhum fornecedor.</p>';
+          el.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+            const ok = await UI.confirmar('Excluir este fornecedor?', { titulo: 'Excluir fornecedor', textoConfirmar: 'Excluir' });
+            if (!ok) return;
+            try { await API.del(`/api/fornecedores/${b.dataset.del}`); fornecedores = await API.get('/api/fornecedores'); render(); UI.sucesso('Fornecedor excluído.'); }
+            catch (e) { UI.erro(e.message); }
+          }));
+        };
+        render();
+        el.querySelector('#form-forn').addEventListener('submit', async (ev) => {
+          ev.preventDefault();
+          const f = ev.target;
+          try {
+            await API.post('/api/fornecedores', {
+              nome: f.nome.value, cnpj: f.cnpj.value, telefone: f.telefone.value, contato: f.contato.value, email: f.email.value,
+            });
+            f.reset(); fornecedores = await API.get('/api/fornecedores'); render(); UI.sucesso('Fornecedor adicionado.');
+          } catch (e) { UI.erro(e.message); }
+        });
+      },
+    });
+  }
+
+  // ----------------------- utilitarios -----------------------
+  async function enviarMultipart(metodo, url, formData) {
+    const resp = await fetch(url, { method: metodo, body: formData });
+    const texto = await resp.text();
+    let dados = null;
+    if (texto) { try { dados = JSON.parse(texto); } catch (_) { dados = texto; } }
+    if (!resp.ok) throw new Error((dados && dados.erro) ? dados.erro : 'Erro ao salvar.');
+    return dados;
+  }
+
+  function debounce(fn, ms) {
+    let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+  }
+
+  return { titulo: 'Produtos', render };
+})();

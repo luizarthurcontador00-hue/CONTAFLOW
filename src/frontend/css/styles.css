@@ -138,6 +138,83 @@ table.tabela th { color: var(--texto-suave); font-weight: 600; font-size: 12.5px
 .toast.erro { background: var(--perigo); }
 .toast.info { background: #334155; }
 
+/* ===================== Formularios ===================== */
+.form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+.form-grid .col-2 { grid-column: span 2; }
+.campo { display: flex; flex-direction: column; gap: 6px; }
+.campo label { font-size: 13px; font-weight: 600; color: #374151; }
+.campo input, .campo select, .campo textarea {
+  padding: 9px 11px; border: 1px solid var(--borda); border-radius: 8px;
+  font-size: 14px; font-family: inherit; background: #fff; color: #1f2937;
+}
+.campo input:focus, .campo select:focus, .campo textarea:focus {
+  outline: none; border-color: var(--primaria); box-shadow: 0 0 0 3px rgba(37,99,235,.12);
+}
+.campo textarea { resize: vertical; min-height: 64px; }
+.campo .dica { font-size: 12px; color: var(--texto-suave); }
+
+.barra-ferramentas {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px;
+}
+.barra-ferramentas input[type="search"], .barra-ferramentas select {
+  padding: 9px 11px; border: 1px solid var(--borda); border-radius: 8px; font-size: 14px;
+}
+.barra-ferramentas .cresce { flex: 1; min-width: 180px; }
+
+/* ===================== Modal ===================== */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(15,23,42,.55);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 900; padding: 20px;
+}
+.modal {
+  background: #fff; border-radius: 14px; width: 100%; max-width: 720px;
+  max-height: 90vh; display: flex; flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0,0,0,.3);
+}
+.modal--pequeno { max-width: 460px; }
+.modal--grande { max-width: 920px; }
+.modal__head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 22px; border-bottom: 1px solid var(--borda);
+}
+.modal__head h2 { margin: 0; font-size: 18px; }
+.modal__fechar { background: none; border: none; font-size: 22px; cursor: pointer; color: #9ca3af; line-height: 1; }
+.modal__body { padding: 22px; overflow-y: auto; }
+.modal__foot {
+  padding: 16px 22px; border-top: 1px solid var(--borda);
+  display: flex; justify-content: flex-end; gap: 10px;
+}
+
+/* ===================== Produtos ===================== */
+.produtos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 16px; }
+.produto-card {
+  background: #fff; border: 1px solid var(--borda); border-radius: 12px;
+  overflow: hidden; box-shadow: var(--sombra); cursor: pointer;
+  transition: transform .1s, box-shadow .1s;
+}
+.produto-card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,.1); }
+.produto-card__foto {
+  height: 130px; background: #f1f5f9; display: grid; place-items: center;
+  color: #cbd5e1; font-size: 40px; overflow: hidden;
+}
+.produto-card__foto img { width: 100%; height: 100%; object-fit: cover; }
+.produto-card__body { padding: 12px 14px; }
+.produto-card__nome { font-weight: 600; font-size: 14.5px; margin-bottom: 4px; }
+.produto-card__preco { color: var(--primaria); font-weight: 700; }
+.produto-card__estoque { font-size: 12.5px; color: var(--texto-suave); margin-top: 4px; }
+.produto-card.estoque-baixo { border-color: #fca5a5; }
+
+.foto-preview {
+  width: 120px; height: 120px; border-radius: 10px; border: 2px dashed var(--borda);
+  display: grid; place-items: center; overflow: hidden; background: #f8fafc; color: #cbd5e1;
+}
+.foto-preview img { width: 100%; height: 100%; object-fit: cover; }
+
+.tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--borda); margin-bottom: 16px; }
+.tab { padding: 10px 16px; cursor: pointer; border-bottom: 2px solid transparent; color: var(--texto-suave); font-weight: 600; }
+.tab.ativo { color: var(--primaria); border-bottom-color: var(--primaria); }
+
 /* ===================== Utilitarios ===================== */
 .muted { color: var(--texto-suave); }
 .mt-16 { margin-top: 16px; }
