@@ -1,0 +1,15 @@
+node_modules/
+data/
+dist/
+*.log
+.DS_Store
+
+# Banco de dados local e artefatos
+*.db
+*.db-shm
+*.db-wal
+
+# Legado (banco antigo do ContaFlow) — codigo permanece versionado
+_legado/*.db
+_legado/*.db-shm
+_legado/*.db-wal

@@ -1,0 +1,25 @@
+# Configuracao do instalador (usada na Fase 8).
+# Gera um instalador .exe para Windows que nao exige Node.js instalado.
+appId: com.contaflow.gestorvendas
+productName: Gestor de Vendas
+directories:
+  output: dist
+  buildResources: build
+files:
+  - src/**/*
+  - package.json
+  - "!**/*.map"
+# better-sqlite3 possui codigo nativo: precisa ser desempacotado do asar.
+asarUnpack:
+  - "**/node_modules/better-sqlite3/**"
+win:
+  target:
+    - nsis
+  # icon: build/icon.ico   # adicionar antes de gerar o instalador final
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Gestor de Vendas

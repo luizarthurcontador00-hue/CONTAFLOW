@@ -1,15 +1,27 @@
 {
-  "name": "contaflow",
-  "version": "1.0.0",
-  "description": "ContaFlow - Sistema de gestao de tarefas para escritorios de contabilidade",
-  "main": "server.js",
+  "name": "gestor-vendas-desktop",
+  "version": "0.1.0",
+  "description": "Sistema de gestao de vendas desktop (Electron + Express + SQLite) - vendas, estoque, PDV, financeiro e relatorios. Uso local, sem emissao de nota fiscal.",
+  "author": "ContaFlow",
+  "license": "UNLICENSED",
+  "main": "src/main/main.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "electron .",
+    "dev": "cross-env NODE_ENV=development electron .",
+    "server": "node src/backend/standalone.js",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "dist": "electron-builder"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",
     "express": "^4.19.2",
-    "express-session": "^1.18.0",
-    "bcrypt": "^5.1.1"
+    "fast-xml-parser": "^4.5.0",
+    "multer": "^1.4.5-lts.1"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
+    "@electron/rebuild": "^3.6.0"
   }
 }
