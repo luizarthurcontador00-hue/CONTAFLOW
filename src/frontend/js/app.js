@@ -9,6 +9,7 @@
     inicio: { titulo: 'Início', pagina: () => window.PaginaInicio },
     produtos: { titulo: 'Produtos', pagina: () => window.PaginaProdutos },
     clientes: { titulo: 'Clientes', pagina: () => window.PaginaClientes },
+    etiquetas: { titulo: 'Etiquetas', pagina: () => window.PaginaEtiquetas },
     compras: { titulo: 'Compras', pagina: () => window.PaginaCompras },
     vendas: { titulo: 'Vendas', pagina: () => window.PaginaVendas },
     pdv: { titulo: 'PDV', pagina: () => window.PaginaPDV },

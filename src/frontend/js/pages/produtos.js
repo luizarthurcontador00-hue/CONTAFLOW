@@ -256,10 +256,12 @@ window.PaginaProdutos = (function () {
         const foot = el.querySelector('.modal__foot');
         foot.innerHTML = `
           <button class="btn btn--perigo" data-excluir>Excluir</button>
+          <button class="btn btn--secundario" data-etiqueta>🔖 Imprimir etiqueta</button>
           <button class="btn btn--secundario" data-ajustar>Ajustar estoque</button>
           <button class="btn" data-editar>Editar</button>`;
         foot.querySelector('[data-editar]').addEventListener('click', () => { el.remove(); abrirFormProduto(p); });
         foot.querySelector('[data-ajustar]').addEventListener('click', () => { el.remove(); abrirAjusteEstoque(p); });
+        foot.querySelector('[data-etiqueta]').addEventListener('click', () => imprimirEtiquetaRapida(p));
         foot.querySelector('[data-excluir]').addEventListener('click', async () => {
           const ok = await UI.confirmar(`Excluir o produto "${p.nome}"? Se houver histórico, ele será apenas inativado.`, { titulo: 'Excluir produto', textoConfirmar: 'Excluir' });
           if (!ok) return;
@@ -269,6 +271,21 @@ window.PaginaProdutos = (function () {
             el.remove(); await listar();
           } catch (e) { UI.erro(e.message); }
         });
+      },
+    });
+  }
+
+  function imprimirEtiquetaRapida(p) {
+    Modal.abrir({
+      titulo: `Imprimir etiqueta — ${p.nome}`, tamanho: 'modal--pequeno',
+      corpoHTML: `<div class="campo"><label>Quantidade de etiquetas</label>
+        <input id="et-qtd-rapida" type="number" min="1" value="1" /></div>
+        ${!p.codigo_barras ? '<p class="dica mt-16">Este produto ainda não tem código de barras — um código interno será gerado e salvo no cadastro.</p>' : ''}`,
+      textoConfirmar: 'Imprimir',
+      aoConfirmar: async (el) => {
+        const qtd = Math.max(1, Number(el.querySelector('#et-qtd-rapida').value || 1));
+        if (!window.PaginaEtiquetas) { UI.erro('Módulo de etiquetas indisponível.'); return false; }
+        await window.PaginaEtiquetas.imprimirIds(new Map([[p.id, { qtd }]]));
       },
     });
   }

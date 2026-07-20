@@ -17,6 +17,12 @@ router.get('/', asyncHandler((req, res) => {
   }));
 }));
 
+// Prepara (gera codigo interno se preciso e persiste) produtos para etiquetas.
+router.post('/etiquetas/preparar', asyncHandler((req, res) => {
+  const ids = (req.body && req.body.ids) || [];
+  res.json(produtos.prepararEtiquetas(ids));
+}));
+
 router.get('/:id', asyncHandler((req, res) => {
   res.json(produtos.obter(req.params.id));
 }));
