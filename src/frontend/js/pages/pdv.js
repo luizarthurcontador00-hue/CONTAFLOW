@@ -186,8 +186,11 @@ window.PaginaPDV = (function () {
     if (!resultados.length) { alvo.innerHTML = '<div class="pdv-resultados" style="padding:10px" >Nenhum produto encontrado.</div>'; return; }
     alvo.innerHTML = `<div class="pdv-resultados">${resultados.map((p, i) => `
       <button data-i="${i}" class="${i === selIdx ? 'sel' : ''}">
-        <strong>${UI.escapar(p.nome)}</strong> — ${UI.moeda(p.preco_venda)}
-        <span class="muted"> · estoque ${UI.numero(p.estoque_atual)} · ${UI.escapar(p.codigo_barras || 's/ código')}</span>
+        <span class="pdv-resultado-foto">${p.foto_path ? `<img src="/uploads/produtos/${encodeURIComponent(p.foto_path)}" alt="">` : '📦'}</span>
+        <span class="pdv-resultado-info">
+          <strong>${UI.escapar(p.nome)}</strong> — ${UI.moeda(p.preco_venda)}
+          <span class="muted"> · estoque ${UI.numero(p.estoque_atual)} · ${UI.escapar(p.codigo_barras || 's/ código')}</span>
+        </span>
       </button>`).join('')}</div>`;
     alvo.querySelectorAll('[data-i]').forEach((b) => b.addEventListener('click', () => adicionar(resultados[Number(b.dataset.i)])));
   }
