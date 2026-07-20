@@ -202,6 +202,30 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 2,
+    name: 'clientes-e-fiado',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS clientes (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          nome           TEXT NOT NULL,
+          cpf            TEXT,
+          telefone       TEXT,
+          email          TEXT,
+          endereco       TEXT,
+          limite_credito REAL NOT NULL DEFAULT 0,
+          observacao     TEXT,
+          ativo          INTEGER NOT NULL DEFAULT 1,
+          criado_em      TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_clientes_nome ON clientes(nome);
+
+        ALTER TABLE vendas ADD COLUMN cliente_id INTEGER REFERENCES clientes(id) ON DELETE SET NULL;
+        ALTER TABLE contas_receber ADD COLUMN cliente_id INTEGER REFERENCES clientes(id) ON DELETE SET NULL;
+      `);
+    },
+  },
 ];
 
 /**

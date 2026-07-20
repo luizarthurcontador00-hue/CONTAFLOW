@@ -8,6 +8,7 @@
   const rotas = {
     inicio: { titulo: 'Início', pagina: () => window.PaginaInicio },
     produtos: { titulo: 'Produtos', pagina: () => window.PaginaProdutos },
+    clientes: { titulo: 'Clientes', pagina: () => window.PaginaClientes },
     compras: { titulo: 'Compras', pagina: () => window.PaginaCompras },
     vendas: { titulo: 'Vendas', pagina: () => window.PaginaVendas },
     pdv: { titulo: 'PDV', pagina: () => window.PaginaPDV },
@@ -15,6 +16,7 @@
     financeiro: { titulo: 'Financeiro', pagina: () => window.PaginaFinanceiro },
     dashboard: { titulo: 'Dashboard', pagina: () => window.PaginaDashboard },
     relatorios: { titulo: 'Relatórios', pagina: () => window.PaginaRelatorios },
+    configuracoes: { titulo: 'Configurações', pagina: () => window.PaginaConfiguracoes },
     backup: { titulo: 'Backup', pagina: () => window.PaginaBackup },
   };
 

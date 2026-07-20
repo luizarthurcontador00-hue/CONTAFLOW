@@ -305,11 +305,23 @@ window.PaginaPDV = (function () {
         <div class="flex flex--between"><span>Total a pagar</span><strong>${UI.moeda(t.total)}</strong></div>
         <div class="flex flex--between mt-16"><span>Informado</span><strong id="pg-informado">R$ 0,00</strong></div>
         <div class="flex flex--between mt-16"><span id="pg-lbl">Troco</span><strong id="pg-troco">R$ 0,00</strong></div>
+        <div class="campo mt-16">
+          <label>Cliente <span class="dica">(obrigatório para venda a prazo/fiado)</span></label>
+          <select id="pg-cliente"><option value="">— sem cliente —</option></select>
+        </div>
         <div class="campo mt-16" id="pg-venc-wrap" style="display:none">
           <label>Vencimento (venda a prazo)</label><input type="date" id="pg-venc" />
         </div>`,
       textoConfirmar: 'Concluir venda',
       aoAbrir: (el) => {
+        // Carrega clientes para o seletor (venda a prazo/fiado).
+        API.get('/api/clientes').then((cls) => {
+          const sel = el.querySelector('#pg-cliente');
+          if (!sel) return;
+          sel.innerHTML = '<option value="">— sem cliente —</option>' +
+            cls.map((c) => `<option value="${c.id}">${UI.escapar(c.nome)}${Number(c.saldo_devedor) > 0 ? ' (deve ' + UI.moeda(c.saldo_devedor) + ')' : ''}</option>`).join('');
+        }).catch(() => {});
+
         const recalc = () => {
           const informado = arred(pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0));
           el.querySelector('#pg-informado').textContent = UI.moeda(informado);
@@ -336,23 +348,105 @@ window.PaginaPDV = (function () {
       },
       aoConfirmar: async (el) => {
         const vencInp = el.querySelector('#pg-venc');
+        const clienteId = el.querySelector('#pg-cliente').value || null;
+        const temPrazo = pagamentos.some((p) => p.forma_pagamento === 'prazo');
+        if (temPrazo && !clienteId) { UI.erro('Selecione o cliente para a venda a prazo (fiado).'); return false; }
         try {
           const venda = await API.post('/api/vendas', {
             itens: carrinho.map((i) => ({ produto_id: i.produto.id, quantidade: i.quantidade, preco_unitario: i.preco })),
             desconto: t.desconto,
             pagamentos,
+            cliente_id: clienteId,
             vencimento_prazo: vencInp && vencInp.value ? vencInp.value : null,
           });
-          UI.sucesso(`Venda #${venda.id} concluída!${venda.troco > 0 ? ' Troco: ' + UI.moeda(venda.troco) : ''}`);
           carrinho = [];
           document.getElementById('pdv-desconto').value = 0;
           renderCarrinho(); limparBusca();
           caixa = await API.get('/api/caixa/atual').catch(() => caixa);
           renderCaixaBar();
+          abrirConclusao(venda);
         } catch (e) { UI.erro(e.message); return false; }
       },
     });
   }
+
+  // ----------------------- Conclusao / cupom -----------------------
+  function abrirConclusao(venda) {
+    Modal.abrir({
+      titulo: `✅ Venda #${venda.id} concluída`,
+      tamanho: 'modal--pequeno',
+      corpoHTML: `
+        <div style="text-align:center">
+          <div class="stat__value" style="color:var(--sucesso)">${UI.moeda(venda.valor_total)}</div>
+          ${venda.troco > 0 ? `<p style="font-size:18px">Troco: <strong>${UI.moeda(venda.troco)}</strong></p>` : ''}
+          <p class="muted">${venda.itens.length} item(ns)</p>
+        </div>`,
+      textoConfirmar: '🖨️ Imprimir cupom',
+      aoConfirmar: async () => { await imprimirCupom(venda); return false; },
+      aoAbrir: (el) => {
+        // Botao secundario "Nova venda" (fecha e foca a busca).
+        const foot = el.querySelector('.modal__foot');
+        const cancelar = foot.querySelector('[data-fechar]');
+        if (cancelar) cancelar.textContent = 'Fechar';
+        const b = document.createElement('button');
+        b.className = 'btn btn--secundario'; b.textContent = 'Nova venda';
+        b.addEventListener('click', () => { el.remove(); const i = document.getElementById('pdv-input'); if (i) i.focus(); });
+        foot.insertBefore(b, foot.firstChild);
+      },
+    });
+  }
+
+  const NOMES_FORMA = { dinheiro: 'Dinheiro', cartao_credito: 'Cartão crédito', cartao_debito: 'Cartão débito', pix: 'PIX', prazo: 'A prazo' };
+
+  async function imprimirCupom(venda) {
+    let cfg = {};
+    try { cfg = await API.get('/api/config'); } catch (_) { /* usa vazio */ }
+    const linhaItens = venda.itens.map((i) => `
+      <tr><td colspan="3">${escaparTxt(i.descricao || '')}</td></tr>
+      <tr><td>${Number(i.quantidade)} x ${dinTxt(i.preco_unitario)}</td><td></td><td style="text-align:right">${dinTxt(i.valor_total)}</td></tr>`).join('');
+    const pags = venda.pagamentos.map((p) => `<tr><td colspan="2">${NOMES_FORMA[p.forma_pagamento] || p.forma_pagamento}</td><td style="text-align:right">${dinTxt(p.valor)}</td></tr>`).join('');
+
+    const html = `<html><head><meta charset="utf-8"><title>Cupom #${venda.id}</title>
+      <style>
+        * { font-family: 'Courier New', monospace; }
+        body { width: 300px; margin: 0 auto; padding: 8px; color:#000; font-size:12px; }
+        h2 { text-align:center; margin:4px 0; font-size:15px; }
+        .center { text-align:center; }
+        table { width:100%; border-collapse:collapse; }
+        td { padding:1px 0; vertical-align:top; }
+        hr { border:none; border-top:1px dashed #000; margin:6px 0; }
+        .tot { font-size:14px; font-weight:bold; }
+      </style></head><body>
+      <h2>${escaparTxt(cfg.nome_loja || 'Comprovante de Venda')}</h2>
+      <div class="center">
+        ${cfg.loja_endereco ? escaparTxt(cfg.loja_endereco) + '<br>' : ''}
+        ${cfg.loja_telefone ? 'Tel: ' + escaparTxt(cfg.loja_telefone) + '<br>' : ''}
+        ${cfg.loja_cnpj ? 'CNPJ/CPF: ' + escaparTxt(cfg.loja_cnpj) : ''}
+      </div>
+      <hr>
+      <div>Venda #${venda.id} — ${new Date().toLocaleString('pt-BR')}</div>
+      <div class="center" style="font-size:10px">*** SEM VALOR FISCAL ***</div>
+      <hr>
+      <table>${linhaItens}</table>
+      <hr>
+      <table>
+        <tr><td colspan="2">Subtotal</td><td style="text-align:right">${dinTxt(venda.valor_bruto)}</td></tr>
+        ${Number(venda.desconto) > 0 ? `<tr><td colspan="2">Desconto</td><td style="text-align:right">-${dinTxt(venda.desconto)}</td></tr>` : ''}
+        <tr class="tot"><td colspan="2">TOTAL</td><td style="text-align:right">${dinTxt(venda.valor_total)}</td></tr>
+      </table>
+      <hr>
+      <table>${pags}${venda.troco > 0 ? `<tr><td colspan="2">Troco</td><td style="text-align:right">${dinTxt(venda.troco)}</td></tr>` : ''}</table>
+      <hr>
+      <div class="center">${escaparTxt(cfg.loja_rodape_cupom || 'Obrigado pela preferência!')}</div>
+      </body></html>`;
+
+    const win = window.open('', '_blank', 'width=380,height=600');
+    win.document.write(html); win.document.close(); win.focus();
+    setTimeout(() => win.print(), 300);
+  }
+
+  function escaparTxt(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function dinTxt(v) { return Number(v || 0).toFixed(2).replace('.', ','); }
 
   // ----------------------- utils -----------------------
   function arred(n) { return Number(Number(n || 0).toFixed(2)); }

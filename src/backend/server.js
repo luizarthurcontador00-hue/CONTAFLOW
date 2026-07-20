@@ -54,6 +54,8 @@ function createApp() {
   // (adicionadas por fase — cada arquivo exporta um express.Router)
   montarRota(app, '/api/categorias', './routes/categorias');
   montarRota(app, '/api/fornecedores', './routes/fornecedores');
+  montarRota(app, '/api/clientes', './routes/clientes');
+  montarRota(app, '/api/config', './routes/config');
   montarRota(app, '/api/produtos', './routes/produtos');
   montarRota(app, '/api/compras', './routes/compras');
   montarRota(app, '/api/vendas', './routes/vendas');

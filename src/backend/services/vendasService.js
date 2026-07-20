@@ -90,9 +90,9 @@ function criarVenda(dados) {
 
   const tx = db.transaction(() => {
     const vendaInfo = db.prepare(
-      `INSERT INTO vendas (valor_bruto, desconto, valor_total, status, caixa_id, observacao)
-       VALUES (?, ?, ?, 'concluida', ?, ?)`
-    ).run(bruto, arred(descItens + descGeral), total, caixa_id, dados.observacao || null);
+      `INSERT INTO vendas (valor_bruto, desconto, valor_total, status, caixa_id, cliente_id, observacao)
+       VALUES (?, ?, ?, 'concluida', ?, ?, ?)`
+    ).run(bruto, arred(descItens + descGeral), total, caixa_id, dados.cliente_id || null, dados.observacao || null);
     const venda_id = vendaInfo.lastInsertRowid;
 
     const insItem = db.prepare(
@@ -119,9 +119,9 @@ function criarVenda(dados) {
       // Venda a prazo gera conta a receber.
       if (p.forma_pagamento === 'prazo') {
         db.prepare(
-          `INSERT INTO contas_receber (venda_id, descricao, valor, parcela, total_parcelas, vencimento, status)
-           VALUES (?, ?, ?, 1, 1, ?, 'pendente')`
-        ).run(venda_id, 'Venda #' + venda_id + ' (a prazo)', Number(p.valor), dados.vencimento_prazo || null);
+          `INSERT INTO contas_receber (venda_id, cliente_id, descricao, valor, parcela, total_parcelas, vencimento, status)
+           VALUES (?, ?, ?, ?, 1, 1, ?, 'pendente')`
+        ).run(venda_id, dados.cliente_id || null, 'Venda #' + venda_id + ' (a prazo)', Number(p.valor), dados.vencimento_prazo || null);
       }
     }
 

@@ -73,7 +73,8 @@ function listarReceber({ status, inicio, fim } = {}) {
   if (inicio) { where.push('date(cr.vencimento) >= date(@inicio)'); params.inicio = inicio; }
   if (fim) { where.push('date(cr.vencimento) <= date(@fim)'); params.fim = fim; }
   return db.prepare(`
-    SELECT cr.* FROM contas_receber cr
+    SELECT cr.*, c.nome AS cliente_nome FROM contas_receber cr
+    LEFT JOIN clientes c ON c.id = cr.cliente_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY (cr.status!='pendente'), date(cr.vencimento)
   `).all(params);
