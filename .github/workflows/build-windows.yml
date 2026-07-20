@@ -6,8 +6,6 @@ on:
   push:
     branches:
       - claude/sales-management-desktop-qwo9d4
-    paths-ignore:
-      - '**/*.md'
   workflow_dispatch:
 
 # Permissao para publicar o instalador em Releases.
