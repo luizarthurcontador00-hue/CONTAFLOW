@@ -102,15 +102,33 @@ function criarVenda(dados) {
     );
     for (const i of itensCalc) {
       insItem.run(venda_id, i.prod.id, i.prod.nome, i.qtd, i.preco, i.custo, i.descItem, i.totalItem);
-      registrarMovimentacao(db, {
-        produto_id: i.prod.id,
-        tipo: 'saida',
-        quantidade: i.qtd,
-        custo_unitario: i.custo,
-        origem: 'venda',
-        referencia_id: venda_id,
-        observacao: 'Venda #' + venda_id,
-      });
+
+      if (i.prod.eh_kit) {
+        // Kit: nao tem estoque proprio - baixa os componentes que o compoem.
+        const componentes = db.prepare('SELECT * FROM produtos_composicao WHERE produto_kit_id = ?').all(i.prod.id);
+        for (const comp of componentes) {
+          const componente = db.prepare('SELECT custo FROM produtos WHERE id = ?').get(comp.produto_componente_id);
+          registrarMovimentacao(db, {
+            produto_id: comp.produto_componente_id,
+            tipo: 'saida',
+            quantidade: arred(Number(comp.quantidade) * i.qtd),
+            custo_unitario: componente ? Number(componente.custo) : null,
+            origem: 'venda',
+            referencia_id: venda_id,
+            observacao: `Componente do kit "${i.prod.nome}" - venda #${venda_id}`,
+          });
+        }
+      } else {
+        registrarMovimentacao(db, {
+          produto_id: i.prod.id,
+          tipo: 'saida',
+          quantidade: i.qtd,
+          custo_unitario: i.custo,
+          origem: 'venda',
+          referencia_id: venda_id,
+          observacao: 'Venda #' + venda_id,
+        });
+      }
     }
 
     const insPag = db.prepare('INSERT INTO vendas_pagamentos (venda_id, forma_pagamento, valor) VALUES (?, ?, ?)');
@@ -140,14 +158,18 @@ function cancelarVenda(id, motivo) {
   if (venda.status === 'cancelada') throw new AppError('Esta venda ja esta cancelada.');
 
   const tx = db.transaction(() => {
-    const itens = db.prepare('SELECT * FROM vendas_itens WHERE venda_id = ?').all(id);
-    for (const i of itens) {
-      if (!i.produto_id) continue;
+    // Reverte exatamente as movimentacoes geradas na venda (cobre produtos
+    // simples e componentes de kits), sem depender da composicao atual do
+    // kit — que pode ter mudado desde a venda.
+    const movs = db.prepare(
+      "SELECT * FROM movimentacoes_estoque WHERE referencia_id = ? AND origem = 'venda' AND tipo = 'saida'"
+    ).all(id);
+    for (const m of movs) {
       registrarMovimentacao(db, {
-        produto_id: i.produto_id,
+        produto_id: m.produto_id,
         tipo: 'entrada',
-        quantidade: i.quantidade,
-        custo_unitario: i.custo_unitario,
+        quantidade: m.quantidade,
+        custo_unitario: m.custo_unitario,
         origem: 'estorno',
         referencia_id: id,
         observacao: 'Estorno da venda #' + id,

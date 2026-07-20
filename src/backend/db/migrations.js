@@ -226,6 +226,30 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 3,
+    name: 'kits-e-variacoes',
+    up(db) {
+      db.exec(`
+        -- Kits/combos: produto composto por outros produtos (estoque
+        -- controlado pelos componentes, nao pelo proprio kit).
+        ALTER TABLE produtos ADD COLUMN eh_kit INTEGER NOT NULL DEFAULT 0;
+        -- Variacoes: rotulo livre para agrupar produtos gerados em lote
+        -- (ex: "Camiseta Modelo X" com variacao "Tamanho M").
+        ALTER TABLE produtos ADD COLUMN grupo_variacao TEXT;
+        ALTER TABLE produtos ADD COLUMN variacao TEXT;
+
+        CREATE TABLE IF NOT EXISTS produtos_composicao (
+          id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+          produto_kit_id        INTEGER NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
+          produto_componente_id INTEGER NOT NULL REFERENCES produtos(id) ON DELETE RESTRICT,
+          quantidade            REAL NOT NULL DEFAULT 1
+        );
+        CREATE INDEX IF NOT EXISTS idx_composicao_kit ON produtos_composicao(produto_kit_id);
+        CREATE INDEX IF NOT EXISTS idx_produtos_grupo_variacao ON produtos(grupo_variacao);
+      `);
+    },
+  },
 ];
 
 /**

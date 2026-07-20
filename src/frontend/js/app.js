@@ -8,6 +8,7 @@
   const rotas = {
     inicio: { titulo: 'Início', pagina: () => window.PaginaInicio },
     produtos: { titulo: 'Produtos', pagina: () => window.PaginaProdutos },
+    lote: { titulo: 'Cadastro em Lote', pagina: () => window.PaginaLote },
     clientes: { titulo: 'Clientes', pagina: () => window.PaginaClientes },
     etiquetas: { titulo: 'Etiquetas', pagina: () => window.PaginaEtiquetas },
     compras: { titulo: 'Compras', pagina: () => window.PaginaCompras },

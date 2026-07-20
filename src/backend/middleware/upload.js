@@ -55,4 +55,20 @@ const uploadXml = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
 });
 
-module.exports = { uploadFoto, uploadXml };
+// ----------------------- Upload de planilha (cadastro em lote) -----------------------
+// Fica so em memoria: e apenas interpretada (parse) e descartada, nunca persistida em disco.
+function planilhaFilter(req, file, cb) {
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (!['.xlsx', '.xls', '.csv'].includes(ext)) {
+    return cb(new AppError('Envie um arquivo de planilha (.xlsx, .xls ou .csv).'));
+  }
+  cb(null, true);
+}
+
+const uploadPlanilha = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: planilhaFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+});
+
+module.exports = { uploadFoto, uploadXml, uploadPlanilha };

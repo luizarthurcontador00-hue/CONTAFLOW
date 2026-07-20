@@ -80,19 +80,19 @@ window.PaginaProdutos = (function () {
   }
 
   function cardProduto(p) {
-    const baixo = Number(p.estoque_atual) <= Number(p.estoque_minimo);
+    const baixo = !p.eh_kit && Number(p.estoque_atual) <= Number(p.estoque_minimo);
     const fotoHTML = p.foto_path
       ? `<img src="/uploads/produtos/${encodeURIComponent(p.foto_path)}" alt="">`
-      : '📦';
+      : (p.eh_kit ? '🎁' : '📦');
     return `
       <div class="produto-card ${baixo ? 'estoque-baixo' : ''}" data-produto="${p.id}">
         <div class="produto-card__foto">${fotoHTML}</div>
         <div class="produto-card__body">
-          <div class="produto-card__nome">${UI.escapar(p.nome)}</div>
+          <div class="produto-card__nome">${p.eh_kit ? '<span class="badge badge--muted" style="margin-right:4px">Kit</span>' : ''}${UI.escapar(p.nome)}</div>
           <div class="produto-card__preco">${UI.moeda(p.preco_venda)}</div>
           <div class="produto-card__estoque">
-            Estoque: ${UI.numero(p.estoque_atual)} ${UI.escapar(p.unidade)}
-            ${baixo ? '<span class="badge badge--alerta" style="margin-left:6px">baixo</span>' : ''}
+            ${p.eh_kit ? 'Composto por outros produtos' : `Estoque: ${UI.numero(p.estoque_atual)} ${UI.escapar(p.unidade)}
+            ${baixo ? '<span class="badge badge--alerta" style="margin-left:6px">baixo</span>' : ''}`}
           </div>
         </div>
       </div>`;
@@ -126,7 +126,7 @@ window.PaginaProdutos = (function () {
         </div>
         <div class="campo">
           <label>Custo (R$)</label>
-          <input name="custo" type="number" step="0.01" min="0" value="${p.custo != null ? p.custo : ''}" />
+          <input id="fp-custo" name="custo" type="number" step="0.01" min="0" value="${p.custo != null ? p.custo : ''}" />
         </div>
         <div class="campo">
           <label>Markup (%) <span class="dica">(opcional)</span></label>
@@ -137,9 +137,9 @@ window.PaginaProdutos = (function () {
           <input name="preco_venda" type="number" step="0.01" min="0" value="${p.preco_venda != null ? p.preco_venda : ''}" />
           <span class="dica">Deixe em branco para calcular pelo markup.</span>
         </div>
-        <div class="campo">
+        <div class="campo" id="fp-estoque-wrap">
           <label>Estoque ${ehEdicao ? 'atual' : 'inicial'}</label>
-          <input name="estoque_atual" type="number" step="0.001" min="0" value="${p.estoque_atual != null ? p.estoque_atual : 0}" ${ehEdicao ? 'disabled' : ''} />
+          <input id="fp-estoque" name="estoque_atual" type="number" step="0.001" min="0" value="${p.estoque_atual != null ? p.estoque_atual : 0}" ${ehEdicao ? 'disabled' : ''} />
           ${ehEdicao ? '<span class="dica">Use "Ajustar estoque" no detalhe.</span>' : ''}
         </div>
         <div class="campo">
@@ -149,6 +149,26 @@ window.PaginaProdutos = (function () {
         <div class="campo col-2">
           <label>Descrição</label>
           <textarea name="descricao">${UI.escapar(p.descricao || '')}</textarea>
+        </div>
+        <div class="campo col-2">
+          <label class="flex gap-12" style="align-items:center">
+            <input type="checkbox" id="fp-eh-kit" ${p.eh_kit ? 'checked' : ''}>
+            🎁 Este produto é um Kit/Combo (composto por outros produtos)
+          </label>
+        </div>
+        <div class="campo col-2" id="fp-kit-secao" style="display:${p.eh_kit ? 'block' : 'none'}">
+          <div class="card" style="background:#f8fafc">
+            <p class="dica" style="margin-top:0">O custo deste produto é calculado automaticamente pela soma dos itens abaixo. O estoque não é controlado neste produto — é baixado direto dos componentes a cada venda.</p>
+            <input id="fp-kit-busca" placeholder="Buscar produto para adicionar ao kit…" style="width:100%" />
+            <div id="fp-kit-resultados"></div>
+            <table class="tabela mt-16">
+              <thead><tr><th>Produto</th><th style="width:100px">Qtd.</th><th style="width:40px"></th></tr></thead>
+              <tbody id="fp-kit-itens"><tr><td colspan="3" class="muted">Nenhum item adicionado.</td></tr></tbody>
+            </table>
+            <div class="flex flex--between mt-16">
+              <span>Custo estimado do kit</span><strong id="fp-kit-custo">R$ 0,00</strong>
+            </div>
+          </div>
         </div>
         <div class="campo col-2">
           <label>Foto do produto</label>
@@ -162,12 +182,53 @@ window.PaginaProdutos = (function () {
         </div>
       </form>`;
 
+    let kitItens = []; // { produto_componente_id, nome, custo, quantidade }
+
+    function renderKitItens(el) {
+      const tbody = el.querySelector('#fp-kit-itens');
+      if (!kitItens.length) {
+        tbody.innerHTML = '<tr><td colspan="3" class="muted">Nenhum item adicionado.</td></tr>';
+      } else {
+        tbody.innerHTML = kitItens.map((it, i) => `<tr>
+          <td>${UI.escapar(it.nome)}</td>
+          <td><input type="number" step="0.001" min="0.001" value="${it.quantidade}" data-kit-qtd="${i}" style="width:100%" /></td>
+          <td><button class="btn btn--secundario" data-kit-rem="${i}">✕</button></td>
+        </tr>`).join('');
+        tbody.querySelectorAll('[data-kit-qtd]').forEach((inp) => inp.addEventListener('input', () => {
+          kitItens[Number(inp.dataset.kitQtd)].quantidade = Number(inp.value || 0);
+          atualizarCustoKit(el);
+        }));
+        tbody.querySelectorAll('[data-kit-rem]').forEach((btn) => btn.addEventListener('click', () => {
+          kitItens.splice(Number(btn.dataset.kitRem), 1);
+          renderKitItens(el);
+        }));
+      }
+      atualizarCustoKit(el);
+    }
+
+    function atualizarCustoKit(el) {
+      const total = kitItens.reduce((s, it) => s + Number(it.custo) * Number(it.quantidade || 0), 0);
+      el.querySelector('#fp-kit-custo').textContent = UI.moeda(total);
+      const custoInput = el.querySelector('#fp-custo');
+      if (custoInput) custoInput.value = total.toFixed(2);
+    }
+
+    function aplicarVisibilidadeKit(el) {
+      const ehKit = el.querySelector('#fp-eh-kit').checked;
+      el.querySelector('#fp-kit-secao').style.display = ehKit ? 'block' : 'none';
+      const custoInput = el.querySelector('#fp-custo');
+      custoInput.disabled = ehKit;
+      const estoqueWrap = el.querySelector('#fp-estoque-wrap');
+      estoqueWrap.style.opacity = ehKit ? '.5' : '1';
+      el.querySelector('#fp-estoque').disabled = ehKit || ehEdicao;
+    }
+
     Modal.abrir({
       titulo: ehEdicao ? 'Editar produto' : 'Novo produto',
       tamanho: 'modal--grande',
       corpoHTML: corpo,
       textoConfirmar: 'Salvar',
-      aoAbrir: (el) => {
+      aoAbrir: async (el) => {
         preencherSelectCategorias(el.querySelector('#fp-categoria'), p.categoria_id);
         const selF = el.querySelector('#fp-fornecedor');
         selF.innerHTML = '<option value="">Sem fornecedor</option>' +
@@ -177,23 +238,65 @@ window.PaginaProdutos = (function () {
           const arq = foto.files[0];
           if (arq) el.querySelector('#fp-preview').innerHTML = `<img src="${URL.createObjectURL(arq)}">`;
         });
+
+        // ----- Kit: alternancia de visibilidade e carga da composicao atual -----
+        el.querySelector('#fp-eh-kit').addEventListener('change', () => aplicarVisibilidadeKit(el));
+        aplicarVisibilidadeKit(el);
+
+        if (ehEdicao && p.eh_kit) {
+          try {
+            const comp = await API.get(`/api/produtos/${p.id}/composicao`);
+            kitItens = comp.map((c) => ({ produto_componente_id: c.produto_componente_id, nome: c.nome, custo: c.custo, quantidade: c.quantidade }));
+          } catch (_) { kitItens = []; }
+        }
+        renderKitItens(el);
+
+        const buscaKit = el.querySelector('#fp-kit-busca');
+        const resultadosKit = el.querySelector('#fp-kit-resultados');
+        buscaKit.addEventListener('input', debounce(async () => {
+          const termo = buscaKit.value.trim();
+          if (!termo) { resultadosKit.innerHTML = ''; return; }
+          const achados = await API.get('/api/vendas/buscar-produto?termo=' + encodeURIComponent(termo)).catch(() => []);
+          const candidatos = achados.filter((c) => !ehEdicao || c.id !== p.id);
+          if (!candidatos.length) { resultadosKit.innerHTML = '<div class="dica">Nenhum produto encontrado.</div>'; return; }
+          resultadosKit.innerHTML = `<div class="pdv-resultados">${candidatos.map((c) => `
+            <button type="button" data-add-kit="${c.id}">${UI.escapar(c.nome)} <span class="muted">— ${UI.moeda(c.custo)} custo</span></button>
+          `).join('')}</div>`;
+          resultadosKit.querySelectorAll('[data-add-kit]').forEach((btn) => btn.addEventListener('click', () => {
+            const id = Number(btn.dataset.addKit);
+            const produto = candidatos.find((c) => c.id === id);
+            if (kitItens.some((it) => it.produto_componente_id === id)) { UI.erro('Este produto já está no kit.'); return; }
+            kitItens.push({ produto_componente_id: id, nome: produto.nome, custo: produto.custo, quantidade: 1 });
+            buscaKit.value = ''; resultadosKit.innerHTML = '';
+            renderKitItens(el);
+          }));
+        }, 250));
       },
       aoConfirmar: async (el) => {
         const form = el.querySelector('#form-produto');
         if (!form.nome.value.trim()) { UI.erro('Informe o nome do produto.'); return false; }
+        const ehKit = el.querySelector('#fp-eh-kit').checked;
+        if (ehKit && !kitItens.length) { UI.erro('Adicione ao menos um produto para compor o kit.'); return false; }
+
         const fd = new FormData(form);
+        fd.set('eh_kit', ehKit ? '1' : '0'); // sempre explicito (checkbox desmarcado nao envia o campo)
         const remover = el.querySelector('#fp-remover');
         if (remover && remover.checked) fd.set('remover_foto', '1');
-        // Nao enviar arquivo vazio
         if (!el.querySelector('#fp-foto').files.length) fd.delete('foto');
+
         try {
+          let salvo;
           if (ehEdicao) {
-            await enviarMultipart('PUT', `/api/produtos/${produto.id}`, fd);
-            UI.sucesso('Produto atualizado.');
+            salvo = await enviarMultipart('PUT', `/api/produtos/${produto.id}`, fd);
           } else {
-            await enviarMultipart('POST', '/api/produtos', fd);
-            UI.sucesso('Produto cadastrado.');
+            salvo = await enviarMultipart('POST', '/api/produtos', fd);
           }
+          if (ehKit) {
+            await API.put(`/api/produtos/${salvo.id}/composicao`, {
+              itens: kitItens.map((it) => ({ produto_componente_id: it.produto_componente_id, quantidade: it.quantidade })),
+            });
+          }
+          UI.sucesso(ehEdicao ? 'Produto atualizado.' : 'Produto cadastrado.');
           await carregarAuxiliares();
           await listar();
         } catch (e) {
@@ -205,33 +308,44 @@ window.PaginaProdutos = (function () {
 
   // ----------------------- Detalhe do produto -----------------------
   async function abrirDetalhe(id) {
-    let p, movs;
+    let p, movs, composicao = null;
     try {
       [p, movs] = await Promise.all([
         API.get(`/api/produtos/${id}`),
         API.get(`/api/produtos/${id}/movimentacoes`),
       ]);
+      if (p.eh_kit) composicao = await API.get(`/api/produtos/${id}/composicao`).catch(() => []);
     } catch (e) { UI.erro(e.message); return; }
 
-    const baixo = Number(p.estoque_atual) <= Number(p.estoque_minimo);
+    const baixo = !p.eh_kit && Number(p.estoque_atual) <= Number(p.estoque_minimo);
     const corpo = `
+      ${p.eh_kit ? '<span class="badge badge--muted mb-16" style="display:inline-block">🎁 Kit / Combo</span>' : ''}
       <div class="flex gap-12" style="align-items:flex-start;flex-wrap:wrap">
         <div class="foto-preview" style="width:180px;height:180px">
-          ${p.foto_path ? `<img src="/uploads/produtos/${encodeURIComponent(p.foto_path)}">` : '📦'}
+          ${p.foto_path ? `<img src="/uploads/produtos/${encodeURIComponent(p.foto_path)}">` : (p.eh_kit ? '🎁' : '📦')}
         </div>
         <div style="flex:1;min-width:220px">
           <table class="tabela">
             <tr><th>Preço de venda</th><td>${UI.moeda(p.preco_venda)}</td></tr>
-            <tr><th>Custo</th><td>${UI.moeda(p.custo)}</td></tr>
-            <tr><th>Estoque</th><td>${UI.numero(p.estoque_atual)} ${UI.escapar(p.unidade)} ${baixo ? '<span class="badge badge--alerta">baixo</span>' : ''}</td></tr>
-            <tr><th>Estoque mínimo</th><td>${UI.numero(p.estoque_minimo)}</td></tr>
+            <tr><th>Custo</th><td>${UI.moeda(p.custo)}${p.eh_kit ? ' <span class="dica">(soma dos componentes)</span>' : ''}</td></tr>
+            ${p.eh_kit
+              ? '<tr><th>Estoque</th><td class="muted">Controlado pelos componentes</td></tr>'
+              : `<tr><th>Estoque</th><td>${UI.numero(p.estoque_atual)} ${UI.escapar(p.unidade)} ${baixo ? '<span class="badge badge--alerta">baixo</span>' : ''}</td></tr>
+                 <tr><th>Estoque mínimo</th><td>${UI.numero(p.estoque_minimo)}</td></tr>`}
             <tr><th>Categoria</th><td>${UI.escapar(p.categoria_nome || '—')}</td></tr>
             <tr><th>Fornecedor</th><td>${UI.escapar(p.fornecedor_nome || '—')}</td></tr>
             <tr><th>Cód. barras</th><td>${UI.escapar(p.codigo_barras || '—')}</td></tr>
+            ${p.grupo_variacao ? `<tr><th>Variação</th><td>${UI.escapar(p.grupo_variacao)}${p.variacao ? ' — ' + UI.escapar(p.variacao) : ''}</td></tr>` : ''}
           </table>
           ${p.descricao ? `<p class="muted mt-16">${UI.escapar(p.descricao)}</p>` : ''}
         </div>
       </div>
+      ${composicao && composicao.length ? `
+        <h3 class="mt-16">Itens do kit</h3>
+        <table class="tabela">
+          <thead><tr><th>Produto</th><th>Qtd.</th><th>Custo</th></tr></thead>
+          <tbody>${composicao.map((c) => `<tr><td>${UI.escapar(c.nome)}</td><td>${UI.numero(c.quantidade)} ${UI.escapar(c.unidade)}</td><td>${UI.moeda(c.custo)}</td></tr>`).join('')}</tbody>
+        </table>` : ''}
       <h3 class="mt-16">Histórico de movimentações</h3>
       <div style="max-height:220px;overflow:auto">
         ${movs.length ? `<table class="tabela">

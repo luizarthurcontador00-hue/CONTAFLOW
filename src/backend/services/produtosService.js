@@ -5,7 +5,7 @@ const path = require('path');
 const { getDb } = require('../db/connection');
 const { AppError } = require('../utils/errors');
 const { registrarMovimentacao } = require('./estoqueService');
-const { precoPorMarkup, markupEfetivo } = require('./precificacaoService');
+const { precoPorMarkup, markupEfetivo, arred } = require('./precificacaoService');
 const paths = require('../paths');
 
 const SELECT_BASE = `
@@ -80,6 +80,10 @@ function normalizar(dados) {
     markup: dados.markup != null && dados.markup !== '' ? Number(dados.markup) : null,
     preco_venda,
     estoque_minimo: Number(dados.estoque_minimo || 0),
+    // Aceita boolean real (lote) ou string vinda de formulario ('1'/'on'/'0'/'false').
+    eh_kit: (dados.eh_kit === true || dados.eh_kit === '1' || dados.eh_kit === 'on') ? 1 : 0,
+    grupo_variacao: dados.grupo_variacao ? String(dados.grupo_variacao).trim() || null : null,
+    variacao: dados.variacao ? String(dados.variacao).trim() || null : null,
   };
 }
 
@@ -88,17 +92,20 @@ function criar(dados) {
   const d = normalizar(dados);
   if (!d.nome) throw new AppError('O nome do produto e obrigatorio.');
 
-  const estoqueInicial = Number(dados.estoque_atual || 0);
+  // Kits nao tem estoque proprio: e sempre controlado pelos componentes.
+  const estoqueInicial = d.eh_kit ? 0 : Number(dados.estoque_atual || 0);
 
   const tx = db.transaction(() => {
     const info = db
       .prepare(
         `INSERT INTO produtos
           (nome, descricao, codigo_barras, categoria_id, fornecedor_id, unidade,
-           custo, markup, preco_venda, estoque_atual, estoque_minimo, foto_path)
+           custo, markup, preco_venda, estoque_atual, estoque_minimo, foto_path,
+           eh_kit, grupo_variacao, variacao)
          VALUES
           (@nome, @descricao, @codigo_barras, @categoria_id, @fornecedor_id, @unidade,
-           @custo, @markup, @preco_venda, 0, @estoque_minimo, @foto_path)`
+           @custo, @markup, @preco_venda, 0, @estoque_minimo, @foto_path,
+           @eh_kit, @grupo_variacao, @variacao)`
       )
       .run({ ...d, foto_path: dados.foto_path || null });
 
@@ -139,6 +146,7 @@ function atualizar(id, dados) {
        categoria_id=@categoria_id, fornecedor_id=@fornecedor_id, unidade=@unidade,
        custo=@custo, markup=@markup, preco_venda=@preco_venda,
        estoque_minimo=@estoque_minimo, foto_path=@foto_path,
+       eh_kit=@eh_kit, grupo_variacao=@grupo_variacao, variacao=@variacao,
        atualizado_em=datetime('now','localtime')
      WHERE id=@id`
   ).run({ ...d, foto_path, id });
@@ -257,6 +265,108 @@ function prepararEtiquetas(ids) {
   });
 }
 
+// ----------------------------- Kits / composicao -----------------------------
+
+/** Lista os itens que compoem um kit. */
+function obterComposicao(kitId) {
+  const db = getDb();
+  obter(kitId); // garante existencia
+  return db.prepare(`
+    SELECT pc.id, pc.produto_componente_id, pc.quantidade,
+           p.nome, p.custo, p.unidade
+    FROM produtos_composicao pc
+    JOIN produtos p ON p.id = pc.produto_componente_id
+    WHERE pc.produto_kit_id = ?
+    ORDER BY p.nome COLLATE NOCASE
+  `).all(kitId);
+}
+
+/**
+ * Substitui a lista de componentes de um kit e recalcula o custo do kit como
+ * a soma (custo do componente x quantidade), mantendo o custo sempre coerente.
+ */
+function salvarComposicao(kitId, itens) {
+  const db = getDb();
+  obter(kitId);
+  const lista = Array.isArray(itens) ? itens : [];
+  if (!lista.length) throw new AppError('Adicione ao menos um produto para compor o kit.');
+
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM produtos_composicao WHERE produto_kit_id = ?').run(kitId);
+    const ins = db.prepare(
+      'INSERT INTO produtos_composicao (produto_kit_id, produto_componente_id, quantidade) VALUES (?, ?, ?)'
+    );
+    let custoTotal = 0;
+    for (const item of lista) {
+      const componenteId = Number(item.produto_componente_id);
+      if (componenteId === Number(kitId)) {
+        throw new AppError('Um kit nao pode conter a si mesmo como componente.');
+      }
+      const qtd = Number(item.quantidade);
+      if (!(qtd > 0)) throw new AppError('A quantidade de cada item do kit deve ser maior que zero.');
+      const componente = db.prepare('SELECT custo FROM produtos WHERE id = ?').get(componenteId);
+      if (!componente) throw new AppError('Um dos produtos selecionados para o kit nao foi encontrado.');
+      ins.run(kitId, componenteId, qtd);
+      custoTotal += Number(componente.custo) * qtd;
+    }
+    db.prepare("UPDATE produtos SET eh_kit = 1, custo = ?, atualizado_em = datetime('now','localtime') WHERE id = ?")
+      .run(arred(custoTotal), kitId);
+  });
+  tx();
+  return obterComposicao(kitId);
+}
+
+// ----------------------------- Cadastro em lote -----------------------------
+
+function acharOuCriarCategoria(db, nome) {
+  const limpo = (nome || '').toString().trim();
+  if (!limpo) return null;
+  const existente = db.prepare('SELECT id FROM categorias WHERE nome = ? COLLATE NOCASE').get(limpo);
+  if (existente) return existente.id;
+  return db.prepare('INSERT INTO categorias (nome) VALUES (?)').run(limpo).lastInsertRowid;
+}
+
+function acharOuCriarFornecedor(db, nome) {
+  const limpo = (nome || '').toString().trim();
+  if (!limpo) return null;
+  const existente = db.prepare('SELECT id FROM fornecedores WHERE nome = ? COLLATE NOCASE').get(limpo);
+  if (existente) return existente.id;
+  return db.prepare('INSERT INTO fornecedores (nome) VALUES (?)').run(limpo).lastInsertRowid;
+}
+
+/**
+ * Cadastra varios produtos de uma vez (grade de cadastro em lote ou
+ * importacao de planilha). Cada linha e processada de forma independente:
+ * um erro numa linha nao impede as demais de serem salvas. Categoria e
+ * fornecedor podem vir por nome (texto): sao localizados ou criados na hora.
+ */
+function criarLote(linhas) {
+  if (!Array.isArray(linhas) || !linhas.length) {
+    throw new AppError('Nenhum produto para cadastrar.');
+  }
+  const db = getDb();
+  const resultados = linhas.map((linha, idx) => {
+    try {
+      if (!linha.nome || !String(linha.nome).trim()) {
+        throw new AppError('Informe o nome do produto.');
+      }
+      const dados = { ...linha };
+      if (linha.categoria) dados.categoria_id = acharOuCriarCategoria(db, linha.categoria);
+      if (linha.fornecedor) dados.fornecedor_id = acharOuCriarFornecedor(db, linha.fornecedor);
+      const produto = criar(dados);
+      return { linha: idx + 1, sucesso: true, produto };
+    } catch (e) {
+      return { linha: idx + 1, sucesso: false, nome: linha.nome || null, erro: (e && e.message) || 'Erro desconhecido.' };
+    }
+  });
+  return {
+    total: resultados.length,
+    criados: resultados.filter((r) => r.sucesso).length,
+    erros: resultados.filter((r) => !r.sucesso).length,
+    resultados,
+  };
+}
+
 module.exports = {
   listar,
   obter,
@@ -266,4 +376,7 @@ module.exports = {
   ajustarEstoque,
   excluir,
   prepararEtiquetas,
+  obterComposicao,
+  salvarComposicao,
+  criarLote,
 };
