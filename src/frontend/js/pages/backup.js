@@ -14,6 +14,7 @@ window.PaginaBackup = (function () {
         <div class="flex gap-12" style="flex-wrap:wrap">
           <button class="btn" id="bk-agora">💾 Fazer backup agora</button>
           <button class="btn btn--secundario" id="bk-abrir">📂 Abrir pasta de backups</button>
+          <button class="btn btn--secundario" id="bk-restaurar-arquivo">♻️ Restaurar de um arquivo…</button>
         </div>
       </div>
 
@@ -32,6 +33,7 @@ window.PaginaBackup = (function () {
 
     container.querySelector('#bk-agora').addEventListener('click', fazerBackup);
     container.querySelector('#bk-abrir').addEventListener('click', abrirPasta);
+    container.querySelector('#bk-restaurar-arquivo').addEventListener('click', restaurarDeArquivo);
     container.querySelector('#bk-auto').addEventListener('change', (e) => alternarAuto(e.target.checked));
 
     await carregarConfig();
@@ -54,10 +56,38 @@ window.PaginaBackup = (function () {
     catch (e) { alvo.innerHTML = UI.escapar(e.message); return; }
     if (!lista.length) { alvo.innerHTML = '<p class="muted">Nenhum backup gerado ainda.</p>'; return; }
     alvo.innerHTML = `<table class="tabela">
-      <thead><tr><th>Arquivo</th><th>Data</th><th>Tamanho</th></tr></thead>
+      <thead><tr><th>Arquivo</th><th>Data</th><th>Tamanho</th><th></th></tr></thead>
       <tbody>${lista.map((b) => `<tr>
         <td>${UI.escapar(b.nome)}</td><td>${UI.dataHora(b.data)}</td><td>${formatarTamanho(b.tamanho)}</td>
+        <td style="text-align:right"><button class="btn btn--secundario" data-restaurar="${UI.escapar(b.caminho)}">Restaurar</button></td>
       </tr>`).join('')}</tbody></table>`;
+    alvo.querySelectorAll('[data-restaurar]').forEach((btn) => btn.addEventListener('click', () => restaurar(btn.dataset.restaurar)));
+  }
+
+  async function restaurarDeArquivo() {
+    if (!(window.appDesktop && window.appDesktop.escolherArquivoBackup)) {
+      UI.erro('A restauração por arquivo está disponível apenas no aplicativo instalado.');
+      return;
+    }
+    const arquivo = await window.appDesktop.escolherArquivoBackup();
+    if (!arquivo) return;
+    await restaurar(arquivo);
+  }
+
+  async function restaurar(origem) {
+    const ok = await UI.confirmar(
+      'Restaurar este backup vai SUBSTITUIR todos os dados atuais (produtos, vendas, financeiro) pelos dados do backup. Um backup de segurança do estado atual será feito automaticamente antes. Deseja continuar?',
+      { titulo: 'Restaurar backup', textoConfirmar: 'Restaurar' }
+    );
+    if (!ok) return;
+    try {
+      await API.post('/api/backup/restaurar', { origem });
+      UI.sucesso('Backup restaurado! Recarregando o sistema…');
+      setTimeout(() => {
+        if (window.appDesktop && window.appDesktop.recarregarJanela) window.appDesktop.recarregarJanela();
+        else location.reload();
+      }, 1200);
+    } catch (e) { UI.erro(e.message); }
   }
 
   async function fazerBackup() {

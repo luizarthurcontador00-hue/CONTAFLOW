@@ -2,14 +2,16 @@
 
 const fs = require('fs');
 const path = require('path');
-const { getDb } = require('../db/connection');
+const { getDb, closeDb } = require('../db/connection');
 const { AppError } = require('../utils/errors');
 const paths = require('../paths');
+const Database = require('better-sqlite3');
 
 function carimbo() {
   const d = new Date();
   const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  const ms = String(d.getMilliseconds()).padStart(3, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}${ms}`;
 }
 
 /**
@@ -50,6 +52,51 @@ function limparAntigos(manter = 15) {
   lista.slice(manter).forEach((b) => {
     try { fs.unlinkSync(b.caminho); } catch (_) { /* ignora */ }
   });
+}
+
+/**
+ * Restaura o banco a partir de um arquivo de backup (.db).
+ * 1) valida que o arquivo e um SQLite com o schema esperado
+ * 2) faz um backup de seguranca do estado atual (para poder desfazer)
+ * 3) fecha a conexao, substitui o arquivo do banco e remove WAL/SHM
+ * A proxima operacao reabre o banco ja restaurado.
+ */
+async function restaurar(origem) {
+  if (!origem || !fs.existsSync(origem)) {
+    throw new AppError('Arquivo de backup nao encontrado.', 404);
+  }
+
+  // 1) Validacao: precisa abrir como SQLite e conter a tabela de produtos.
+  try {
+    const teste = new Database(origem, { readonly: true, fileMustExist: true });
+    const ok = teste.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('produtos','schema_version')").all();
+    teste.close();
+    if (!ok || ok.length === 0) {
+      throw new AppError('O arquivo selecionado nao e um backup valido deste sistema.');
+    }
+  } catch (e) {
+    if (e.amigavel) throw e;
+    throw new AppError('O arquivo selecionado nao e um banco de dados valido.');
+  }
+
+  // 2) Backup de seguranca do estado atual (antes de sobrescrever).
+  let seguranca = null;
+  try {
+    const r = await fazerBackup(paths.backupsDir);
+    seguranca = r.arquivo;
+  } catch (_) { /* se falhar, segue mesmo assim */ }
+
+  // 3) Fecha a conexao e substitui o arquivo do banco.
+  closeDb();
+  fs.copyFileSync(origem, paths.dbPath);
+  ['-wal', '-shm'].forEach((suf) => {
+    const f = paths.dbPath + suf;
+    if (fs.existsSync(f)) { try { fs.unlinkSync(f); } catch (_) { /* ignora */ } }
+  });
+
+  // Reabre imediatamente (valida que ficou consistente).
+  getDb();
+  return { ok: true, backup_seguranca: seguranca };
 }
 
 // -------------------- Configuracao de backup automatico --------------------
@@ -98,6 +145,7 @@ async function backupAutomaticoSeNecessario(horas = 24) {
 
 module.exports = {
   fazerBackup,
+  restaurar,
   listarBackups,
   limparAntigos,
   getConfig,

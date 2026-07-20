@@ -20,4 +20,9 @@ router.post('/automatico', asyncHandler((req, res) => {
   res.json(backup.setAutomatico(!!(req.body && req.body.ligado)));
 }));
 
+router.post('/restaurar', asyncHandler(async (req, res) => {
+  const r = await backup.restaurar(req.body && req.body.origem);
+  res.json(r);
+}));
+
 module.exports = router;

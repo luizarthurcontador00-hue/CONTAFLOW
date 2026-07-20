@@ -13,5 +13,7 @@ contextBridge.exposeInMainWorld('appDesktop', {
   },
   escolherPasta: () => ipcRenderer.invoke('escolher-pasta'),
   abrirPasta: (caminho) => ipcRenderer.invoke('abrir-pasta', caminho),
+  escolherArquivoBackup: () => ipcRenderer.invoke('escolher-arquivo-backup'),
+  recarregarJanela: () => ipcRenderer.invoke('recarregar-janela'),
   plataforma: process.platform,
 });

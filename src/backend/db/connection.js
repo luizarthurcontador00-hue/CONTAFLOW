@@ -19,4 +19,12 @@ function getDb() {
   return db;
 }
 
-module.exports = { getDb };
+/** Fecha a conexao atual (usado na restauracao de backup). */
+function closeDb() {
+  if (db) {
+    try { db.close(); } catch (_) { /* ignora */ }
+    db = null;
+  }
+}
+
+module.exports = { getDb, closeDb };

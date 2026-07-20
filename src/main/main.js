@@ -24,6 +24,22 @@ ipcMain.handle('abrir-pasta', async (_e, caminho) => {
   return true;
 });
 
+// Seleciona um arquivo de backup (.db) para restauracao.
+ipcMain.handle('escolher-arquivo-backup', async () => {
+  const r = await dialog.showOpenDialog(mainWindow, {
+    title: 'Escolha o arquivo de backup (.db) para restaurar',
+    properties: ['openFile'],
+    filters: [{ name: 'Backup do banco', extensions: ['db'] }],
+  });
+  return r.canceled ? null : r.filePaths[0];
+});
+
+// Recarrega a janela (usado apos restaurar um backup).
+ipcMain.handle('recarregar-janela', async () => {
+  if (mainWindow) mainWindow.webContents.reload();
+  return true;
+});
+
 // Executa o backup automatico (se configurado) e agenda verificacoes periodicas.
 function agendarBackupAutomatico() {
   const backup = require('../backend/services/backupService');
