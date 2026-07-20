@@ -1,0 +1,59 @@
+name: Gerar instalador Windows
+
+# Executa ao enviar codigo para a branch de desenvolvimento e tambem
+# manualmente pelo botao "Run workflow" na aba Actions.
+on:
+  push:
+    branches:
+      - claude/sales-management-desktop-qwo9d4
+    paths-ignore:
+      - '**/*.md'
+  workflow_dispatch:
+
+# Permissao para publicar o instalador em Releases.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Baixar o codigo
+        uses: actions/checkout@v4
+
+      - name: Instalar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar dependencias
+        run: npm install
+
+      - name: Gerar o instalador (.exe)
+        # electron-builder reconstroi o better-sqlite3 para o Electron e
+        # empacota o app. --publish never impede publicacao automatica aqui.
+        run: npx electron-builder --win --publish never
+
+      - name: Enviar o instalador como artefato (download rapido)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Gestor-de-Vendas-Windows
+          path: |
+            dist/*.exe
+          if-no-files-found: error
+
+      - name: Publicar em Releases (link permanente de download)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: windows-latest
+          name: Gestor de Vendas - instalador Windows (mais recente)
+          body: |
+            Instalador do **Gestor de Vendas** para Windows, gerado automaticamente.
+
+            Baixe o arquivo `Gestor de Vendas Setup ....exe` abaixo e execute para instalar.
+            Nao e necessario ter Node.js instalado.
+          files: dist/*.exe
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
