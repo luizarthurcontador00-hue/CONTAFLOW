@@ -250,6 +250,29 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 4,
+    name: 'contas-fixas',
+    up(db) {
+      db.exec(`
+        -- Contas fixas: modelo de conta a pagar recorrente (aluguel, internet,
+        -- agua/luz...). A cada mes, uma conta_pagar e gerada automaticamente
+        -- a partir do modelo, se ainda nao existir uma para o mes corrente.
+        CREATE TABLE IF NOT EXISTS contas_fixas (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          descricao      TEXT NOT NULL,
+          fornecedor_id  INTEGER REFERENCES fornecedores(id) ON DELETE SET NULL,
+          valor          REAL NOT NULL DEFAULT 0,
+          dia_vencimento INTEGER NOT NULL,     -- 1 a 31 (ajustado ao ultimo dia do mes quando necessario)
+          ativa          INTEGER NOT NULL DEFAULT 1,
+          criado_em      TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+
+        ALTER TABLE contas_pagar ADD COLUMN conta_fixa_id INTEGER REFERENCES contas_fixas(id) ON DELETE SET NULL;
+        CREATE INDEX IF NOT EXISTS idx_cpagar_conta_fixa ON contas_pagar(conta_fixa_id);
+      `);
+    },
+  },
 ];
 
 /**

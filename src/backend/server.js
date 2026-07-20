@@ -22,6 +22,17 @@ function createApp() {
   // eslint-disable-next-line no-console
   console.log(`[db] schema pronto (v${info.para}) em ${paths.dbPath}`);
 
+  // Gera as contas fixas (recorrentes) pendentes do mes, se houver. Nunca
+  // deve impedir o app de subir.
+  try {
+    // eslint-disable-next-line global-require
+    const { gerarContasFixasPendentes } = require('./services/financeiroService');
+    const r = gerarContasFixasPendentes();
+    if (r.geradas > 0) console.log(`[financeiro] ${r.geradas} conta(s) fixa(s) gerada(s) para o mes.`);
+  } catch (e) {
+    console.error('[financeiro] falha ao gerar contas fixas do mes:', e.message);
+  }
+
   const app = express();
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true }));

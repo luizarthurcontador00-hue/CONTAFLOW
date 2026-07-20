@@ -63,6 +63,95 @@ function excluirPagar(id) {
   return { ok: true };
 }
 
+// ========================= Contas fixas (recorrentes) =========================
+
+function listarContasFixas() {
+  const db = getDb();
+  return db.prepare(`
+    SELECT cf.*, f.nome AS fornecedor_nome
+    FROM contas_fixas cf LEFT JOIN fornecedores f ON f.id = cf.fornecedor_id
+    ORDER BY (cf.ativa = 0), cf.dia_vencimento
+  `).all();
+}
+
+function validarContaFixa(dados) {
+  const descricao = (dados.descricao || '').trim();
+  if (!descricao) throw new AppError('Informe a descricao da conta fixa.');
+  if (!(Number(dados.valor) > 0)) throw new AppError('Informe um valor maior que zero.');
+  const dia = Number(dados.dia_vencimento);
+  if (!Number.isInteger(dia) || dia < 1 || dia > 31) {
+    throw new AppError('Informe um dia de vencimento entre 1 e 31.');
+  }
+  return { descricao, valor: Number(dados.valor), dia_vencimento: dia, fornecedor_id: dados.fornecedor_id || null };
+}
+
+function criarContaFixa(dados) {
+  const db = getDb();
+  const d = validarContaFixa(dados);
+  const info = db.prepare(
+    'INSERT INTO contas_fixas (descricao, fornecedor_id, valor, dia_vencimento) VALUES (?, ?, ?, ?)'
+  ).run(d.descricao, d.fornecedor_id, d.valor, d.dia_vencimento);
+  return db.prepare('SELECT * FROM contas_fixas WHERE id = ?').get(info.lastInsertRowid);
+}
+
+function atualizarContaFixa(id, dados) {
+  const db = getDb();
+  const atual = db.prepare('SELECT * FROM contas_fixas WHERE id = ?').get(id);
+  if (!atual) throw new AppError('Conta fixa nao encontrada.', 404);
+  const d = validarContaFixa({ ...atual, ...dados });
+  const ativa = dados.ativa !== undefined ? (dados.ativa ? 1 : 0) : atual.ativa;
+  db.prepare('UPDATE contas_fixas SET descricao=?, fornecedor_id=?, valor=?, dia_vencimento=?, ativa=? WHERE id=?')
+    .run(d.descricao, d.fornecedor_id, d.valor, d.dia_vencimento, ativa, id);
+  return db.prepare('SELECT * FROM contas_fixas WHERE id = ?').get(id);
+}
+
+function excluirContaFixa(id) {
+  // Nao apaga as contas a pagar ja geradas (historico), so o modelo.
+  getDb().prepare('DELETE FROM contas_fixas WHERE id = ?').run(id);
+  return { ok: true };
+}
+
+function ultimoDiaDoMes(ano, mes) {
+  return new Date(ano, mes, 0).getDate(); // mes: 1-12
+}
+
+/**
+ * Gera as contas a pagar do mes corrente para cada conta fixa ativa que
+ * ainda nao tenha uma gerada neste mes. Idempotente: pode ser chamada varias
+ * vezes (na inicializacao do app e ao abrir a tela) sem duplicar.
+ */
+function gerarContasFixasPendentes() {
+  const db = getDb();
+  const fixas = db.prepare('SELECT * FROM contas_fixas WHERE ativa = 1').all();
+  if (!fixas.length) return { geradas: 0 };
+
+  const agora = new Date();
+  const ano = agora.getFullYear();
+  const mes = agora.getMonth() + 1;
+  const aaMm = `${ano}-${String(mes).padStart(2, '0')}`;
+  const ultimoDia = ultimoDiaDoMes(ano, mes);
+
+  let geradas = 0;
+  const tx = db.transaction(() => {
+    const jaTem = db.prepare(
+      "SELECT 1 FROM contas_pagar WHERE conta_fixa_id = ? AND strftime('%Y-%m', vencimento) = ?"
+    );
+    const inserir = db.prepare(
+      `INSERT INTO contas_pagar (fornecedor_id, conta_fixa_id, descricao, valor, vencimento, status)
+       VALUES (?, ?, ?, ?, ?, 'pendente')`
+    );
+    for (const f of fixas) {
+      if (jaTem.get(f.id, aaMm)) continue;
+      const dia = Math.min(Number(f.dia_vencimento), ultimoDia);
+      const vencimento = `${aaMm}-${String(dia).padStart(2, '0')}`;
+      inserir.run(f.fornecedor_id, f.id, f.descricao, f.valor, vencimento);
+      geradas++;
+    }
+  });
+  tx();
+  return { geradas };
+}
+
 // ========================== Contas a receber ==========================
 
 function listarReceber({ status, inicio, fim } = {}) {
@@ -201,4 +290,5 @@ module.exports = {
   listarPagar, criarPagar, baixarPagar, reabrirPagar, excluirPagar,
   listarReceber, criarReceber, baixarReceber, reabrirReceber, excluirReceber,
   alertas, fluxoCaixa,
+  listarContasFixas, criarContaFixa, atualizarContaFixa, excluirContaFixa, gerarContasFixasPendentes,
 };
