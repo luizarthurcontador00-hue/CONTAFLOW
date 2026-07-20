@@ -1,13 +1,39 @@
 'use strict';
 
 const path = require('path');
-const { app, BrowserWindow, dialog, shell } = require('electron');
+const { app, BrowserWindow, dialog, shell, ipcMain } = require('electron');
 const { startServer } = require('../backend/server');
 
 let mainWindow = null;
 let backend = null;
+let timerBackup = null;
 
 const isDev = process.env.NODE_ENV === 'development';
+
+// ------------------------- IPC (backup / pastas) -------------------------
+ipcMain.handle('escolher-pasta', async () => {
+  const r = await dialog.showOpenDialog(mainWindow, {
+    title: 'Escolha a pasta para salvar o backup',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  return r.canceled ? null : r.filePaths[0];
+});
+
+ipcMain.handle('abrir-pasta', async (_e, caminho) => {
+  if (caminho) shell.openPath(caminho);
+  return true;
+});
+
+// Executa o backup automatico (se configurado) e agenda verificacoes periodicas.
+function agendarBackupAutomatico() {
+  const backup = require('../backend/services/backupService');
+  const rodar = () => backup.backupAutomaticoSeNecessario(24).catch((e) => {
+    // eslint-disable-next-line no-console
+    console.error('[backup] falha no backup automatico:', e.message);
+  });
+  rodar();
+  timerBackup = setInterval(rodar, 6 * 60 * 60 * 1000); // verifica a cada 6h
+}
 
 async function criarJanela() {
   // Sobe o backend Express embutido em uma porta livre (127.0.0.1).
@@ -46,6 +72,8 @@ async function criarJanela() {
   if (isDev) {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   }
+
+  agendarBackupAutomatico();
 }
 
 app.whenReady().then(criarJanela).catch((err) => {
@@ -57,6 +85,7 @@ app.whenReady().then(criarJanela).catch((err) => {
 });
 
 app.on('window-all-closed', () => {
+  if (timerBackup) clearInterval(timerBackup);
   if (backend && backend.server) backend.server.close();
   if (process.platform !== 'darwin') app.quit();
 });

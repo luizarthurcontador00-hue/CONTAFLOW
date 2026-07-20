@@ -1,21 +1,42 @@
 # Configuracao do instalador (usada na Fase 8).
 # Gera um instalador .exe para Windows que nao exige Node.js instalado.
+#
+# Como gerar (no Windows, ou em CI Windows):
+#   npm install
+#   npm run dist
+# O electron-builder empacota o Electron + Node + dependencias e reconstroi
+# automaticamente o modulo nativo (better-sqlite3) para a ABI do Electron.
+
 appId: com.contaflow.gestorvendas
 productName: Gestor de Vendas
+copyright: Gestor de Vendas
+
 directories:
   output: dist
   buildResources: build
+
+# Inclui todo o projeto EXCETO o que nao deve ir para o instalador.
+# (node_modules de producao sao incluidos automaticamente; nao restringir aqui
+#  para nao excluir express/better-sqlite3.)
 files:
-  - src/**/*
-  - package.json
+  - "**/*"
+  - "!_legado/**"
+  - "!data/**"
+  - "!dist/**"
+  - "!**/*.md"
+  - "!.git*"
   - "!**/*.map"
-# better-sqlite3 possui codigo nativo: precisa ser desempacotado do asar.
+
+# better-sqlite3 possui codigo nativo (.node): precisa ficar fora do asar.
 asarUnpack:
   - "**/node_modules/better-sqlite3/**"
+
 win:
   target:
     - nsis
-  # icon: build/icon.ico   # adicionar antes de gerar o instalador final
+  # Adicione um icone antes de gerar o instalador final:
+  # icon: build/icon.ico
+
 nsis:
   oneClick: false
   perMachine: false

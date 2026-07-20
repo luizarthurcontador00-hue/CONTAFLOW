@@ -11,5 +11,7 @@ contextBridge.exposeInMainWorld('appDesktop', {
   aoReceberBackendUrl: (callback) => {
     ipcRenderer.on('backend-url', (_event, url) => callback(url));
   },
+  escolherPasta: () => ipcRenderer.invoke('escolher-pasta'),
+  abrirPasta: (caminho) => ipcRenderer.invoke('abrir-pasta', caminho),
   plataforma: process.platform,
 });
