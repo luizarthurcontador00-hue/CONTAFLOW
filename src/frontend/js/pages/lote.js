@@ -27,6 +27,7 @@ window.PaginaLote = (function () {
     ]);
 
     container.innerHTML = `
+      <a href="#/produtos" class="dica" style="display:inline-block;margin-bottom:12px">← Voltar para Produtos</a>
       <div class="barra-ferramentas">
         <button class="btn btn--secundario" id="lt-add-linha">+ Adicionar linha</button>
         <button class="btn btn--secundario" id="lt-variacoes">🧬 Gerar variações</button>

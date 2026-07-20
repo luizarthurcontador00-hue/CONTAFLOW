@@ -17,6 +17,7 @@ window.PaginaEtiquetas = (function () {
     selecao.clear();
 
     container.innerHTML = `
+      <a href="#/produtos" class="dica" style="display:inline-block;margin-bottom:12px">← Voltar para Produtos</a>
       <div class="barra-ferramentas">
         <input type="search" id="et-busca" class="cresce" placeholder="Buscar produto por nome ou código de barras…" />
         <select id="et-categoria"><option value="">Todas as categorias</option>${categorias.map((c) => `<option value="${c.id}">${UI.escapar(c.nome)}</option>`).join('')}</select>
