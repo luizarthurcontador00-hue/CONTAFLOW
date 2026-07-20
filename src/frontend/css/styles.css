@@ -215,6 +215,49 @@ table.tabela th { color: var(--texto-suave); font-weight: 600; font-size: 12.5px
 .tab { padding: 10px 16px; cursor: pointer; border-bottom: 2px solid transparent; color: var(--texto-suave); font-weight: 600; }
 .tab.ativo { color: var(--primaria); border-bottom-color: var(--primaria); }
 
+/* ===================== PDV ===================== */
+.pdv { display: grid; grid-template-columns: 1fr 340px; gap: 16px; height: 100%; }
+.pdv__esq { display: flex; flex-direction: column; min-height: 0; }
+.pdv__dir { display: flex; flex-direction: column; gap: 12px; }
+.pdv-busca { display: flex; gap: 10px; margin-bottom: 12px; }
+.pdv-busca input {
+  flex: 1; padding: 14px 16px; font-size: 18px; border: 2px solid var(--primaria);
+  border-radius: 10px;
+}
+.pdv-busca input:focus { outline: none; box-shadow: 0 0 0 4px rgba(37,99,235,.15); }
+.pdv-resultados {
+  border: 1px solid var(--borda); border-radius: 8px; background: #fff; margin-bottom: 10px;
+  max-height: 180px; overflow: auto;
+}
+.pdv-resultados button {
+  display: block; width: 100%; text-align: left; padding: 10px 14px; border: none;
+  background: none; cursor: pointer; border-bottom: 1px solid var(--borda); font-size: 14px;
+}
+.pdv-resultados button:hover, .pdv-resultados button.sel { background: #eef2ff; }
+.pdv-carrinho { flex: 1; overflow: auto; border: 1px solid var(--borda); border-radius: 10px; background: #fff; }
+.pdv-carrinho table { width: 100%; border-collapse: collapse; }
+.pdv-carrinho th, .pdv-carrinho td { padding: 10px 12px; border-bottom: 1px solid var(--borda); font-size: 15px; }
+.pdv-carrinho th { position: sticky; top: 0; background: #f8fafc; font-size: 12px; text-transform: uppercase; color: var(--texto-suave); }
+.pdv-carrinho input.qtd { width: 70px; padding: 6px 8px; border: 1px solid var(--borda); border-radius: 6px; text-align: center; }
+.pdv-total-card { background: #111827; color: #fff; border-radius: 12px; padding: 18px; }
+.pdv-total-card .linha { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; color: #cbd5e1; }
+.pdv-total-card .total { font-size: 34px; font-weight: 800; color: #fff; }
+.pdv-desconto input { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid #374151; background: #1f2937; color: #fff; }
+.pdv-acoes { display: grid; gap: 10px; }
+.pdv-acoes .btn { justify-content: center; padding: 16px; font-size: 17px; }
+.pdv-caixa-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 14px; border-radius: 10px; margin-bottom: 12px; font-size: 14px;
+}
+.pdv-caixa-bar.aberto { background: #dcfce7; color: #166534; }
+.pdv-caixa-bar.fechado { background: #fef3c7; color: #92400e; }
+.pdv-caixa-bar .acoes { display: flex; gap: 8px; }
+.pagamento-linha { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+.pagamento-linha select, .pagamento-linha input { padding: 9px 11px; border: 1px solid var(--borda); border-radius: 8px; font-size: 14px; }
+.chip-forma { display: inline-block; padding: 2px 8px; border-radius: 6px; background: #eef2ff; color: #3730a3; font-size: 12px; margin-right: 4px; }
+.atalho { font-size: 12px; color: var(--texto-suave); }
+kbd { background: #f1f5f9; border: 1px solid #cbd5e1; border-bottom-width: 2px; border-radius: 4px; padding: 1px 6px; font-size: 12px; font-family: monospace; }
+
 /* ===================== Utilitarios ===================== */
 .muted { color: var(--texto-suave); }
 .mt-16 { margin-top: 16px; }

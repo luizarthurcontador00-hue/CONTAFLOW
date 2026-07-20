@@ -1,0 +1,206 @@
+'use strict';
+
+const { getDb } = require('../db/connection');
+const { AppError } = require('../utils/errors');
+const { registrarMovimentacao } = require('./estoqueService');
+const { arred } = require('./precificacaoService');
+
+const FORMAS = ['dinheiro', 'cartao_credito', 'cartao_debito', 'pix', 'prazo'];
+
+/** Busca rapida de produto para a venda/PDV (codigo de barras exato ou nome). */
+function buscarProduto(termo) {
+  const db = getDb();
+  if (!termo) return [];
+  const t = String(termo).trim();
+  // Codigo de barras exato tem prioridade (leitor USB).
+  const exato = db.prepare('SELECT * FROM produtos WHERE codigo_barras = ? AND ativo = 1').get(t);
+  if (exato) return [exato];
+  return db.prepare(
+    'SELECT * FROM produtos WHERE ativo = 1 AND (nome LIKE ? OR codigo_barras LIKE ?) ORDER BY nome COLLATE NOCASE LIMIT 20'
+  ).all(`%${t}%`, `%${t}%`);
+}
+
+/**
+ * Cria uma venda.
+ * dados = {
+ *   itens: [{ produto_id, quantidade, preco_unitario?, desconto_item? }],
+ *   desconto?: number,            // desconto geral (R$)
+ *   pagamentos: [{ forma_pagamento, valor }],
+ *   caixa_id?: number,            // se nao vier, usa o caixa aberto (se houver)
+ *   observacao?, vencimento_prazo?: 'YYYY-MM-DD'
+ * }
+ */
+function criarVenda(dados) {
+  const db = getDb();
+  if (!dados || !Array.isArray(dados.itens) || !dados.itens.length) {
+    throw new AppError('Adicione ao menos um item para concluir a venda.');
+  }
+  const pagamentos = Array.isArray(dados.pagamentos) ? dados.pagamentos : [];
+  if (!pagamentos.length) throw new AppError('Informe ao menos uma forma de pagamento.');
+  for (const p of pagamentos) {
+    if (!FORMAS.includes(p.forma_pagamento)) throw new AppError('Forma de pagamento invalida: ' + p.forma_pagamento);
+    if (!(Number(p.valor) > 0)) throw new AppError('O valor de cada pagamento deve ser maior que zero.');
+  }
+
+  // Carrega produtos e calcula valores.
+  const itensCalc = dados.itens.map((it) => {
+    const prod = db.prepare('SELECT * FROM produtos WHERE id = ?').get(it.produto_id);
+    if (!prod) throw new AppError('Produto do carrinho nao encontrado (id ' + it.produto_id + ').', 404);
+    const qtd = Number(it.quantidade);
+    if (!(qtd > 0)) throw new AppError(`Quantidade invalida para "${prod.nome}".`);
+    const preco = it.preco_unitario != null && it.preco_unitario !== '' ? Number(it.preco_unitario) : Number(prod.preco_venda);
+    const descItem = Number(it.desconto_item || 0);
+    const totalItem = arred(qtd * preco - descItem);
+    return { prod, qtd, preco, descItem, totalItem, custo: Number(prod.custo || 0) };
+  });
+
+  const bruto = arred(itensCalc.reduce((s, i) => s + i.qtd * i.preco, 0));
+  const descItens = arred(itensCalc.reduce((s, i) => s + i.descItem, 0));
+  const descGeral = Number(dados.desconto || 0);
+  const total = arred(bruto - descItens - descGeral);
+  if (total < 0) throw new AppError('O desconto nao pode ser maior que o valor da venda.');
+
+  // Separa dinheiro das demais formas. O troco (dinheiro entregue alem do
+  // necessario) NAO entra no caixa: registramos apenas a parte aplicada.
+  const outras = pagamentos.filter((p) => p.forma_pagamento !== 'dinheiro');
+  const dinheiro = pagamentos.filter((p) => p.forma_pagamento === 'dinheiro');
+  const totalOutras = arred(outras.reduce((s, p) => s + Number(p.valor), 0));
+  if (totalOutras > total + 0.001) {
+    throw new AppError('A soma dos pagamentos (exceto dinheiro) excede o valor da venda.');
+  }
+  const dinheiroNecessario = arred(total - totalOutras);
+  const dinheiroEntregue = arred(dinheiro.reduce((s, p) => s + Number(p.valor), 0));
+  if (dinheiroEntregue + 0.001 < dinheiroNecessario) {
+    throw new AppError(`Pagamento insuficiente. Faltam ${(dinheiroNecessario - dinheiroEntregue).toFixed(2)}.`);
+  }
+  const troco = arred(dinheiroEntregue - dinheiroNecessario);
+
+  // Pagamentos que serao efetivamente gravados (dinheiro consolidado no valor aplicado).
+  const pagamentosGravar = outras.map((p) => ({ forma_pagamento: p.forma_pagamento, valor: arred(Number(p.valor)) }));
+  if (dinheiroNecessario > 0) {
+    pagamentosGravar.push({ forma_pagamento: 'dinheiro', valor: dinheiroNecessario });
+  }
+
+  // Caixa: usa o informado ou o caixa aberto atual (se houver).
+  let caixa_id = dados.caixa_id || null;
+  if (!caixa_id) {
+    const aberto = db.prepare("SELECT id FROM caixa WHERE status = 'aberto' ORDER BY id DESC LIMIT 1").get();
+    if (aberto) caixa_id = aberto.id;
+  }
+
+  const tx = db.transaction(() => {
+    const vendaInfo = db.prepare(
+      `INSERT INTO vendas (valor_bruto, desconto, valor_total, status, caixa_id, observacao)
+       VALUES (?, ?, ?, 'concluida', ?, ?)`
+    ).run(bruto, arred(descItens + descGeral), total, caixa_id, dados.observacao || null);
+    const venda_id = vendaInfo.lastInsertRowid;
+
+    const insItem = db.prepare(
+      `INSERT INTO vendas_itens
+        (venda_id, produto_id, descricao, quantidade, preco_unitario, custo_unitario, desconto_item, valor_total)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const i of itensCalc) {
+      insItem.run(venda_id, i.prod.id, i.prod.nome, i.qtd, i.preco, i.custo, i.descItem, i.totalItem);
+      registrarMovimentacao(db, {
+        produto_id: i.prod.id,
+        tipo: 'saida',
+        quantidade: i.qtd,
+        custo_unitario: i.custo,
+        origem: 'venda',
+        referencia_id: venda_id,
+        observacao: 'Venda #' + venda_id,
+      });
+    }
+
+    const insPag = db.prepare('INSERT INTO vendas_pagamentos (venda_id, forma_pagamento, valor) VALUES (?, ?, ?)');
+    for (const p of pagamentosGravar) {
+      insPag.run(venda_id, p.forma_pagamento, Number(p.valor));
+      // Venda a prazo gera conta a receber.
+      if (p.forma_pagamento === 'prazo') {
+        db.prepare(
+          `INSERT INTO contas_receber (venda_id, descricao, valor, parcela, total_parcelas, vencimento, status)
+           VALUES (?, ?, ?, 1, 1, ?, 'pendente')`
+        ).run(venda_id, 'Venda #' + venda_id + ' (a prazo)', Number(p.valor), dados.vencimento_prazo || null);
+      }
+    }
+
+    return venda_id;
+  });
+
+  const venda = obterVenda(tx());
+  venda.troco = troco;
+  return venda;
+}
+
+function cancelarVenda(id, motivo) {
+  const db = getDb();
+  const venda = db.prepare('SELECT * FROM vendas WHERE id = ?').get(id);
+  if (!venda) throw new AppError('Venda nao encontrada.', 404);
+  if (venda.status === 'cancelada') throw new AppError('Esta venda ja esta cancelada.');
+
+  const tx = db.transaction(() => {
+    const itens = db.prepare('SELECT * FROM vendas_itens WHERE venda_id = ?').all(id);
+    for (const i of itens) {
+      if (!i.produto_id) continue;
+      registrarMovimentacao(db, {
+        produto_id: i.produto_id,
+        tipo: 'entrada',
+        quantidade: i.quantidade,
+        custo_unitario: i.custo_unitario,
+        origem: 'estorno',
+        referencia_id: id,
+        observacao: 'Estorno da venda #' + id,
+      });
+    }
+    // Cancela contas a receber vinculadas ainda pendentes.
+    db.prepare("UPDATE contas_receber SET status = 'cancelada' WHERE venda_id = ? AND status = 'pendente'").run(id);
+    db.prepare("UPDATE vendas SET status = 'cancelada', observacao = COALESCE(observacao,'') || ? WHERE id = ?")
+      .run(motivo ? ` | Cancelada: ${motivo}` : ' | Cancelada', id);
+  });
+  tx();
+  return obterVenda(id);
+}
+
+function obterVenda(id) {
+  const db = getDb();
+  const venda = db.prepare('SELECT * FROM vendas WHERE id = ?').get(id);
+  if (!venda) throw new AppError('Venda nao encontrada.', 404);
+  venda.itens = db.prepare('SELECT * FROM vendas_itens WHERE venda_id = ? ORDER BY id').all(id);
+  venda.pagamentos = db.prepare('SELECT * FROM vendas_pagamentos WHERE venda_id = ?').all(id);
+  return venda;
+}
+
+function listarVendas({ inicio, fim, forma_pagamento, produto_id, status } = {}) {
+  const db = getDb();
+  const where = [];
+  const params = {};
+  if (inicio) { where.push('date(v.data) >= date(@inicio)'); params.inicio = inicio; }
+  if (fim) { where.push('date(v.data) <= date(@fim)'); params.fim = fim; }
+  if (status) { where.push('v.status = @status'); params.status = status; }
+  if (forma_pagamento) {
+    where.push('EXISTS (SELECT 1 FROM vendas_pagamentos vp WHERE vp.venda_id = v.id AND vp.forma_pagamento = @forma)');
+    params.forma = forma_pagamento;
+  }
+  if (produto_id) {
+    where.push('EXISTS (SELECT 1 FROM vendas_itens vi WHERE vi.venda_id = v.id AND vi.produto_id = @produto)');
+    params.produto = Number(produto_id);
+  }
+  const sql = `
+    SELECT v.*,
+      (SELECT GROUP_CONCAT(forma_pagamento, ', ') FROM vendas_pagamentos vp WHERE vp.venda_id = v.id) AS formas,
+      (SELECT COUNT(*) FROM vendas_itens vi WHERE vi.venda_id = v.id) AS total_itens
+    FROM vendas v
+    ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+    ORDER BY v.id DESC LIMIT 500`;
+  return db.prepare(sql).all(params);
+}
+
+module.exports = {
+  FORMAS,
+  buscarProduto,
+  criarVenda,
+  cancelarVenda,
+  obterVenda,
+  listarVendas,
+};

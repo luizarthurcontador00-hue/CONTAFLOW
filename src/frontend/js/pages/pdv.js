@@ -1,0 +1,362 @@
+'use strict';
+
+/**
+ * PDV (Ponto de Venda): tela otimizada para o balcao.
+ * - Busca por código de barras (leitor USB) ou nome
+ * - Carrinho, desconto, múltiplas formas de pagamento com troco
+ * - Abertura/fechamento de caixa, sangria e suprimento
+ * - Atalhos: F2 foca busca · F4 finaliza · Del limpa venda
+ */
+window.PaginaPDV = (function () {
+  let carrinho = [];   // { produto, quantidade, preco }
+  let caixa = null;
+  let resultados = [];
+  let selIdx = 0;
+  let handlerTeclado = null;
+
+  const FORMAS = [
+    ['dinheiro', 'Dinheiro'], ['cartao_credito', 'Cartão crédito'],
+    ['cartao_debito', 'Cartão débito'], ['pix', 'PIX'], ['prazo', 'A prazo'],
+  ];
+
+  async function render(container) {
+    carrinho = [];
+    caixa = await API.get('/api/caixa/atual').catch(() => null);
+
+    container.innerHTML = `
+      <div id="pdv-root" class="pdv">
+        <div class="pdv__esq">
+          <div id="caixa-bar"></div>
+          <div class="pdv-busca">
+            <input id="pdv-input" type="text" placeholder="Código de barras ou nome do produto…  (F2)" autocomplete="off" />
+            <button class="btn" id="pdv-add">Adicionar</button>
+          </div>
+          <div id="pdv-resultados"></div>
+          <div class="pdv-carrinho">
+            <table>
+              <thead><tr><th>Produto</th><th>Qtd</th><th>Preço</th><th>Subtotal</th><th></th></tr></thead>
+              <tbody id="pdv-itens"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="pdv__dir">
+          <div class="pdv-total-card">
+            <div class="linha"><span>Itens</span><span id="pdv-qtd-itens">0</span></div>
+            <div class="linha"><span>Subtotal</span><span id="pdv-subtotal">R$ 0,00</span></div>
+            <div class="pdv-desconto linha" style="display:block">
+              <span>Desconto (R$)</span>
+              <input id="pdv-desconto" type="number" min="0" step="0.01" value="0" />
+            </div>
+            <hr style="border-color:#374151;margin:12px 0" />
+            <div class="linha" style="align-items:baseline"><span>TOTAL</span><span class="total" id="pdv-total">R$ 0,00</span></div>
+          </div>
+          <div class="pdv-acoes">
+            <button class="btn" id="pdv-finalizar">Finalizar venda (F4)</button>
+            <button class="btn btn--secundario" id="pdv-limpar">Limpar venda (Del)</button>
+          </div>
+          <div class="atalho">
+            <kbd>F2</kbd> buscar · <kbd>Enter</kbd> adicionar · <kbd>F4</kbd> finalizar · <kbd>Del</kbd> limpar
+          </div>
+        </div>
+      </div>`;
+
+    renderCaixaBar();
+    renderCarrinho();
+
+    const input = container.querySelector('#pdv-input');
+    input.addEventListener('keydown', onInputKey);
+    input.addEventListener('input', debounce(buscar, 200));
+    container.querySelector('#pdv-add').addEventListener('click', () => adicionarDaBusca());
+    container.querySelector('#pdv-desconto').addEventListener('input', atualizarTotais);
+    container.querySelector('#pdv-finalizar').addEventListener('click', finalizar);
+    container.querySelector('#pdv-limpar').addEventListener('click', limpar);
+
+    setTimeout(() => input.focus(), 50);
+
+    // Atalhos globais (removidos ao sair da pagina)
+    if (handlerTeclado) document.removeEventListener('keydown', handlerTeclado);
+    handlerTeclado = (e) => {
+      if (!document.getElementById('pdv-root')) { document.removeEventListener('keydown', handlerTeclado); return; }
+      if (e.key === 'F2') { e.preventDefault(); input.focus(); input.select(); }
+      else if (e.key === 'F4') { e.preventDefault(); finalizar(); }
+      else if (e.key === 'Delete') { e.preventDefault(); limpar(); }
+    };
+    document.addEventListener('keydown', handlerTeclado);
+  }
+
+  // ----------------------- Caixa -----------------------
+  function renderCaixaBar() {
+    const bar = document.getElementById('caixa-bar');
+    if (!bar) return;
+    if (caixa) {
+      bar.className = 'pdv-caixa-bar aberto';
+      bar.innerHTML = `
+        <span>🟢 Caixa aberto — abertura ${UI.moeda(caixa.valor_abertura)} · vendas ${caixa.resumo.qtd_vendas} (${UI.moeda(caixa.resumo.total_vendas)})</span>
+        <span class="acoes">
+          <button class="btn btn--secundario" data-mov="suprimento">Suprimento</button>
+          <button class="btn btn--secundario" data-mov="sangria">Sangria</button>
+          <button class="btn btn--perigo" id="btn-fechar-caixa">Fechar caixa</button>
+        </span>`;
+      bar.querySelectorAll('[data-mov]').forEach((b) => b.addEventListener('click', () => movimentarCaixa(b.dataset.mov)));
+      bar.querySelector('#btn-fechar-caixa').addEventListener('click', fecharCaixa);
+    } else {
+      bar.className = 'pdv-caixa-bar fechado';
+      bar.innerHTML = `<span>🟡 Caixa fechado — abra o caixa para iniciar as vendas do dia.</span>
+        <span class="acoes"><button class="btn" id="btn-abrir-caixa">Abrir caixa</button></span>`;
+      bar.querySelector('#btn-abrir-caixa').addEventListener('click', abrirCaixa);
+    }
+  }
+
+  function abrirCaixa() {
+    Modal.abrir({
+      titulo: 'Abrir caixa', tamanho: 'modal--pequeno',
+      corpoHTML: `<div class="campo"><label>Valor de abertura (troco inicial)</label>
+        <input id="ca-valor" type="number" min="0" step="0.01" value="0" /></div>`,
+      textoConfirmar: 'Abrir',
+      aoConfirmar: async (el) => {
+        try {
+          caixa = await API.post('/api/caixa/abrir', { valor_abertura: Number(el.querySelector('#ca-valor').value || 0) });
+          renderCaixaBar(); UI.sucesso('Caixa aberto.');
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
+  function movimentarCaixa(tipo) {
+    Modal.abrir({
+      titulo: tipo === 'sangria' ? 'Sangria (retirada)' : 'Suprimento (entrada)', tamanho: 'modal--pequeno',
+      corpoHTML: `<div class="campo"><label>Valor</label><input id="mv-valor" type="number" min="0" step="0.01" /></div>
+        <div class="campo mt-16"><label>Motivo</label><input id="mv-motivo" /></div>`,
+      textoConfirmar: 'Confirmar',
+      aoConfirmar: async (el) => {
+        try {
+          caixa = await API.post(`/api/caixa/${caixa.id}/movimento`, {
+            tipo, valor: Number(el.querySelector('#mv-valor').value || 0), motivo: el.querySelector('#mv-motivo').value,
+          });
+          renderCaixaBar(); UI.sucesso('Movimento registrado.');
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
+  async function fecharCaixa() {
+    const atual = await API.get('/api/caixa/atual').catch(() => caixa);
+    const esperado = atual.resumo.esperado_dinheiro;
+    Modal.abrir({
+      titulo: 'Fechar caixa', tamanho: 'modal--pequeno',
+      corpoHTML: `
+        <table class="tabela">
+          <tr><th>Abertura</th><td>${UI.moeda(atual.valor_abertura)}</td></tr>
+          <tr><th>Vendas em dinheiro</th><td>${UI.moeda(atual.resumo.por_forma.find((f) => f.forma === 'dinheiro') ? atual.resumo.por_forma.find((f) => f.forma === 'dinheiro').total : 0)}</td></tr>
+          <tr><th>Suprimentos</th><td>${UI.moeda(atual.resumo.suprimentos)}</td></tr>
+          <tr><th>Sangrias</th><td>- ${UI.moeda(atual.resumo.sangrias)}</td></tr>
+          <tr><th>Esperado em caixa</th><td><strong>${UI.moeda(esperado)}</strong></td></tr>
+        </table>
+        <div class="campo mt-16"><label>Valor contado (dinheiro na gaveta)</label>
+          <input id="fc-valor" type="number" min="0" step="0.01" value="${esperado}" /></div>
+        <div id="fc-dif" class="dica mt-16"></div>`,
+      textoConfirmar: 'Fechar caixa',
+      aoAbrir: (el) => {
+        const inp = el.querySelector('#fc-valor');
+        const dif = el.querySelector('#fc-dif');
+        const calc = () => {
+          const d = Number(inp.value || 0) - esperado;
+          dif.textContent = d === 0 ? 'Sem diferença.' : (d > 0 ? `Sobra de ${UI.moeda(d)}` : `Falta de ${UI.moeda(Math.abs(d))}`);
+          dif.style.color = d === 0 ? '' : (d > 0 ? 'var(--sucesso)' : 'var(--perigo)');
+        };
+        inp.addEventListener('input', calc); calc();
+      },
+      aoConfirmar: async (el) => {
+        try {
+          const r = await API.post(`/api/caixa/${atual.id}/fechar`, { valor_fechamento: Number(el.querySelector('#fc-valor').value || 0) });
+          caixa = null; renderCaixaBar();
+          UI.sucesso(`Caixa fechado. Diferença: ${UI.moeda(r.diferenca)}.`);
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
+  // ----------------------- Busca / carrinho -----------------------
+  async function buscar() {
+    const termo = document.getElementById('pdv-input').value.trim();
+    const alvo = document.getElementById('pdv-resultados');
+    if (!termo) { alvo.innerHTML = ''; resultados = []; return; }
+    resultados = await API.get('/api/vendas/buscar-produto?termo=' + encodeURIComponent(termo)).catch(() => []);
+    selIdx = 0;
+    if (!resultados.length) { alvo.innerHTML = '<div class="pdv-resultados" style="padding:10px" >Nenhum produto encontrado.</div>'; return; }
+    alvo.innerHTML = `<div class="pdv-resultados">${resultados.map((p, i) => `
+      <button data-i="${i}" class="${i === selIdx ? 'sel' : ''}">
+        <strong>${UI.escapar(p.nome)}</strong> — ${UI.moeda(p.preco_venda)}
+        <span class="muted"> · estoque ${UI.numero(p.estoque_atual)} · ${UI.escapar(p.codigo_barras || 's/ código')}</span>
+      </button>`).join('')}</div>`;
+    alvo.querySelectorAll('[data-i]').forEach((b) => b.addEventListener('click', () => adicionar(resultados[Number(b.dataset.i)])));
+  }
+
+  function onInputKey(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      adicionarDaBusca();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault(); moverSelecao(1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault(); moverSelecao(-1);
+    }
+  }
+
+  function moverSelecao(d) {
+    if (!resultados.length) return;
+    selIdx = Math.max(0, Math.min(resultados.length - 1, selIdx + d));
+    document.querySelectorAll('#pdv-resultados [data-i]').forEach((b, i) => b.classList.toggle('sel', i === selIdx));
+  }
+
+  async function adicionarDaBusca() {
+    const termo = document.getElementById('pdv-input').value.trim();
+    if (!termo) return;
+    // Se ainda nao buscou, busca agora (fluxo do leitor: digita e Enter).
+    if (!resultados.length) {
+      resultados = await API.get('/api/vendas/buscar-produto?termo=' + encodeURIComponent(termo)).catch(() => []);
+    }
+    if (resultados.length === 1) return adicionar(resultados[0]);
+    if (resultados.length > 1) return adicionar(resultados[selIdx] || resultados[0]);
+    UI.erro('Produto não encontrado.');
+  }
+
+  function adicionar(produto) {
+    if (!produto) return;
+    const existente = carrinho.find((i) => i.produto.id === produto.id);
+    if (existente) existente.quantidade = arred(existente.quantidade + 1);
+    else carrinho.push({ produto, quantidade: 1, preco: Number(produto.preco_venda) });
+    limparBusca();
+    renderCarrinho();
+  }
+
+  function limparBusca() {
+    const inp = document.getElementById('pdv-input');
+    inp.value = ''; document.getElementById('pdv-resultados').innerHTML = '';
+    resultados = []; selIdx = 0; inp.focus();
+  }
+
+  function renderCarrinho() {
+    const tb = document.getElementById('pdv-itens');
+    if (!tb) return;
+    if (!carrinho.length) {
+      tb.innerHTML = '<tr><td colspan="5" class="vazio">Carrinho vazio. Bipe ou busque um produto.</td></tr>';
+    } else {
+      tb.innerHTML = carrinho.map((i, idx) => `<tr>
+        <td>${UI.escapar(i.produto.nome)}</td>
+        <td><input class="qtd" type="number" min="0" step="0.001" value="${i.quantidade}" data-qtd="${idx}" /></td>
+        <td>${UI.moeda(i.preco)}</td>
+        <td>${UI.moeda(arred(i.quantidade * i.preco))}</td>
+        <td><button class="btn btn--secundario" data-rem="${idx}">✕</button></td>
+      </tr>`).join('');
+      tb.querySelectorAll('[data-qtd]').forEach((inp) => inp.addEventListener('input', () => {
+        const idx = Number(inp.dataset.qtd);
+        carrinho[idx].quantidade = Number(inp.value || 0);
+        atualizarTotais();
+      }));
+      tb.querySelectorAll('[data-rem]').forEach((b) => b.addEventListener('click', () => {
+        carrinho.splice(Number(b.dataset.rem), 1); renderCarrinho();
+      }));
+    }
+    atualizarTotais();
+  }
+
+  function calcTotais() {
+    const subtotal = arred(carrinho.reduce((s, i) => s + i.quantidade * i.preco, 0));
+    const desconto = Number(document.getElementById('pdv-desconto').value || 0);
+    const total = arred(Math.max(0, subtotal - desconto));
+    return { subtotal, desconto, total };
+  }
+
+  function atualizarTotais() {
+    const t = calcTotais();
+    document.getElementById('pdv-qtd-itens').textContent = carrinho.reduce((s, i) => s + Number(i.quantidade), 0);
+    document.getElementById('pdv-subtotal').textContent = UI.moeda(t.subtotal);
+    document.getElementById('pdv-total').textContent = UI.moeda(t.total);
+  }
+
+  function limpar() {
+    if (!carrinho.length) return;
+    UI.confirmar('Limpar a venda atual?', { titulo: 'Limpar venda', textoConfirmar: 'Limpar' }).then((ok) => {
+      if (ok) { carrinho = []; document.getElementById('pdv-desconto').value = 0; renderCarrinho(); limparBusca(); }
+    });
+  }
+
+  // ----------------------- Pagamento / finalizar -----------------------
+  function finalizar() {
+    if (!carrinho.length) { UI.erro('Adicione itens antes de finalizar.'); return; }
+    const t = calcTotais();
+    let pagamentos = [{ forma_pagamento: 'dinheiro', valor: t.total }];
+
+    const linhasHTML = () => pagamentos.map((p, i) => `
+      <div class="pagamento-linha" data-i="${i}">
+        <select data-forma="${i}">${FORMAS.map((f) => `<option value="${f[0]}" ${p.forma_pagamento === f[0] ? 'selected' : ''}>${f[1]}</option>`).join('')}</select>
+        <input type="number" min="0" step="0.01" data-valor="${i}" value="${p.valor}" style="width:120px" />
+        <button class="btn btn--secundario" data-rem="${i}">✕</button>
+      </div>`).join('');
+
+    Modal.abrir({
+      titulo: `Pagamento — ${UI.moeda(t.total)}`,
+      tamanho: 'modal--pequeno',
+      corpoHTML: `
+        <div id="pg-linhas">${linhasHTML()}</div>
+        <button class="btn btn--secundario" id="pg-add" style="margin-top:8px">+ Adicionar forma</button>
+        <hr style="margin:14px 0;border:none;border-top:1px solid var(--borda)" />
+        <div class="flex flex--between"><span>Total a pagar</span><strong>${UI.moeda(t.total)}</strong></div>
+        <div class="flex flex--between mt-16"><span>Informado</span><strong id="pg-informado">R$ 0,00</strong></div>
+        <div class="flex flex--between mt-16"><span id="pg-lbl">Troco</span><strong id="pg-troco">R$ 0,00</strong></div>
+        <div class="campo mt-16" id="pg-venc-wrap" style="display:none">
+          <label>Vencimento (venda a prazo)</label><input type="date" id="pg-venc" />
+        </div>`,
+      textoConfirmar: 'Concluir venda',
+      aoAbrir: (el) => {
+        const recalc = () => {
+          const informado = arred(pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0));
+          el.querySelector('#pg-informado').textContent = UI.moeda(informado);
+          const diff = arred(informado - t.total);
+          el.querySelector('#pg-lbl').textContent = diff >= 0 ? 'Troco' : 'Falta';
+          el.querySelector('#pg-troco').textContent = UI.moeda(Math.abs(diff));
+          const temPrazo = pagamentos.some((p) => p.forma_pagamento === 'prazo');
+          el.querySelector('#pg-venc-wrap').style.display = temPrazo ? '' : 'none';
+        };
+        const religar = () => {
+          el.querySelector('#pg-linhas').innerHTML = linhasHTML();
+          el.querySelectorAll('[data-forma]').forEach((s) => s.addEventListener('change', () => { pagamentos[Number(s.dataset.forma)].forma_pagamento = s.value; recalc(); }));
+          el.querySelectorAll('[data-valor]').forEach((inp) => inp.addEventListener('input', () => { pagamentos[Number(inp.dataset.valor)].valor = Number(inp.value || 0); recalc(); }));
+          el.querySelectorAll('[data-rem]').forEach((b) => b.addEventListener('click', () => { if (pagamentos.length > 1) { pagamentos.splice(Number(b.dataset.rem), 1); religar(); recalc(); } }));
+          recalc();
+        };
+        el.querySelector('#pg-add').addEventListener('click', () => {
+          const t2 = calcTotais();
+          const informado = pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0);
+          pagamentos.push({ forma_pagamento: 'dinheiro', valor: arred(Math.max(0, t2.total - informado)) });
+          religar();
+        });
+        religar();
+      },
+      aoConfirmar: async (el) => {
+        const vencInp = el.querySelector('#pg-venc');
+        try {
+          const venda = await API.post('/api/vendas', {
+            itens: carrinho.map((i) => ({ produto_id: i.produto.id, quantidade: i.quantidade, preco_unitario: i.preco })),
+            desconto: t.desconto,
+            pagamentos,
+            vencimento_prazo: vencInp && vencInp.value ? vencInp.value : null,
+          });
+          UI.sucesso(`Venda #${venda.id} concluída!${venda.troco > 0 ? ' Troco: ' + UI.moeda(venda.troco) : ''}`);
+          carrinho = [];
+          document.getElementById('pdv-desconto').value = 0;
+          renderCarrinho(); limparBusca();
+          caixa = await API.get('/api/caixa/atual').catch(() => caixa);
+          renderCaixaBar();
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
+  // ----------------------- utils -----------------------
+  function arred(n) { return Number(Number(n || 0).toFixed(2)); }
+  function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+  return { titulo: 'PDV', render };
+})();
