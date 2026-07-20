@@ -90,6 +90,39 @@ async function criarJanela() {
   }
 
   agendarBackupAutomatico();
+  verificarAtualizacoes();
+}
+
+// Verifica atualizacoes no GitHub Releases (apenas no app empacotado).
+// Baixa em segundo plano e instala ao fechar o programa; avisa o usuario.
+function verificarAtualizacoes() {
+  if (!app.isPackaged) return;
+  try {
+    const { autoUpdater } = require('electron-updater');
+    autoUpdater.autoDownload = true;
+    autoUpdater.on('update-downloaded', (info) => {
+      if (!mainWindow) return;
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Atualização disponível',
+        message: `Uma nova versão (${info.version}) foi baixada.`,
+        detail: 'A atualização será instalada ao fechar o programa. Deseja reiniciar agora para atualizar?',
+        buttons: ['Reiniciar agora', 'Mais tarde'],
+        defaultId: 0,
+        cancelId: 1,
+      }).then((r) => {
+        if (r.response === 0) autoUpdater.quitAndInstall();
+      });
+    });
+    autoUpdater.on('error', (e) => {
+      // eslint-disable-next-line no-console
+      console.error('[update] erro ao verificar atualizacoes:', e && e.message);
+    });
+    autoUpdater.checkForUpdates();
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[update] indisponivel:', e && e.message);
+  }
 }
 
 app.whenReady().then(criarJanela).catch((err) => {

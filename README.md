@@ -53,6 +53,14 @@ O instalador gerado **não exige** que o usuário final tenha Node.js instalado.
 Antes da versão final, adicione um ícone em `build/icon.ico` e descomente a
 linha `icon:` em `electron-builder.yml`.
 
+## Atualização automática
+
+O app empacotado verifica novas versões no GitHub Releases ao abrir
+(`electron-updater`), baixa em segundo plano e avisa o usuário para reiniciar e
+instalar. Para publicar uma nova versão, basta **aumentar o `version` no
+`package.json`** e enviar para a branch — o GitHub Actions gera e publica o
+instalador (com `latest.yml`), e os apps instalados se atualizam sozinhos.
+
 ## Backup
 
 - **Manual:** menu **Backup → Fazer backup agora** (no desktop, permite escolher

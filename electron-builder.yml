@@ -11,6 +11,14 @@ appId: com.contaflow.gestorvendas
 productName: Gestor de Vendas
 copyright: Gestor de Vendas
 
+# Publicacao no GitHub Releases (usada pelo auto-update / electron-updater).
+# Gera o latest.yml necessario para o app detectar novas versoes.
+publish:
+  provider: github
+  owner: luizarthurcontador00-hue
+  repo: CONTAFLOW
+  releaseType: release
+
 directories:
   output: dist
   buildResources: build

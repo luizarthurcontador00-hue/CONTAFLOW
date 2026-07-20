@@ -28,10 +28,14 @@ jobs:
       - name: Instalar dependencias
         run: npm install
 
-      - name: Gerar o instalador (.exe)
-        # electron-builder reconstroi o better-sqlite3 para o Electron e
-        # empacota o app. --publish never impede publicacao automatica aqui.
-        run: npx electron-builder --win --publish never
+      - name: Gerar e publicar o instalador (.exe) no GitHub Releases
+        # electron-builder reconstroi o better-sqlite3 para o Electron, empacota
+        # o app e publica no Releases (tag v<versao>) com o latest.yml necessario
+        # para a atualizacao automatica funcionar.
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Enviar o instalador como artefato (download rapido)
         uses: actions/upload-artifact@v4
@@ -40,18 +44,3 @@ jobs:
           path: |
             dist/*.exe
           if-no-files-found: error
-
-      - name: Publicar em Releases (link permanente de download)
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: windows-latest
-          name: Gestor de Vendas - instalador Windows (mais recente)
-          body: |
-            Instalador do **Gestor de Vendas** para Windows, gerado automaticamente.
-
-            Baixe o arquivo `Gestor de Vendas Setup ....exe` abaixo e execute para instalar.
-            Nao e necessario ter Node.js instalado.
-          files: dist/*.exe
-          make_latest: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
