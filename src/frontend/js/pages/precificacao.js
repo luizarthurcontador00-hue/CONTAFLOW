@@ -8,8 +8,34 @@
 window.PaginaPrecificacao = (function () {
   let categorias = [];
   let fornecedores = [];
+  let abaTopo = 'planilha';
 
   async function render(container) {
+    container.innerHTML = `
+      <div class="tabs">
+        <div class="tab ${abaTopo === 'planilha' ? 'ativo' : ''}" data-topo="planilha">📊 Planilha de Precificação</div>
+        <div class="tab ${abaTopo === 'ferramentas' ? 'ativo' : ''}" data-topo="ferramentas">🧮 Ferramentas rápidas</div>
+      </div>
+      <div id="prec-conteudo"></div>`;
+    container.querySelectorAll('[data-topo]').forEach((t) => t.addEventListener('click', () => {
+      abaTopo = t.dataset.topo;
+      container.querySelectorAll('.tab').forEach((x) => x.classList.toggle('ativo', x === t));
+      trocarTopo();
+    }));
+    trocarTopo();
+  }
+
+  function trocarTopo() {
+    const alvo = document.getElementById('prec-conteudo');
+    if (abaTopo === 'planilha') {
+      if (window.PrecAvancada) window.PrecAvancada.render(alvo);
+      else alvo.innerHTML = '<div class="card">Módulo indisponível.</div>';
+    } else {
+      renderFerramentas(alvo);
+    }
+  }
+
+  async function renderFerramentas(container) {
     [categorias, fornecedores] = await Promise.all([
       API.get('/api/categorias').catch(() => []),
       API.get('/api/fornecedores').catch(() => []),

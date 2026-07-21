@@ -273,6 +273,74 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 5,
+    name: 'precificacao-markup-divisor',
+    up(db) {
+      db.exec(`
+        -- Configuracao de faturamento e impostos (linha unica - Modulo 2).
+        CREATE TABLE IF NOT EXISTS precificacao_config (
+          id                    INTEGER PRIMARY KEY CHECK (id = 1),
+          faturamento_mensal    REAL NOT NULL DEFAULT 0,
+          simples_nacional_pct  REAL NOT NULL DEFAULT 0,
+          icms_pct              REAL NOT NULL DEFAULT 0,
+          pis_pct               REAL NOT NULL DEFAULT 0,
+          cofins_pct            REAL NOT NULL DEFAULT 0,
+          ir_pct                REAL NOT NULL DEFAULT 0,
+          cs_pct                REAL NOT NULL DEFAULT 0,
+          ibs_pct               REAL NOT NULL DEFAULT 0,
+          cbs_pct                REAL NOT NULL DEFAULT 0,
+          atividade             TEXT NOT NULL DEFAULT 'comercio',
+          atualizado_em         TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        INSERT OR IGNORE INTO precificacao_config (id) VALUES (1);
+
+        -- Despesas fixas e variaveis (Modulo 3).
+        CREATE TABLE IF NOT EXISTS precificacao_despesas (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          tipo       TEXT NOT NULL CHECK (tipo IN ('fixa','variavel')),
+          descricao  TEXT NOT NULL,
+          valor      REAL NOT NULL DEFAULT 0,
+          ordem      INTEGER NOT NULL DEFAULT 0
+        );
+
+        -- Produtos/servicos da planilha de precificacao (Modulo 5).
+        CREATE TABLE IF NOT EXISTS precificacao_produtos (
+          id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+          referencia         TEXT,
+          descricao          TEXT NOT NULL,
+          quantidade         REAL NOT NULL DEFAULT 1,
+          valor_pedido       REAL NOT NULL DEFAULT 0,
+          custo_embalagem    REAL NOT NULL DEFAULT 0,
+          custo_frete_fixo   REAL NOT NULL DEFAULT 0,
+          frete_pct          REAL NOT NULL DEFAULT 0,
+          taxa_cartao_pct    REAL NOT NULL DEFAULT 0,
+          margem_pct         REAL NOT NULL DEFAULT 0,
+          usar_margem_setor  INTEGER NOT NULL DEFAULT 1,
+          preco_mercado      REAL,
+          preco_praticado    REAL,
+          ordem              INTEGER NOT NULL DEFAULT 0,
+          criado_em          TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+          atualizado_em      TEXT
+        );
+      `);
+
+      // Itens padrao de despesas (valor 0 - usuario preenche depois).
+      const fixas = [
+        'Aluguel', 'Internet', 'Condomínio', 'Pró-labore', 'Material de escritório',
+        'Luz/Água', 'Telefone', 'Remunerações (Salário, Férias, 13º)',
+        'Manutenção patrimonial', 'Outras despesas tributárias (MEI)',
+        'Outras despesas com pessoal', 'Outros gastos gerais',
+      ];
+      const variaveis = [
+        'Matérias-primas', 'Embalagens', 'Etiquetas', 'Mercadoria para revenda',
+        'Frete', 'Propaganda e publicidade', 'Comissão',
+      ];
+      const ins = db.prepare('INSERT INTO precificacao_despesas (tipo, descricao, valor, ordem) VALUES (?, ?, 0, ?)');
+      fixas.forEach((d, i) => ins.run('fixa', d, i));
+      variaveis.forEach((d, i) => ins.run('variavel', d, i));
+    },
+  },
 ];
 
 /**
