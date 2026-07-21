@@ -218,11 +218,18 @@ table.tabela th { color: var(--texto-suave); font-weight: 600; font-size: 12.5px
 /* ===================== Produtos ===================== */
 .produtos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 16px; }
 .produto-card {
+  position: relative;
   background: #fff; border: 1px solid var(--borda); border-radius: 12px;
   overflow: hidden; box-shadow: var(--sombra); cursor: pointer;
   transition: transform .1s, box-shadow .1s;
 }
 .produto-card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,.1); }
+.produto-card--selecionado { border-color: var(--primaria); box-shadow: 0 0 0 2px var(--primaria); }
+.produto-card__check {
+  position: absolute; top: 8px; left: 8px; z-index: 2;
+  background: #fff; border-radius: 6px; padding: 3px; box-shadow: 0 1px 4px rgba(0,0,0,.25);
+}
+.produto-card__check input { width: 17px; height: 17px; accent-color: var(--primaria); cursor: pointer; }
 .produto-card__foto {
   height: 130px; background: #f1f5f9; display: grid; place-items: center;
   color: #cbd5e1; font-size: 40px; overflow: hidden;

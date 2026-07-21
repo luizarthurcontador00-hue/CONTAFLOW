@@ -205,6 +205,75 @@ function excluir(id) {
   return { excluido: true };
 }
 
+/**
+ * Exclui varios produtos de uma vez. Reaproveita excluir() por item, entao
+ * cada produto respeita a mesma regra (inativa se tem historico, senao
+ * remove de fato); um erro num item nao impede os demais.
+ */
+function excluirLote(ids) {
+  if (!Array.isArray(ids) || !ids.length) {
+    throw new AppError('Selecione ao menos um produto.');
+  }
+  const resultados = ids.map((id) => {
+    try {
+      const r = excluir(id);
+      return { id, sucesso: true, inativado: !!r.inativado };
+    } catch (e) {
+      return { id, sucesso: false, erro: (e && e.message) || 'Erro desconhecido.' };
+    }
+  });
+  return {
+    total: resultados.length,
+    excluidos: resultados.filter((r) => r.sucesso && !r.inativado).length,
+    inativados: resultados.filter((r) => r.sucesso && r.inativado).length,
+    erros: resultados.filter((r) => !r.sucesso).length,
+    resultados,
+  };
+}
+
+/**
+ * Atualiza um ou mais campos em varios produtos de uma vez. Somente os
+ * campos presentes em `campos` sao alterados; os demais permanecem intactos.
+ * Campos aceitos: categoria_id, fornecedor_id, unidade, estoque_minimo, ativo.
+ */
+function editarLote(ids, campos) {
+  if (!Array.isArray(ids) || !ids.length) {
+    throw new AppError('Selecione ao menos um produto.');
+  }
+  const db = getDb();
+  const sets = [];
+  const params = {};
+
+  if (campos.categoria_id !== undefined) { sets.push('categoria_id=@categoria_id'); params.categoria_id = campos.categoria_id || null; }
+  if (campos.fornecedor_id !== undefined) { sets.push('fornecedor_id=@fornecedor_id'); params.fornecedor_id = campos.fornecedor_id || null; }
+  if (campos.unidade !== undefined && String(campos.unidade).trim() !== '') {
+    sets.push('unidade=@unidade'); params.unidade = String(campos.unidade).trim().toUpperCase();
+  }
+  if (campos.estoque_minimo !== undefined && campos.estoque_minimo !== '') {
+    sets.push('estoque_minimo=@estoque_minimo'); params.estoque_minimo = Number(campos.estoque_minimo);
+  }
+  if (campos.ativo !== undefined) { sets.push('ativo=@ativo'); params.ativo = campos.ativo ? 1 : 0; }
+
+  if (!sets.length) throw new AppError('Selecione ao menos um campo para alterar.');
+
+  const sql = `UPDATE produtos SET ${sets.join(', ')}, atualizado_em=datetime('now','localtime') WHERE id=@id`;
+  const resultados = ids.map((id) => {
+    try {
+      obter(id); // garante existencia (lanca 404 amigavel se nao existir)
+      db.prepare(sql).run({ ...params, id });
+      return { id, sucesso: true };
+    } catch (e) {
+      return { id, sucesso: false, erro: (e && e.message) || 'Erro desconhecido.' };
+    }
+  });
+  return {
+    total: resultados.length,
+    atualizados: resultados.filter((r) => r.sucesso).length,
+    erros: resultados.filter((r) => !r.sucesso).length,
+    resultados,
+  };
+}
+
 function removerFotoArquivo(nomeArquivo) {
   try {
     const p = path.join(paths.produtosImgDir, path.basename(nomeArquivo));
@@ -379,4 +448,6 @@ module.exports = {
   obterComposicao,
   salvarComposicao,
   criarLote,
+  excluirLote,
+  editarLote,
 };

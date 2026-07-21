@@ -30,6 +30,18 @@ router.post('/lote', asyncHandler((req, res) => {
   res.json(produtos.criarLote(linhas));
 }));
 
+// Excluir/editar varios produtos selecionados de uma vez.
+router.post('/lote-excluir', asyncHandler((req, res) => {
+  const ids = (req.body && req.body.ids) || [];
+  res.json(produtos.excluirLote(ids));
+}));
+
+router.post('/lote-editar', asyncHandler((req, res) => {
+  const ids = (req.body && req.body.ids) || [];
+  const campos = (req.body && req.body.campos) || {};
+  res.json(produtos.editarLote(ids, campos));
+}));
+
 // Planilha modelo para download.
 router.get('/planilha/modelo', asyncHandler((req, res) => {
   const buffer = planilha.gerarModelo();

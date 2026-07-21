@@ -9,6 +9,8 @@ window.PaginaProdutos = (function () {
   let categorias = [];
   let fornecedores = [];
   let filtros = { busca: '', categoria_id: '', estoque_baixo: false };
+  let modoSelecao = false;
+  let selecionados = new Set();
 
   async function render(container) {
     container.innerHTML = `
@@ -22,8 +24,10 @@ window.PaginaProdutos = (function () {
         <button class="btn btn--secundario" id="btn-fornecedores">🚚 Fornecedores</button>
         <button class="btn btn--secundario" id="btn-lote">📋 Cadastro em Lote</button>
         <button class="btn btn--secundario" id="btn-etiquetas">🔖 Etiquetas</button>
+        <button class="btn btn--secundario" id="btn-modo-selecao">☑️ Selecionar vários</button>
         <button class="btn" id="btn-novo">+ Novo produto</button>
       </div>
+      <div id="barra-selecao" style="display:none"></div>
       <div id="produtos-lista"><div class="card">Carregando…</div></div>
     `;
 
@@ -39,8 +43,32 @@ window.PaginaProdutos = (function () {
     container.querySelector('#btn-fornecedores').addEventListener('click', abrirGerenciadorFornecedores);
     container.querySelector('#btn-lote').addEventListener('click', () => { location.hash = '#/lote'; });
     container.querySelector('#btn-etiquetas').addEventListener('click', () => { location.hash = '#/etiquetas'; });
+    container.querySelector('#btn-modo-selecao').addEventListener('click', alternarModoSelecao);
 
     await listar();
+  }
+
+  function alternarModoSelecao() {
+    modoSelecao = !modoSelecao;
+    if (!modoSelecao) selecionados.clear();
+    const btn = document.getElementById('btn-modo-selecao');
+    if (btn) btn.textContent = modoSelecao ? '✕ Cancelar seleção' : '☑️ Selecionar vários';
+    listar();
+  }
+
+  function renderBarraSelecao() {
+    const alvo = document.getElementById('barra-selecao');
+    if (!alvo) return;
+    if (!modoSelecao || selecionados.size === 0) { alvo.style.display = 'none'; alvo.innerHTML = ''; return; }
+    alvo.style.display = 'block';
+    alvo.innerHTML = `<div class="card mb-16" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#eef2ff;border-color:#c7d2fe">
+      <strong>${selecionados.size} produto(s) selecionado(s)</strong>
+      <div class="cresce"></div>
+      <button class="btn btn--secundario" id="sel-editar">✏️ Editar em lote</button>
+      <button class="btn btn--perigo" id="sel-excluir">🗑️ Excluir selecionados</button>
+    </div>`;
+    alvo.querySelector('#sel-editar').addEventListener('click', abrirEdicaoEmLote);
+    alvo.querySelector('#sel-excluir').addEventListener('click', excluirSelecionados);
   }
 
   async function carregarAuxiliares() {
@@ -77,19 +105,32 @@ window.PaginaProdutos = (function () {
       return;
     }
 
-    alvo.innerHTML = `<div class="produtos-grid">${itens.map(cardProduto).join('')}</div>`;
+    alvo.innerHTML = `<div class="produtos-grid">${itens.map((p) => cardProduto(p, modoSelecao)).join('')}</div>`;
     alvo.querySelectorAll('[data-produto]').forEach((el) => {
-      el.addEventListener('click', () => abrirDetalhe(Number(el.dataset.produto)));
+      const id = Number(el.dataset.produto);
+      el.addEventListener('click', () => {
+        if (modoSelecao) { alternarSelecao(id); return; }
+        abrirDetalhe(id);
+      });
     });
+    renderBarraSelecao();
   }
 
-  function cardProduto(p) {
+  function alternarSelecao(id) {
+    if (selecionados.has(id)) selecionados.delete(id);
+    else selecionados.add(id);
+    listar();
+  }
+
+  function cardProduto(p, selecao) {
     const baixo = !p.eh_kit && Number(p.estoque_atual) <= Number(p.estoque_minimo);
     const fotoHTML = p.foto_path
       ? `<img src="/uploads/produtos/${encodeURIComponent(p.foto_path)}" alt="">`
       : (p.eh_kit ? '🎁' : '📦');
+    const marcado = selecionados.has(p.id);
     return `
-      <div class="produto-card ${baixo ? 'estoque-baixo' : ''}" data-produto="${p.id}">
+      <div class="produto-card ${baixo ? 'estoque-baixo' : ''} ${marcado ? 'produto-card--selecionado' : ''}" data-produto="${p.id}">
+        ${selecao ? `<div class="produto-card__check"><input type="checkbox" ${marcado ? 'checked' : ''} tabindex="-1" style="pointer-events:none"></div>` : ''}
         <div class="produto-card__foto">${fotoHTML}</div>
         <div class="produto-card__body">
           <div class="produto-card__nome">${p.eh_kit ? '<span class="badge badge--muted" style="margin-right:4px">Kit</span>' : ''}${UI.escapar(p.nome)}</div>
@@ -311,6 +352,81 @@ window.PaginaProdutos = (function () {
   }
 
   // ----------------------- Detalhe do produto -----------------------
+  // ----------------------- Acoes em lote (selecao multipla) -----------------------
+  async function excluirSelecionados() {
+    const ids = Array.from(selecionados);
+    const ok = await UI.confirmar(
+      `Excluir ${ids.length} produto(s) selecionado(s)? Produtos com histórico (vendas ou movimentações) serão apenas inativados, não removidos.`,
+      { titulo: 'Excluir selecionados', textoConfirmar: 'Excluir' }
+    );
+    if (!ok) return;
+    try {
+      const r = await API.post('/api/produtos/lote-excluir', { ids });
+      UI.sucesso(`${r.excluidos} excluído(s), ${r.inativados} inativado(s)${r.erros ? `, ${r.erros} com erro` : ''}.`);
+      selecionados.clear();
+      await listar();
+    } catch (e) { UI.erro(e.message); }
+  }
+
+  function abrirEdicaoEmLote() {
+    const ids = Array.from(selecionados);
+    Modal.abrir({
+      titulo: `Editar ${ids.length} produto(s) em lote`, tamanho: 'modal--pequeno',
+      corpoHTML: `
+        <p class="dica" style="margin-top:0">Marque só os campos que quer alterar. Os não marcados permanecem como estão em cada produto.</p>
+        <div class="campo">
+          <label><input type="checkbox" id="el-chk-cat"> Categoria</label>
+          <select id="el-categoria" disabled><option value="">Sem categoria</option>${categorias.map((c) => `<option value="${c.id}">${UI.escapar(c.nome)}</option>`).join('')}</select>
+        </div>
+        <div class="campo mt-16">
+          <label><input type="checkbox" id="el-chk-forn"> Fornecedor</label>
+          <select id="el-fornecedor" disabled><option value="">Sem fornecedor</option>${fornecedores.map((f) => `<option value="${f.id}">${UI.escapar(f.nome)}</option>`).join('')}</select>
+        </div>
+        <div class="campo mt-16">
+          <label><input type="checkbox" id="el-chk-und"> Unidade</label>
+          <input id="el-unidade" disabled />
+        </div>
+        <div class="campo mt-16">
+          <label><input type="checkbox" id="el-chk-estmin"> Estoque mínimo</label>
+          <input id="el-estmin" type="number" step="0.001" min="0" disabled />
+        </div>
+        <div class="campo mt-16">
+          <label><input type="checkbox" id="el-chk-status"> Status</label>
+          <select id="el-status" disabled><option value="1">Ativo</option><option value="0">Inativo</option></select>
+        </div>`,
+      textoConfirmar: 'Aplicar aos selecionados',
+      aoAbrir: (el) => {
+        const ligar = (chkId, campoId) => {
+          const chk = el.querySelector(chkId);
+          const campo = el.querySelector(campoId);
+          chk.addEventListener('change', () => { campo.disabled = !chk.checked; });
+        };
+        ligar('#el-chk-cat', '#el-categoria');
+        ligar('#el-chk-forn', '#el-fornecedor');
+        ligar('#el-chk-und', '#el-unidade');
+        ligar('#el-chk-estmin', '#el-estmin');
+        ligar('#el-chk-status', '#el-status');
+      },
+      aoConfirmar: async (el) => {
+        const campos = {};
+        if (el.querySelector('#el-chk-cat').checked) campos.categoria_id = el.querySelector('#el-categoria').value || null;
+        if (el.querySelector('#el-chk-forn').checked) campos.fornecedor_id = el.querySelector('#el-fornecedor').value || null;
+        if (el.querySelector('#el-chk-und').checked) campos.unidade = el.querySelector('#el-unidade').value;
+        if (el.querySelector('#el-chk-estmin').checked) campos.estoque_minimo = el.querySelector('#el-estmin').value;
+        if (el.querySelector('#el-chk-status').checked) campos.ativo = el.querySelector('#el-status').value === '1';
+
+        if (!Object.keys(campos).length) { UI.erro('Marque ao menos um campo para alterar.'); return false; }
+
+        try {
+          const r = await API.post('/api/produtos/lote-editar', { ids, campos });
+          UI.sucesso(`${r.atualizados} produto(s) atualizado(s)${r.erros ? `, ${r.erros} com erro` : ''}.`);
+          selecionados.clear();
+          await listar();
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
   async function abrirDetalhe(id) {
     let p, movs, composicao = null;
     try {
