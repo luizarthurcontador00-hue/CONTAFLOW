@@ -210,7 +210,13 @@ window.PaginaLote = (function () {
     </div>`;
 
     if (resultado.erros) UI.toast(`${resultado.criados} cadastrados, ${resultado.erros} com erro.`, 'erro');
-    else UI.sucesso(`${resultado.criados} produto(s) cadastrado(s) com sucesso!`);
+    else UI.sucesso(`${resultado.criados} produto(s) cadastrado(s)! Enviados para a Precificação.`);
+
+    // Se houver produtos cadastrados, leva para a aba de Precificacao (grupo do lote).
+    if (resultado.criados > 0 && !resultado.erros) {
+      window.__precAbrirProdutos = true;
+      setTimeout(() => { location.hash = '#/precificacao'; }, 900);
+    }
   }
 
   return { titulo: 'Cadastro em Lote', render };

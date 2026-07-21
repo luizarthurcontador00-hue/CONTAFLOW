@@ -45,7 +45,26 @@ function listarDespesas() {
   return getDb().prepare('SELECT * FROM precificacao_despesas ORDER BY tipo, ordem, id').all();
 }
 function listarProdutos() {
-  return getDb().prepare('SELECT * FROM precificacao_produtos ORDER BY ordem, id').all();
+  return getDb().prepare('SELECT * FROM precificacao_produtos ORDER BY (lote_data IS NULL), lote_data DESC, ordem, id').all();
+}
+
+/** Contexto (percentuais) usado no calculo de cada produto. Fonte unica. */
+function contextoCalculo() {
+  const cfg = getConfig();
+  const bruto = Number(cfg.faturamento_mensal || 0);
+  const impostosAtualPct = pct1(
+    Number(cfg.simples_nacional_pct || 0) + Number(cfg.icms_pct || 0) + Number(cfg.pis_pct || 0) +
+    Number(cfg.cofins_pct || 0) + Number(cfg.ir_pct || 0) + Number(cfg.cs_pct || 0)
+  );
+  const totalFixas = getDb()
+    .prepare("SELECT COALESCE(SUM(valor),0) s FROM precificacao_despesas WHERE tipo='fixa'").get().s;
+  const avFixasReal = pct1(dividirSeguro(totalFixas, bruto) * 100);
+  const atividade = TABELA_ATIVIDADES[cfg.atividade] ? cfg.atividade : 'comercio';
+  return {
+    impostosPct: impostosAtualPct,
+    despFixaSetorPct: TABELA_ATIVIDADES[atividade].despesa_fixa.valor,
+    avFixasReal,
+  };
 }
 
 // --------------------------- Calculo completo ---------------------------
@@ -91,10 +110,27 @@ function calcularTudo() {
   const ref = TABELA_ATIVIDADES[atividade];
 
   // Modulo 5 - produtos (markup divisor + prova real)
-  const produtosCalc = produtos.map((p) => calcularProduto(p, {
-    impostosPct: totalImpostosAtualPct,
-    despFixaSetorPct: ref.despesa_fixa.valor,
-    avFixasReal,
+  const ctx = { impostosPct: totalImpostosAtualPct, despFixaSetorPct: ref.despesa_fixa.valor, avFixasReal };
+  const produtosCalc = produtos.map((p) => calcularProduto(p, ctx));
+
+  // Agrupa por lote de importacao (o grupo sem lote = "Produtos avulsos").
+  const mapaGrupos = new Map();
+  produtosCalc.forEach((p) => {
+    const chave = p.lote || '__avulsos__';
+    if (!mapaGrupos.has(chave)) {
+      mapaGrupos.set(chave, {
+        lote: p.lote || null,
+        rotulo: p.lote || 'Produtos avulsos',
+        lote_data: p.lote_data || null,
+        itens: [],
+      });
+    }
+    mapaGrupos.get(chave).itens.push(p);
+  });
+  const grupos = Array.from(mapaGrupos.values()).map((g) => ({
+    ...g,
+    qtd: g.itens.length,
+    aplicaveis: g.itens.filter((i) => i.produto_id && !i.markup_invalido && i.preco_sugerido > 0).length,
   }));
 
   return {
@@ -119,6 +155,7 @@ function calcularTudo() {
     },
     modulo4: TABELA_ATIVIDADES,
     modulo5: produtosCalc,
+    modulo5_grupos: grupos,
   };
 }
 
@@ -303,10 +340,86 @@ function excluirProduto(id) {
   return calcularTudo();
 }
 
+/**
+ * Cria linhas de precificacao a partir de produtos importados (cadastro em
+ * lote ou NF-e), vinculadas ao produto real e agrupadas por um rotulo de lote.
+ * itens: [{ produto_id, referencia, descricao, quantidade, valor_pedido }]
+ */
+function importarProdutos(itens, rotulo) {
+  if (!Array.isArray(itens) || !itens.length) return { criadas: 0, lote: rotulo };
+  const db = getDb();
+  const loteData = new Date().toISOString();
+  const base = db.prepare('SELECT COALESCE(MAX(ordem),0) o FROM precificacao_produtos').get().o;
+  const ins = db.prepare(`
+    INSERT INTO precificacao_produtos
+      (produto_id, referencia, descricao, quantidade, valor_pedido, lote, lote_data, ordem)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const tx = db.transaction(() => {
+    itens.forEach((it, i) => ins.run(
+      it.produto_id || null,
+      it.referencia || null,
+      (it.descricao || 'Produto').toString(),
+      Number(it.quantidade || 1),
+      Number(it.valor_pedido || 0),
+      rotulo,
+      loteData,
+      base + i + 1
+    ));
+  });
+  tx();
+  return { criadas: itens.length, lote: rotulo };
+}
+
+/** Grava o preco sugerido de uma linha no produto real vinculado. */
+function aplicarPreco(id) {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM precificacao_produtos WHERE id=?').get(id);
+  if (!row) throw new AppError('Linha de precificação não encontrada.', 404);
+  if (!row.produto_id) throw new AppError('Esta linha não está vinculada a um produto do cadastro.');
+  const calc = calcularProduto(row, contextoCalculo());
+  if (calc.markup_invalido || !(calc.preco_sugerido > 0)) {
+    throw new AppError('Preço sugerido inválido — revise os percentuais (a soma não pode chegar a 100%).');
+  }
+  db.prepare("UPDATE produtos SET preco_venda=?, atualizado_em=datetime('now','localtime') WHERE id=?")
+    .run(calc.preco_sugerido, row.produto_id);
+  return { ok: true, produto_id: row.produto_id, preco: calc.preco_sugerido, estado: calcularTudo() };
+}
+
+/** Aplica o preco sugerido de todas as linhas vinculadas de um lote. */
+function aplicarPrecoLote(lote) {
+  const db = getDb();
+  const rows = lote
+    ? db.prepare('SELECT * FROM precificacao_produtos WHERE lote=? AND produto_id IS NOT NULL').all(lote)
+    : db.prepare('SELECT * FROM precificacao_produtos WHERE lote IS NULL AND produto_id IS NOT NULL').all();
+  const ctx = contextoCalculo();
+  const upd = db.prepare("UPDATE produtos SET preco_venda=?, atualizado_em=datetime('now','localtime') WHERE id=?");
+  let aplicados = 0, ignorados = 0;
+  const tx = db.transaction(() => {
+    rows.forEach((row) => {
+      const calc = calcularProduto(row, ctx);
+      if (calc.markup_invalido || !(calc.preco_sugerido > 0)) { ignorados++; return; }
+      upd.run(calc.preco_sugerido, row.produto_id);
+      aplicados++;
+    });
+  });
+  tx();
+  return { aplicados, ignorados, estado: calcularTudo() };
+}
+
+/** Exclui todas as linhas de um lote. */
+function excluirLote(lote) {
+  const db = getDb();
+  if (lote) db.prepare('DELETE FROM precificacao_produtos WHERE lote=?').run(lote);
+  else db.prepare('DELETE FROM precificacao_produtos WHERE lote IS NULL').run();
+  return calcularTudo();
+}
+
 module.exports = {
   TABELA_ATIVIDADES,
   calcularTudo,
   salvarConfig,
   criarDespesa, atualizarDespesa, excluirDespesa,
   criarProduto, atualizarProduto, excluirProduto,
+  importarProdutos, aplicarPreco, aplicarPrecoLote, excluirLote,
 };

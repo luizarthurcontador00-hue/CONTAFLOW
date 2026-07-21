@@ -172,8 +172,11 @@ window.PaginaCompras = (function () {
         };
         try {
           await API.post('/api/compras/confirmar', payload);
-          UI.sucesso('Nota importada e estoque atualizado.');
+          UI.sucesso('Nota importada! Produtos enviados para a Precificação.');
           await listar();
+          // Leva para a aba de Precificacao (grupo da nota).
+          window.__precAbrirProdutos = true;
+          setTimeout(() => { location.hash = '#/precificacao'; }, 900);
         } catch (e) { UI.erro(e.message); return false; }
       },
     });

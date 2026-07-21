@@ -341,6 +341,21 @@ const migrations = [
       variaveis.forEach((d, i) => ins.run('variavel', d, i));
     },
   },
+  {
+    version: 6,
+    name: 'precificacao-vinculo-produtos',
+    up(db) {
+      db.exec(`
+        -- Vincula uma linha da precificacao ao produto real (para aplicar o
+        -- preco sugerido de volta ao cadastro) e agrupa por lote de importacao.
+        ALTER TABLE precificacao_produtos ADD COLUMN produto_id INTEGER REFERENCES produtos(id) ON DELETE SET NULL;
+        ALTER TABLE precificacao_produtos ADD COLUMN lote TEXT;       -- rotulo do grupo (ex: "Cadastro em lote 20/07/2026 20:00")
+        ALTER TABLE precificacao_produtos ADD COLUMN lote_data TEXT;  -- timestamp ISO para ordenar os grupos
+        CREATE INDEX IF NOT EXISTS idx_prec_prod_lote ON precificacao_produtos(lote);
+        CREATE INDEX IF NOT EXISTS idx_prec_prod_produto ON precificacao_produtos(produto_id);
+      `);
+    },
+  },
 ];
 
 /**

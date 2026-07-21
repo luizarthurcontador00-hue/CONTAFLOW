@@ -10,7 +10,12 @@
 window.PrecAvancada = (function () {
   let estado = null;
   let modulo = 'instrucoes';
+  let moduloPendente = null;      // definido por solicitarModulo (ao vir de uma importacao)
   let raizEl = null;
+  const gruposAbertos = new Set(); // lotes expandidos no Modulo 5
+
+  // Permite abrir a planilha ja num modulo especifico (ex.: apos importar).
+  function solicitarModulo(m) { moduloPendente = m; }
 
   const pct = (n) => (Number(n || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
   const moeda = (n) => UI.moeda(n);
@@ -18,6 +23,7 @@ window.PrecAvancada = (function () {
 
   async function render(container) {
     raizEl = container;
+    if (moduloPendente) { modulo = moduloPendente; moduloPendente = null; }
     container.innerHTML = '<div class="card">Carregando…</div>';
     try { estado = await API.get('/api/precificacao-avancada'); }
     catch (e) { container.innerHTML = `<div class="card"><span class="badge badge--erro">Erro</span> ${esc(e.message)}</div>`; return; }
@@ -248,29 +254,17 @@ window.PrecAvancada = (function () {
 
   // =============================== Módulo 5 ===============================
   function htmlPrecificacao() {
-    const linhas = estado.modulo5;
     const impPct = estado.modulo2.total_impostos_atual_pct;
-    const corpo = linhas.length ? linhas.map(linhaProduto).join('') :
-      '<tr><td colspan="20" class="vazio">Nenhum produto. Clique em "+ Adicionar produto".</td></tr>';
+    const grupos = estado.modulo5_grupos;
     return `
       <div class="card mb-16" style="background:#f8fafc">
         <div class="flex flex--between" style="flex-wrap:wrap;gap:8px">
           <span class="dica">Impostos aplicados (do Faturamento): <strong>${pct(impPct)}</strong> · Atividade: <strong>${esc(estado.modulo4[estado.modulo3.atividade].nome)}</strong> (desp. fixa setor ${pct(estado.modulo3.max_desp_fixa_pct)})</span>
-          <button class="btn" id="prec-add">+ Adicionar produto</button>
+          <button class="btn" id="prec-add">+ Adicionar produto avulso</button>
         </div>
+        <p class="dica mt-16" style="margin-bottom:0">Produtos importados (cadastro em lote ou NF-e) aparecem aqui agrupados por importação. Clique em um grupo para preencher e depois use <strong>"Aplicar preços"</strong> para atualizar o preço de venda no cadastro.</p>
       </div>
-      <div class="card prec-scroll">
-        <table class="prec-tabela" style="min-width:1600px">
-          <thead><tr>
-            <th>Ref.</th><th>Descrição</th><th>Qtd</th><th>Valor pedido</th>
-            <th>Custo unit.</th><th>Embalagem</th><th>Frete fixo</th><th>Custo total</th>
-            <th>Frete %</th><th>Cartão %</th><th>Impostos %</th><th>Margem %</th><th>Margem setor?</th>
-            <th>Markup</th><th>⭐ Preço sugerido</th><th>Preço mercado</th><th>Preço praticado</th><th>Margem atual</th>
-            <th>Prova Real</th><th></th>
-          </tr></thead>
-          <tbody>${corpo}</tbody>
-        </table>
-      </div>
+      ${grupos.length ? grupos.map(htmlGrupo).join('') : '<div class="card vazio">Nenhum produto na planilha. Importe produtos (cadastro em lote ou NF-e) ou adicione um produto avulso.</div>'}
       <div class="mt-16 flex gap-12" style="flex-wrap:wrap">
         <span class="prec-legenda"><span class="amostra" style="background:#dcfce7"></span> Verde = automático</span>
         <span class="prec-legenda">⭐ Preço de venda sugerido pelo markup divisor</span>
@@ -278,9 +272,39 @@ window.PrecAvancada = (function () {
       </div>`;
   }
 
+  function htmlGrupo(g) {
+    const chave = g.lote || '__avulsos__';
+    const aberto = gruposAbertos.has(chave);
+    const dataTxt = g.lote_data ? UI.dataHora(g.lote_data) : '';
+    return `
+      <div class="card mb-16" data-grupo="${esc(chave)}">
+        <div class="flex flex--between" style="flex-wrap:wrap;gap:8px;cursor:pointer" data-toggle="${esc(chave)}">
+          <div>
+            <strong>${aberto ? '▾' : '▸'} ${esc(g.rotulo)}</strong>
+            <span class="dica" style="margin-left:8px">${g.qtd} produto(s)${g.aplicaveis ? ` · ${g.aplicaveis} com preço aplicável` : ''}${dataTxt ? ` · ${dataTxt.split(' ')[0]}` : ''}</span>
+          </div>
+          <div class="flex gap-12" onclick="event.stopPropagation()">
+            ${g.lote ? `<button class="btn" data-aplicar-lote="${esc(g.lote)}" ${g.aplicaveis ? '' : 'disabled'}>💾 Aplicar preços (${g.aplicaveis})</button>
+            <button class="btn btn--secundario" data-excluir-lote="${esc(g.lote)}">Remover grupo</button>` : ''}
+          </div>
+        </div>
+        ${aberto ? `<div class="prec-scroll mt-16"><table class="prec-tabela" style="min-width:1700px">
+          <thead><tr>
+            <th>Ref.</th><th>Descrição</th><th>Qtd</th><th>Valor pedido</th>
+            <th>Custo unit.</th><th>Embalagem</th><th>Frete fixo</th><th>Custo total</th>
+            <th>Frete %</th><th>Cartão %</th><th>Impostos %</th><th>Margem %</th><th>Margem setor?</th>
+            <th>Markup</th><th>⭐ Preço sugerido</th><th>Preço mercado</th><th>Preço praticado</th><th>Margem atual</th>
+            <th>Prova Real</th><th>Aplicar</th><th></th>
+          </tr></thead>
+          <tbody>${g.itens.map(linhaProduto).join('')}</tbody>
+        </table></div>` : ''}
+      </div>`;
+  }
+
   function linhaProduto(p) {
     const pr = p.prova_real;
     const provaOk = Math.abs(pr.total) < 0.005;
+    const podeAplicar = p.produto_id && !p.markup_invalido && p.preco_sugerido > 0;
     return `<tr data-linha="${p.id}">
       <td style="min-width:80px"><input data-pp="referencia" value="${esc(p.referencia || '')}" /></td>
       <td style="min-width:140px"><input data-pp="descricao" value="${esc(p.descricao || '')}" /></td>
@@ -301,14 +325,35 @@ window.PrecAvancada = (function () {
       <td style="width:110px"><input type="number" step="0.01" data-pp="preco_praticado" value="${p.preco_praticado != null ? p.preco_praticado : ''}" /></td>
       <td class="celula-calc">${p.preco_praticado ? pct(p.margem_atual_pct) : '—'}</td>
       <td class="celula-calc ${provaOk ? '' : 'celula-calc--erro'}" title="Frete ${moeda(pr.frete)} · Cartão ${moeda(pr.cartao)} · Impostos ${moeda(pr.impostos)} · Margem ${moeda(pr.margem)} · Despesas ${moeda(pr.despesas)} · Custo ${moeda(pr.custo_produto)}">${moeda(pr.total)} ${provaOk ? '✓' : '⚠️'}</td>
+      <td style="width:90px">${p.produto_id ? `<button class="btn ${podeAplicar ? '' : 'btn--secundario'}" data-aplicar="${p.id}" ${podeAplicar ? '' : 'disabled'} title="Gravar preço sugerido no produto">Aplicar</button>` : '<span class="dica">avulso</span>'}</td>
       <td style="width:40px"><button class="btn btn--secundario" data-pp-del="${p.id}">✕</button></td>
     </tr>`;
   }
 
   function ligarPrecificacao(alvo) {
     alvo.querySelector('#prec-add').addEventListener('click', async () => {
-      try { await recarregar(await API.post('/api/precificacao-avancada/produto', {})); } catch (e) { UI.erro(e.message); }
+      try { const r = await API.post('/api/precificacao-avancada/produto', {}); gruposAbertos.add('__avulsos__'); await recarregar(r); } catch (e) { UI.erro(e.message); }
     });
+    // Expandir/recolher grupos
+    alvo.querySelectorAll('[data-toggle]').forEach((h) => h.addEventListener('click', () => {
+      const chave = h.dataset.toggle;
+      if (gruposAbertos.has(chave)) gruposAbertos.delete(chave); else gruposAbertos.add(chave);
+      renderModulo();
+    }));
+    // Aplicar preco do lote inteiro
+    alvo.querySelectorAll('[data-aplicar-lote]').forEach((b) => b.addEventListener('click', async () => {
+      const lote = b.dataset.aplicarLote;
+      const ok = await UI.confirmar(`Aplicar os preços sugeridos deste grupo aos produtos do cadastro? Isso atualiza o preço de venda de cada produto.`, { titulo: 'Aplicar preços', textoConfirmar: 'Aplicar', perigo: false });
+      if (!ok) return;
+      try { const r = await API.post('/api/precificacao-avancada/aplicar-lote', { lote }); UI.sucesso(`${r.aplicados} preço(s) aplicado(s)${r.ignorados ? `, ${r.ignorados} ignorado(s)` : ''}.`); await recarregar(r.estado); }
+      catch (e) { UI.erro(e.message); }
+    }));
+    alvo.querySelectorAll('[data-excluir-lote]').forEach((b) => b.addEventListener('click', async () => {
+      const ok = await UI.confirmar('Remover este grupo da planilha de precificação? (Os produtos do cadastro não são afetados.)', { titulo: 'Remover grupo', textoConfirmar: 'Remover' });
+      if (!ok) return;
+      try { await recarregar(await API.post('/api/precificacao-avancada/excluir-lote', { lote: b.dataset.excluirLote })); } catch (e) { UI.erro(e.message); }
+    }));
+    // Linhas
     alvo.querySelectorAll('[data-linha]').forEach((tr) => {
       const id = tr.dataset.linha;
       tr.querySelectorAll('[data-pp]').forEach((inp) => inp.addEventListener('change', async () => {
@@ -318,6 +363,11 @@ window.PrecAvancada = (function () {
         try { await recarregar(await API.put('/api/precificacao-avancada/produto/' + id, { [campo]: valor })); }
         catch (e) { UI.erro(e.message); }
       }));
+      const aplicar = tr.querySelector('[data-aplicar]');
+      if (aplicar) aplicar.addEventListener('click', async () => {
+        try { const r = await API.post('/api/precificacao-avancada/produto/' + aplicar.dataset.aplicar + '/aplicar-preco', {}); UI.sucesso(`Preço ${moeda(r.preco)} aplicado ao produto.`); await recarregar(r.estado); }
+        catch (e) { UI.erro(e.message); }
+      });
       const del = tr.querySelector('[data-pp-del]');
       if (del) del.addEventListener('click', async () => {
         try { await recarregar(await API.del('/api/precificacao-avancada/produto/' + del.dataset.ppDel)); } catch (e) { UI.erro(e.message); }
@@ -325,5 +375,5 @@ window.PrecAvancada = (function () {
     });
   }
 
-  return { render };
+  return { render, solicitarModulo };
 })();

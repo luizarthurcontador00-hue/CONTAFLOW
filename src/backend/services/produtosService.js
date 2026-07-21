@@ -428,12 +428,38 @@ function criarLote(linhas) {
       return { linha: idx + 1, sucesso: false, nome: linha.nome || null, erro: (e && e.message) || 'Erro desconhecido.' };
     }
   });
+  // Envia os produtos criados para a planilha de Precificacao, agrupados por
+  // um lote com data/hora, para o usuario definir os precos por markup divisor.
+  const criados = resultados.filter((r) => r.sucesso).map((r) => ({
+    produto_id: r.produto.id,
+    referencia: r.produto.codigo_barras,
+    descricao: r.produto.nome,
+    quantidade: 1,
+    valor_pedido: Number(r.produto.custo || 0),
+  }));
+  let lotePrecificacao = null;
+  if (criados.length) {
+    // eslint-disable-next-line global-require
+    const prec = require('./precAvancadaService');
+    const rotulo = `Cadastro em lote ${dataHoraRotulo()}`;
+    prec.importarProdutos(criados, rotulo);
+    lotePrecificacao = rotulo;
+  }
+
   return {
     total: resultados.length,
     criados: resultados.filter((r) => r.sucesso).length,
     erros: resultados.filter((r) => !r.sucesso).length,
     resultados,
+    lote_precificacao: lotePrecificacao,
   };
+}
+
+/** Rotulo de lote no formato "DD/MM/AAAA HH:MM". */
+function dataHoraRotulo() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 module.exports = {

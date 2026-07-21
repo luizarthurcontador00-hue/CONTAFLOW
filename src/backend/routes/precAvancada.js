@@ -22,4 +22,9 @@ router.post('/produto', asyncHandler((req, res) => res.status(201).json(svc.cria
 router.put('/produto/:id', asyncHandler((req, res) => res.json(svc.atualizarProduto(req.params.id, req.body || {}))));
 router.delete('/produto/:id', asyncHandler((req, res) => res.json(svc.excluirProduto(req.params.id))));
 
+// Aplicar o preco sugerido de volta ao produto do cadastro (uma linha ou um lote inteiro).
+router.post('/produto/:id/aplicar-preco', asyncHandler((req, res) => res.json(svc.aplicarPreco(req.params.id))));
+router.post('/aplicar-lote', asyncHandler((req, res) => res.json(svc.aplicarPrecoLote(req.body && req.body.lote))));
+router.post('/excluir-lote', asyncHandler((req, res) => res.json(svc.excluirLote(req.body && req.body.lote))));
+
 module.exports = router;

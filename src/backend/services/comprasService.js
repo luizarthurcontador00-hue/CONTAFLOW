@@ -101,6 +101,8 @@ function confirmarImportacao(dados) {
     if (ja) throw new AppError('Esta NF-e ja foi importada anteriormente.', 409);
   }
 
+  const itensPrec = []; // coletados p/ enviar a planilha de Precificacao
+
   const tx = db.transaction(() => {
     const fornecedor_id = resolverFornecedor(db, dados.fornecedor || {});
 
@@ -183,6 +185,14 @@ function confirmarImportacao(dados) {
         Number(item.valor_unitario || 0),
         Number(item.valor_total || 0)
       );
+
+      itensPrec.push({
+        produto_id,
+        referencia: item.ean || item.codigo_fornec || null,
+        descricao: (item.novo && item.novo.nome) || item.descricao || 'Produto',
+        quantidade: Number(item.quantidade || 0) || 1,
+        valor_pedido: Number(item.valor_total || 0),
+      });
     }
 
     // Conta a pagar (opcional).
@@ -203,7 +213,21 @@ function confirmarImportacao(dados) {
   });
 
   const compra_id = tx();
-  return obterCompra(compra_id);
+
+  // Envia os itens da nota para a planilha de Precificacao (lote com data).
+  let lotePrecificacao = null;
+  if (itensPrec.length) {
+    // eslint-disable-next-line global-require
+    const prec = require('./precAvancadaService');
+    const d = new Date();
+    const p2 = (n) => String(n).padStart(2, '0');
+    lotePrecificacao = `NF ${dados.numero_nf || 's/n'} — ${p2(d.getDate())}/${p2(d.getMonth() + 1)}/${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+    prec.importarProdutos(itensPrec, lotePrecificacao);
+  }
+
+  const compra = obterCompra(compra_id);
+  compra.lote_precificacao = lotePrecificacao;
+  return compra;
 }
 
 function listarCompras() {

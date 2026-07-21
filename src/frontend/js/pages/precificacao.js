@@ -11,6 +11,13 @@ window.PaginaPrecificacao = (function () {
   let abaTopo = 'planilha';
 
   async function render(container) {
+    // Vindo de uma importacao (cadastro em lote / NF-e): abre a planilha no
+    // modulo de precificacao de produtos.
+    if (window.__precAbrirProdutos) {
+      abaTopo = 'planilha';
+      if (window.PrecAvancada) window.PrecAvancada.solicitarModulo('precificacao');
+      window.__precAbrirProdutos = false;
+    }
     container.innerHTML = `
       <div class="tabs">
         <div class="tab ${abaTopo === 'planilha' ? 'ativo' : ''}" data-topo="planilha">📊 Planilha de Precificação</div>
