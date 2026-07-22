@@ -27,6 +27,16 @@ router.post('/contas-receber/:id/baixar', asyncHandler((req, res) => res.json(fi
 router.post('/contas-receber/:id/reabrir', asyncHandler((req, res) => res.json(fin.reabrirReceber(req.params.id))));
 router.delete('/contas-receber/:id', asyncHandler((req, res) => res.json(fin.excluirReceber(req.params.id))));
 
+// ------------------- Contas financeiras (saldos) --------------------
+router.get('/contas-financeiras', asyncHandler((req, res) => res.json(fin.listarContasFinanceiras({ incluir_inativas: req.query.incluir_inativas === '1' }))));
+router.post('/contas-financeiras', asyncHandler((req, res) => res.status(201).json(fin.criarContaFinanceira(req.body || {}))));
+router.put('/contas-financeiras/:id', asyncHandler((req, res) => res.json(fin.atualizarContaFinanceira(req.params.id, req.body || {}))));
+router.post('/contas-financeiras/:id/ajustar-saldo', asyncHandler((req, res) => res.json(fin.ajustarSaldoConta(req.params.id, req.body.saldo, req.body.motivo))));
+router.get('/contas-financeiras/:id/extrato', asyncHandler((req, res) => res.json(fin.extratoConta(req.params.id, req.query))));
+router.delete('/contas-financeiras/:id', asyncHandler((req, res) => res.json(fin.excluirContaFinanceira(req.params.id))));
+router.get('/mapa-contas', asyncHandler((req, res) => res.json(fin.getMapaContas(require('../db/connection').getDb()))));
+router.put('/mapa-contas', asyncHandler((req, res) => res.json(fin.salvarMapaContas(req.body || {}))));
+
 // ----------------------- Alertas / fluxo de caixa -------------------
 router.get('/alertas', asyncHandler((req, res) => res.json(fin.alertas(req.query))));
 router.get('/fluxo-caixa', asyncHandler((req, res) => res.json(fin.fluxoCaixa(req.query))));

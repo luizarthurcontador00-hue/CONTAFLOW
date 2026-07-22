@@ -356,6 +356,68 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 7,
+    name: 'contas-financeiras-e-parcelamento',
+    up(db) {
+      db.exec(`
+        -- Contas financeiras (carteiras/saldos): banco, dinheiro em caixa,
+        -- maquina de cartao... Cada conta tem um saldo inicial e um extrato de
+        -- movimentos; o saldo atual e o saldo inicial + entradas - saidas.
+        CREATE TABLE IF NOT EXISTS contas_financeiras (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          nome          TEXT NOT NULL,
+          tipo          TEXT NOT NULL DEFAULT 'outro',   -- dinheiro | banco | cartao | outro
+          saldo_inicial REAL NOT NULL DEFAULT 0,
+          ativa         INTEGER NOT NULL DEFAULT 1,
+          ordem         INTEGER NOT NULL DEFAULT 0,
+          criado_em     TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+
+        -- Extrato das contas financeiras (uma linha por entrada/saida).
+        CREATE TABLE IF NOT EXISTS contas_financeiras_mov (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          conta_id      INTEGER NOT NULL REFERENCES contas_financeiras(id) ON DELETE CASCADE,
+          data          TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+          tipo          TEXT NOT NULL,                   -- entrada | saida
+          valor         REAL NOT NULL DEFAULT 0,
+          origem        TEXT NOT NULL,                   -- venda | recebimento | pagamento | ajuste | abertura
+          referencia_id INTEGER,
+          descricao     TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_cfin_mov_conta ON contas_financeiras_mov(conta_id);
+        CREATE INDEX IF NOT EXISTS idx_cfin_mov_data ON contas_financeiras_mov(data);
+
+        -- Parcelamento das contas a pagar + conta financeira usada no pagamento.
+        ALTER TABLE contas_pagar ADD COLUMN parcela INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE contas_pagar ADD COLUMN total_parcelas INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE contas_pagar ADD COLUMN conta_financeira_id INTEGER REFERENCES contas_financeiras(id) ON DELETE SET NULL;
+
+        -- Marca as contas a receber geradas por venda a vista (registro ja
+        -- "recebido"), para nao duplicar no fluxo de caixa; + conta usada.
+        ALTER TABLE contas_receber ADD COLUMN tipo TEXT NOT NULL DEFAULT 'normal';  -- normal | venda_vista
+        ALTER TABLE contas_receber ADD COLUMN conta_financeira_id INTEGER REFERENCES contas_financeiras(id) ON DELETE SET NULL;
+      `);
+
+      // Contas padrao.
+      const ins = db.prepare('INSERT INTO contas_financeiras (nome, tipo, ordem) VALUES (?, ?, ?)');
+      const idCaixa = ins.run('Caixa (dinheiro)', 'dinheiro', 0).lastInsertRowid;
+      const idBanco = ins.run('Banco', 'banco', 1).lastInsertRowid;
+      const idCartao = ins.run('Máquina de cartão', 'cartao', 2).lastInsertRowid;
+
+      // Mapa forma de pagamento -> conta financeira (editavel em Configuracoes).
+      const mapa = {
+        dinheiro: idCaixa,
+        pix: idBanco,
+        transferencia: idBanco,
+        boleto: idBanco,
+        cartao_credito: idCartao,
+        cartao_debito: idCartao,
+      };
+      db.prepare("INSERT INTO config (chave, valor) VALUES ('financeiro_mapa_contas', ?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor")
+        .run(JSON.stringify(mapa));
+    },
+  },
 ];
 
 /**

@@ -13,6 +13,141 @@ function somarMeses(dataISO, meses) {
   return base.toISOString().slice(0, 10);
 }
 
+// ===================== Contas financeiras (saldos) =====================
+
+/** Le o mapa forma de pagamento -> conta financeira (config em JSON). */
+function getMapaContas(db) {
+  const row = db.prepare("SELECT valor FROM config WHERE chave = 'financeiro_mapa_contas'").get();
+  if (!row || !row.valor) return {};
+  try { return JSON.parse(row.valor) || {}; } catch (_) { return {}; }
+}
+
+function salvarMapaContas(mapa) {
+  const db = getDb();
+  const limpo = {};
+  Object.entries(mapa || {}).forEach(([forma, id]) => { limpo[forma] = id ? Number(id) : null; });
+  db.prepare("INSERT INTO config (chave, valor) VALUES ('financeiro_mapa_contas', ?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor")
+    .run(JSON.stringify(limpo));
+  return limpo;
+}
+
+/** Conta financeira associada a uma forma de pagamento (ou null). */
+function contaDaForma(db, forma) {
+  if (!forma) return null;
+  const mapa = getMapaContas(db);
+  const id = mapa[forma];
+  if (!id) return null;
+  const existe = db.prepare('SELECT id FROM contas_financeiras WHERE id = ? AND ativa = 1').get(id);
+  return existe ? Number(id) : null;
+}
+
+/**
+ * Lanca um movimento no extrato de uma conta financeira. Sem conta_id, nao
+ * faz nada (permite chamar sempre, mesmo quando a forma nao mapeia conta).
+ * DEVE ser chamada dentro de uma transacao quando junto de outras escritas.
+ */
+function lancarMovimentoConta(db, { conta_id, tipo, valor, origem, referencia_id = null, descricao = null }) {
+  if (!conta_id) return;
+  if (tipo !== 'entrada' && tipo !== 'saida') throw new AppError('Tipo de movimento invalido.');
+  db.prepare(
+    `INSERT INTO contas_financeiras_mov (conta_id, tipo, valor, origem, referencia_id, descricao)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(conta_id, tipo, arred(Number(valor)), origem, referencia_id, descricao);
+}
+
+/** Saldo atual = saldo_inicial + entradas - saidas. */
+function saldoConta(db, contaId) {
+  const c = db.prepare('SELECT saldo_inicial FROM contas_financeiras WHERE id = ?').get(contaId);
+  if (!c) return 0;
+  const mov = db.prepare(
+    "SELECT COALESCE(SUM(CASE WHEN tipo='entrada' THEN valor ELSE -valor END),0) s FROM contas_financeiras_mov WHERE conta_id = ?"
+  ).get(contaId).s;
+  return arred(Number(c.saldo_inicial) + Number(mov));
+}
+
+function listarContasFinanceiras({ incluir_inativas } = {}) {
+  const db = getDb();
+  const rows = db.prepare(
+    `SELECT * FROM contas_financeiras ${incluir_inativas ? '' : 'WHERE ativa = 1'} ORDER BY (ativa=0), ordem, id`
+  ).all();
+  return rows.map((c) => ({ ...c, saldo_atual: saldoConta(db, c.id) }));
+}
+
+function criarContaFinanceira(dados) {
+  const db = getDb();
+  const nome = (dados.nome || '').trim();
+  if (!nome) throw new AppError('Informe o nome da conta.');
+  const tipo = ['dinheiro', 'banco', 'cartao', 'outro'].includes(dados.tipo) ? dados.tipo : 'outro';
+  const ordem = db.prepare('SELECT COALESCE(MAX(ordem),-1)+1 o FROM contas_financeiras').get().o;
+  const info = db.prepare(
+    'INSERT INTO contas_financeiras (nome, tipo, saldo_inicial, ordem) VALUES (?, ?, ?, ?)'
+  ).run(nome, tipo, Number(dados.saldo_inicial || 0), ordem);
+  return db.prepare('SELECT * FROM contas_financeiras WHERE id = ?').get(info.lastInsertRowid);
+}
+
+function atualizarContaFinanceira(id, dados) {
+  const db = getDb();
+  const atual = db.prepare('SELECT * FROM contas_financeiras WHERE id = ?').get(id);
+  if (!atual) throw new AppError('Conta nao encontrada.', 404);
+  const nome = dados.nome !== undefined ? (dados.nome || '').trim() : atual.nome;
+  if (!nome) throw new AppError('Informe o nome da conta.');
+  const tipo = dados.tipo !== undefined && ['dinheiro', 'banco', 'cartao', 'outro'].includes(dados.tipo) ? dados.tipo : atual.tipo;
+  const saldoInicial = dados.saldo_inicial !== undefined && dados.saldo_inicial !== '' ? Number(dados.saldo_inicial) : atual.saldo_inicial;
+  const ativa = dados.ativa !== undefined ? (dados.ativa ? 1 : 0) : atual.ativa;
+  db.prepare('UPDATE contas_financeiras SET nome=?, tipo=?, saldo_inicial=?, ativa=? WHERE id=?')
+    .run(nome, tipo, saldoInicial, ativa, id);
+  return db.prepare('SELECT * FROM contas_financeiras WHERE id = ?').get(id);
+}
+
+/**
+ * Ajuste manual de saldo (controle de saldo da conta): registra um movimento
+ * de entrada/saida igual a diferenca entre o saldo desejado e o atual.
+ */
+function ajustarSaldoConta(id, novoSaldo, motivo) {
+  const db = getDb();
+  const conta = db.prepare('SELECT * FROM contas_financeiras WHERE id = ?').get(id);
+  if (!conta) throw new AppError('Conta nao encontrada.', 404);
+  const alvo = Number(novoSaldo);
+  if (Number.isNaN(alvo)) throw new AppError('Saldo invalido.');
+  const atual = saldoConta(db, id);
+  const diff = arred(alvo - atual);
+  if (diff === 0) return { ...conta, saldo_atual: atual };
+  lancarMovimentoConta(db, {
+    conta_id: id,
+    tipo: diff > 0 ? 'entrada' : 'saida',
+    valor: Math.abs(diff),
+    origem: 'ajuste',
+    descricao: motivo || 'Ajuste manual de saldo',
+  });
+  return { ...conta, saldo_atual: saldoConta(db, id) };
+}
+
+function excluirContaFinanceira(id) {
+  const db = getDb();
+  const temMov = db.prepare('SELECT 1 FROM contas_financeiras_mov WHERE conta_id = ? LIMIT 1').get(id);
+  if (temMov) {
+    // Preserva o historico: apenas inativa contas que ja movimentaram.
+    db.prepare('UPDATE contas_financeiras SET ativa = 0 WHERE id = ?').run(id);
+    return { inativada: true };
+  }
+  db.prepare('DELETE FROM contas_financeiras WHERE id = ?').run(id);
+  return { excluida: true };
+}
+
+function extratoConta(id, { inicio, fim } = {}) {
+  const db = getDb();
+  const conta = db.prepare('SELECT * FROM contas_financeiras WHERE id = ?').get(id);
+  if (!conta) throw new AppError('Conta nao encontrada.', 404);
+  const where = ['conta_id = @id'];
+  const params = { id };
+  if (inicio) { where.push('date(data) >= date(@inicio)'); params.inicio = inicio; }
+  if (fim) { where.push('date(data) <= date(@fim)'); params.fim = fim; }
+  const movimentos = db.prepare(
+    `SELECT * FROM contas_financeiras_mov WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT 300`
+  ).all(params);
+  return { ...conta, saldo_atual: saldoConta(db, id), movimentos };
+}
+
 // =========================== Contas a pagar ===========================
 
 function listarPagar({ status, inicio, fim } = {}) {
@@ -30,36 +165,79 @@ function listarPagar({ status, inicio, fim } = {}) {
   `).all(params);
 }
 
+/**
+ * Cria conta a pagar, com parcelamento opcional.
+ * dados = { descricao, fornecedor_id?, valor, vencimento?/primeiro_vencimento?,
+ *           parcelas?, forma_pagamento? }
+ * Com parcelas > 1, o valor informado e o TOTAL e cada parcela vence a cada mes.
+ */
 function criarPagar(dados) {
   const db = getDb();
   const descricao = (dados.descricao || '').trim();
   if (!descricao) throw new AppError('Informe a descricao da conta.');
-  if (!(Number(dados.valor) > 0)) throw new AppError('Informe um valor maior que zero.');
-  const info = db.prepare(
-    `INSERT INTO contas_pagar (fornecedor_id, descricao, valor, vencimento, status, forma_pagamento)
-     VALUES (?, ?, ?, ?, 'pendente', ?)`
-  ).run(dados.fornecedor_id || null, descricao, Number(dados.valor), dados.vencimento || null, dados.forma_pagamento || null);
-  return db.prepare('SELECT * FROM contas_pagar WHERE id = ?').get(info.lastInsertRowid);
+  const valor = Number(dados.valor);
+  if (!(valor > 0)) throw new AppError('Informe um valor maior que zero.');
+  const parcelas = Math.max(1, Number(dados.parcelas || 1));
+  const primeiro = dados.primeiro_vencimento || dados.vencimento || null;
+
+  const valorParcela = arred(valor / parcelas);
+  const ins = db.prepare(
+    `INSERT INTO contas_pagar (fornecedor_id, descricao, valor, vencimento, status, forma_pagamento, parcela, total_parcelas)
+     VALUES (?, ?, ?, ?, 'pendente', ?, ?, ?)`
+  );
+  const tx = db.transaction(() => {
+    let acumulado = 0;
+    const ids = [];
+    for (let i = 1; i <= parcelas; i++) {
+      const v = i === parcelas ? arred(valor - acumulado) : valorParcela;
+      acumulado = arred(acumulado + v);
+      const venc = primeiro ? somarMeses(primeiro, i - 1) : null;
+      const desc = parcelas > 1 ? `${descricao} (${i}/${parcelas})` : descricao;
+      ids.push(ins.run(dados.fornecedor_id || null, desc, v, venc, dados.forma_pagamento || null, i, parcelas).lastInsertRowid);
+    }
+    return ids;
+  });
+  const ids = tx();
+  if (parcelas > 1) return { criadas: parcelas };
+  return db.prepare('SELECT * FROM contas_pagar WHERE id = ?').get(ids[0]);
 }
 
-function baixarPagar(id, { data_pagamento, forma_pagamento } = {}) {
+function baixarPagar(id, { data_pagamento, forma_pagamento, conta_financeira_id } = {}) {
   const db = getDb();
   const c = db.prepare('SELECT * FROM contas_pagar WHERE id = ?').get(id);
   if (!c) throw new AppError('Conta nao encontrada.', 404);
   if (c.status === 'pago') throw new AppError('Esta conta ja foi paga.');
-  db.prepare("UPDATE contas_pagar SET status='pago', data_pagamento=?, forma_pagamento=COALESCE(?, forma_pagamento) WHERE id=?")
-    .run(data_pagamento || hoje(), forma_pagamento || null, id);
+  const forma = forma_pagamento || c.forma_pagamento || null;
+  const contaId = conta_financeira_id ? Number(conta_financeira_id) : contaDaForma(db, forma);
+  const tx = db.transaction(() => {
+    db.prepare("UPDATE contas_pagar SET status='pago', data_pagamento=?, forma_pagamento=COALESCE(?, forma_pagamento), conta_financeira_id=? WHERE id=?")
+      .run(data_pagamento || hoje(), forma_pagamento || null, contaId || null, id);
+    lancarMovimentoConta(db, {
+      conta_id: contaId, tipo: 'saida', valor: c.valor, origem: 'pagamento',
+      referencia_id: id, descricao: c.descricao,
+    });
+  });
+  tx();
   return db.prepare('SELECT * FROM contas_pagar WHERE id = ?').get(id);
 }
 
 function reabrirPagar(id) {
   const db = getDb();
-  db.prepare("UPDATE contas_pagar SET status='pendente', data_pagamento=NULL WHERE id=?").run(id);
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM contas_financeiras_mov WHERE origem='pagamento' AND referencia_id=?").run(id);
+    db.prepare("UPDATE contas_pagar SET status='pendente', data_pagamento=NULL, conta_financeira_id=NULL WHERE id=?").run(id);
+  });
+  tx();
   return db.prepare('SELECT * FROM contas_pagar WHERE id = ?').get(id);
 }
 
 function excluirPagar(id) {
-  getDb().prepare('DELETE FROM contas_pagar WHERE id = ?').run(id);
+  const db = getDb();
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM contas_financeiras_mov WHERE origem='pagamento' AND referencia_id=?").run(id);
+    db.prepare('DELETE FROM contas_pagar WHERE id = ?').run(id);
+  });
+  tx();
   return { ok: true };
 }
 
@@ -202,25 +380,44 @@ function criarReceber(dados) {
   return { criadas: parcelas };
 }
 
-function baixarReceber(id, { data_recebimento, forma_recebimento } = {}) {
+function baixarReceber(id, { data_recebimento, forma_recebimento, conta_financeira_id } = {}) {
   const db = getDb();
   const c = db.prepare('SELECT * FROM contas_receber WHERE id = ?').get(id);
   if (!c) throw new AppError('Conta nao encontrada.', 404);
   if (c.status === 'recebido') throw new AppError('Esta conta ja foi recebida.');
   if (c.status === 'cancelada') throw new AppError('Esta conta esta cancelada.');
-  db.prepare("UPDATE contas_receber SET status='recebido', data_recebimento=?, forma_recebimento=? WHERE id=?")
-    .run(data_recebimento || hoje(), forma_recebimento || null, id);
+  const contaId = conta_financeira_id ? Number(conta_financeira_id) : contaDaForma(db, forma_recebimento);
+  const tx = db.transaction(() => {
+    db.prepare("UPDATE contas_receber SET status='recebido', data_recebimento=?, forma_recebimento=?, conta_financeira_id=? WHERE id=?")
+      .run(data_recebimento || hoje(), forma_recebimento || null, contaId || null, id);
+    lancarMovimentoConta(db, {
+      conta_id: contaId, tipo: 'entrada', valor: c.valor, origem: 'recebimento',
+      referencia_id: id, descricao: c.descricao,
+    });
+  });
+  tx();
   return db.prepare('SELECT * FROM contas_receber WHERE id = ?').get(id);
 }
 
 function reabrirReceber(id) {
   const db = getDb();
-  db.prepare("UPDATE contas_receber SET status='pendente', data_recebimento=NULL WHERE id=?").run(id);
+  const c = db.prepare('SELECT * FROM contas_receber WHERE id = ?').get(id);
+  if (c && c.tipo === 'venda_vista') throw new AppError('Recebimento de venda a vista nao pode ser reaberto.');
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM contas_financeiras_mov WHERE origem='recebimento' AND referencia_id=?").run(id);
+    db.prepare("UPDATE contas_receber SET status='pendente', data_recebimento=NULL, conta_financeira_id=NULL WHERE id=?").run(id);
+  });
+  tx();
   return db.prepare('SELECT * FROM contas_receber WHERE id = ?').get(id);
 }
 
 function excluirReceber(id) {
-  getDb().prepare('DELETE FROM contas_receber WHERE id = ?').run(id);
+  const db = getDb();
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM contas_financeiras_mov WHERE origem='recebimento' AND referencia_id=?").run(id);
+    db.prepare('DELETE FROM contas_receber WHERE id = ?').run(id);
+  });
+  tx();
   return { ok: true };
 }
 
@@ -262,9 +459,11 @@ function fluxoCaixa({ inicio, fim } = {}) {
       AND date(v.data) BETWEEN date(?) AND date(?)
   `).get(ini, f).total;
 
+  // Exclui as contas "venda_vista" (registro ja embutido em vendasVista) para
+  // nao contar a mesma venda a vista duas vezes.
   const recebimentos = db.prepare(`
     SELECT COALESCE(SUM(valor),0) AS total FROM contas_receber
-    WHERE status='recebido' AND date(data_recebimento) BETWEEN date(?) AND date(?)
+    WHERE status='recebido' AND tipo <> 'venda_vista' AND date(data_recebimento) BETWEEN date(?) AND date(?)
   `).get(ini, f).total;
 
   const pagamentos = db.prepare(`
@@ -283,6 +482,8 @@ function fluxoCaixa({ inicio, fim } = {}) {
       recebimentos: arred(recebimentos),
       pagamentos: arred(pagamentos),
     },
+    contas: listarContasFinanceiras(),
+    saldo_total_contas: arred(listarContasFinanceiras().reduce((s, c) => s + Number(c.saldo_atual), 0)),
   };
 }
 
@@ -291,4 +492,10 @@ module.exports = {
   listarReceber, criarReceber, baixarReceber, reabrirReceber, excluirReceber,
   alertas, fluxoCaixa,
   listarContasFixas, criarContaFixa, atualizarContaFixa, excluirContaFixa, gerarContasFixasPendentes,
+  // contas financeiras (saldos)
+  listarContasFinanceiras, criarContaFinanceira, atualizarContaFinanceira,
+  ajustarSaldoConta, excluirContaFinanceira, extratoConta,
+  getMapaContas, salvarMapaContas,
+  // helpers usados por vendasService
+  contaDaForma, lancarMovimentoConta,
 };

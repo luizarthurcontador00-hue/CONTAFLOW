@@ -127,7 +127,7 @@ function pagarVsReceber({ inicio, fim } = {}) {
   const db = getDb();
   const { ini, f } = intervalo({ inicio, fim });
   const pagar = db.prepare("SELECT COALESCE(SUM(valor),0) t FROM contas_pagar WHERE date(vencimento) BETWEEN date(?) AND date(?)").get(ini, f).t;
-  const receber = db.prepare("SELECT COALESCE(SUM(valor),0) t FROM contas_receber WHERE status!='cancelada' AND date(vencimento) BETWEEN date(?) AND date(?)").get(ini, f).t;
+  const receber = db.prepare("SELECT COALESCE(SUM(valor),0) t FROM contas_receber WHERE status!='cancelada' AND tipo <> 'venda_vista' AND date(vencimento) BETWEEN date(?) AND date(?)").get(ini, f).t;
   const pagarPend = db.prepare("SELECT COALESCE(SUM(valor),0) t FROM contas_pagar WHERE status='pendente' AND date(vencimento) BETWEEN date(?) AND date(?)").get(ini, f).t;
   const receberPend = db.prepare("SELECT COALESCE(SUM(valor),0) t FROM contas_receber WHERE status='pendente' AND date(vencimento) BETWEEN date(?) AND date(?)").get(ini, f).t;
   return {

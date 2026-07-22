@@ -1,13 +1,39 @@
 'use strict';
 
 /**
- * Pagina Financeiro: contas a pagar, contas a receber e fluxo de caixa.
- * Alertas de vencidas/a vencer, baixas com data efetiva e parcelamento.
+ * Pagina Financeiro: contas a pagar (com parcelamento e contas fixas),
+ * contas a receber, saldos das contas financeiras e fluxo de caixa.
+ * As listas de contas mostram, por padrao, o mes corrente (com navegacao
+ * de mes e opcao "todas").
  */
 window.PaginaFinanceiro = (function () {
   let fornecedores = [];
+  let contasFin = [];
   let abaAtual = 'pagar';
   const FORMAS = { dinheiro: 'Dinheiro', cartao_credito: 'Cartão crédito', cartao_debito: 'Cartão débito', pix: 'PIX', prazo: 'A prazo', boleto: 'Boleto', transferencia: 'Transferência' };
+  // Formas que alimentam um saldo (a prazo nao entra em conta na hora).
+  const FORMAS_SALDO = { dinheiro: 'Dinheiro', pix: 'PIX', cartao_credito: 'Cartão crédito', cartao_debito: 'Cartão débito', transferencia: 'Transferência', boleto: 'Boleto' };
+  const TIPOS_CONTA = { dinheiro: '💵 Dinheiro', banco: '🏦 Banco', cartao: '💳 Máquina de cartão', outro: '📦 Outro' };
+
+  const filtroPagar = { mes: mesCorrente(), todos: false, status: '' };
+  const filtroReceber = { mes: mesCorrente(), todos: false, status: '' };
+
+  function mesCorrente() { return new Date().toISOString().slice(0, 7); }
+  function periodoMes(anoMes) {
+    const [a, m] = anoMes.split('-').map(Number);
+    const ultimo = new Date(a, m, 0).getDate();
+    return { inicio: `${anoMes}-01`, fim: `${anoMes}-${String(ultimo).padStart(2, '0')}` };
+  }
+  function mesLabel(anoMes) {
+    const [a, m] = anoMes.split('-').map(Number);
+    const nomes = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    return `${nomes[m - 1]} de ${a}`;
+  }
+  function mudarMes(anoMes, delta) {
+    const [a, m] = anoMes.split('-').map(Number);
+    const d = new Date(a, m - 1 + delta, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
 
   async function render(container) {
     fornecedores = await API.get('/api/fornecedores').catch(() => []);
@@ -27,10 +53,7 @@ window.PaginaFinanceiro = (function () {
       trocarAba();
     }));
 
-    // Garante que as contas fixas do mes ja tenham sido lancadas (idempotente;
-    // cobre o caso de o mes ter virado com o programa aberto ha dias).
     await API.post('/api/financeiro/contas-fixas/gerar-pendentes', {}).catch(() => {});
-
     carregarAlertas();
     trocarAba();
   }
@@ -55,6 +78,7 @@ window.PaginaFinanceiro = (function () {
   }
 
   function situacao(c) {
+    if (c.tipo === 'venda_vista') return '<span class="badge badge--ok">Recebida (venda)</span>';
     if (c.status === 'pago' || c.status === 'recebido') return '<span class="badge badge--ok">Quitada</span>';
     if (c.status === 'cancelada') return '<span class="badge badge--muted">Cancelada</span>';
     const hoje = new Date().toISOString().slice(0, 10);
@@ -62,30 +86,64 @@ window.PaginaFinanceiro = (function () {
     return '<span class="badge badge--alerta">Pendente</span>';
   }
 
+  // Barra de navegacao de mes reutilizavel (A Pagar / A Receber).
+  function barraMes(filtro, prefixo, statusOpcoes) {
+    return `
+      <div class="barra-ferramentas">
+        <div class="flex gap-12" style="align-items:center">
+          <button class="btn btn--secundario" id="${prefixo}-mes-ant" ${filtro.todos ? 'disabled' : ''}>◀</button>
+          <strong style="min-width:150px;text-align:center">${filtro.todos ? 'Todos os períodos' : mesLabel(filtro.mes)}</strong>
+          <button class="btn btn--secundario" id="${prefixo}-mes-prox" ${filtro.todos ? 'disabled' : ''}>▶</button>
+          <label class="flex gap-12" style="align-items:center;font-size:13px;margin-left:8px">
+            <input type="checkbox" id="${prefixo}-todos" ${filtro.todos ? 'checked' : ''}> Ver todos
+          </label>
+        </div>
+        <select id="${prefixo}-status">${statusOpcoes}</select>
+        <div class="cresce"></div>
+        <button class="btn" id="${prefixo}-nova">+ Nova conta a ${prefixo === 'cp' ? 'pagar' : 'receber'}</button>
+      </div>`;
+  }
+
+  function ligarBarraMes(alvo, filtro, prefixo, recarregar) {
+    const rerender = () => (prefixo === 'cp' ? renderPagar() : renderReceber());
+    alvo.querySelector(`#${prefixo}-mes-ant`).addEventListener('click', () => { filtro.mes = mudarMes(filtro.mes, -1); rerender(); });
+    alvo.querySelector(`#${prefixo}-mes-prox`).addEventListener('click', () => { filtro.mes = mudarMes(filtro.mes, 1); rerender(); });
+    alvo.querySelector(`#${prefixo}-todos`).addEventListener('change', (e) => { filtro.todos = e.target.checked; rerender(); });
+    alvo.querySelector(`#${prefixo}-status`).addEventListener('change', (e) => { filtro.status = e.target.value; recarregar(); });
+  }
+
+  function queryPeriodo(filtro) {
+    const params = new URLSearchParams();
+    if (filtro.status) params.set('status', filtro.status);
+    if (!filtro.todos) {
+      const { inicio, fim } = periodoMes(filtro.mes);
+      params.set('inicio', inicio); params.set('fim', fim);
+    }
+    return params.toString();
+  }
+
   // ----------------------------- A Pagar -----------------------------
   async function renderPagar() {
     const alvo = document.getElementById('fin-conteudo');
-    alvo.innerHTML = `
-      <div class="barra-ferramentas">
-        <select id="cp-status"><option value="">Todas</option><option value="pendente">Pendentes</option><option value="pago">Pagas</option></select>
-        <button class="btn btn--secundario" id="cp-filtrar">Filtrar</button>
-        <div class="cresce"></div>
-        <button class="btn" id="cp-nova">+ Nova conta a pagar</button>
-      </div>
-      <div class="card"><div id="cp-lista">Carregando…</div></div>`;
-    alvo.querySelector('#cp-filtrar').addEventListener('click', listarPagar);
+    const statusOpcoes = ['<option value="">Todas</option>', '<option value="pendente">Pendentes</option>', '<option value="pago">Pagas</option>']
+      .map((o) => o.replace(`value="${filtroPagar.status}"`, `value="${filtroPagar.status}" selected`)).join('');
+    alvo.innerHTML = barraMes(filtroPagar, 'cp', statusOpcoes) + '<div class="card"><div id="cp-lista">Carregando…</div></div>';
+    ligarBarraMes(alvo, filtroPagar, 'cp', listarPagar);
     alvo.querySelector('#cp-nova').addEventListener('click', formPagar);
     await listarPagar();
   }
 
   async function listarPagar() {
     const alvo = document.getElementById('cp-lista');
-    const status = document.getElementById('cp-status').value;
     let contas;
-    try { contas = await API.get('/api/financeiro/contas-pagar' + (status ? '?status=' + status : '')); }
+    try { contas = await API.get('/api/financeiro/contas-pagar?' + queryPeriodo(filtroPagar)); }
     catch (e) { alvo.innerHTML = UI.escapar(e.message); return; }
-    if (!contas.length) { alvo.innerHTML = '<p class="muted">Nenhuma conta.</p>'; return; }
-    alvo.innerHTML = tabelaContas(contas, 'pagar');
+    if (!contas.length) { alvo.innerHTML = '<p class="muted">Nenhuma conta neste período.</p>'; return; }
+    const total = contas.reduce((s, c) => s + Number(c.valor), 0);
+    const pend = contas.filter((c) => c.status === 'pendente').reduce((s, c) => s + Number(c.valor), 0);
+    alvo.innerHTML = tabelaContas(contas, 'pagar') +
+      `<div class="flex flex--between mt-16" style="font-size:14px"><span class="muted">${contas.length} conta(s)</span>
+        <span>Pendente: <strong style="color:var(--perigo)">${UI.moeda(pend)}</strong> · Total: <strong>${UI.moeda(total)}</strong></span></div>`;
     ligarAcoes(alvo, 'pagar');
   }
 
@@ -95,16 +153,22 @@ window.PaginaFinanceiro = (function () {
       corpoHTML: `
         <div class="campo"><label>Descrição *</label><input id="cp-desc" /></div>
         <div class="campo mt-16"><label>Fornecedor</label><select id="cp-forn"><option value="">—</option>${fornecedores.map((f) => `<option value="${f.id}">${UI.escapar(f.nome)}</option>`).join('')}</select></div>
-        <div class="campo mt-16"><label>Valor (R$) *</label><input id="cp-valor" type="number" step="0.01" min="0" /></div>
-        <div class="campo mt-16"><label>Vencimento</label><input id="cp-venc" type="date" /></div>`,
+        <div class="campo mt-16"><label>Valor total (R$) *</label><input id="cp-valor" type="number" step="0.01" min="0" /></div>
+        <div class="form-grid mt-16">
+          <div class="campo"><label>Parcelas</label><input id="cp-parc" type="number" min="1" value="1" /></div>
+          <div class="campo"><label>1º vencimento</label><input id="cp-venc" type="date" value="${new Date().toISOString().slice(0, 10)}" /></div>
+        </div>
+        <div class="dica mt-16">Com mais de uma parcela, o valor é dividido e cada parcela vence a cada mês (uma conta por parcela).</div>`,
       textoConfirmar: 'Salvar',
       aoConfirmar: async (el) => {
         try {
-          await API.post('/api/financeiro/contas-pagar', {
+          const r = await API.post('/api/financeiro/contas-pagar', {
             descricao: el.querySelector('#cp-desc').value, fornecedor_id: el.querySelector('#cp-forn').value || null,
-            valor: el.querySelector('#cp-valor').value, vencimento: el.querySelector('#cp-venc').value || null,
+            valor: el.querySelector('#cp-valor').value, parcelas: el.querySelector('#cp-parc').value,
+            primeiro_vencimento: el.querySelector('#cp-venc').value || null,
           });
-          UI.sucesso('Conta criada.'); await listarPagar(); carregarAlertas();
+          UI.sucesso(r && r.criadas ? `${r.criadas} parcela(s) criada(s).` : 'Conta criada.');
+          await listarPagar(); carregarAlertas();
         } catch (e) { UI.erro(e.message); return false; }
       },
     });
@@ -196,27 +260,25 @@ window.PaginaFinanceiro = (function () {
   // ---------------------------- A Receber ----------------------------
   async function renderReceber() {
     const alvo = document.getElementById('fin-conteudo');
-    alvo.innerHTML = `
-      <div class="barra-ferramentas">
-        <select id="cr-status"><option value="">Todas</option><option value="pendente">Pendentes</option><option value="recebido">Recebidas</option><option value="cancelada">Canceladas</option></select>
-        <button class="btn btn--secundario" id="cr-filtrar">Filtrar</button>
-        <div class="cresce"></div>
-        <button class="btn" id="cr-nova">+ Nova conta a receber</button>
-      </div>
-      <div class="card"><div id="cr-lista">Carregando…</div></div>`;
-    alvo.querySelector('#cr-filtrar').addEventListener('click', listarReceber);
+    const statusOpcoes = ['<option value="">Todas</option>', '<option value="pendente">Pendentes</option>', '<option value="recebido">Recebidas</option>', '<option value="cancelada">Canceladas</option>']
+      .map((o) => o.replace(`value="${filtroReceber.status}"`, `value="${filtroReceber.status}" selected`)).join('');
+    alvo.innerHTML = barraMes(filtroReceber, 'cr', statusOpcoes) + '<div class="card"><div id="cr-lista">Carregando…</div></div>';
+    ligarBarraMes(alvo, filtroReceber, 'cr', listarReceber);
     alvo.querySelector('#cr-nova').addEventListener('click', formReceber);
     await listarReceber();
   }
 
   async function listarReceber() {
     const alvo = document.getElementById('cr-lista');
-    const status = document.getElementById('cr-status').value;
     let contas;
-    try { contas = await API.get('/api/financeiro/contas-receber' + (status ? '?status=' + status : '')); }
+    try { contas = await API.get('/api/financeiro/contas-receber?' + queryPeriodo(filtroReceber)); }
     catch (e) { alvo.innerHTML = UI.escapar(e.message); return; }
-    if (!contas.length) { alvo.innerHTML = '<p class="muted">Nenhuma conta.</p>'; return; }
-    alvo.innerHTML = tabelaContas(contas, 'receber');
+    if (!contas.length) { alvo.innerHTML = '<p class="muted">Nenhuma conta neste período.</p>'; return; }
+    const receb = contas.filter((c) => c.status === 'recebido').reduce((s, c) => s + Number(c.valor), 0);
+    const pend = contas.filter((c) => c.status === 'pendente').reduce((s, c) => s + Number(c.valor), 0);
+    alvo.innerHTML = tabelaContas(contas, 'receber') +
+      `<div class="flex flex--between mt-16" style="font-size:14px"><span class="muted">${contas.length} conta(s)</span>
+        <span>A receber: <strong style="color:var(--alerta,#b45309)">${UI.moeda(pend)}</strong> · Recebido: <strong style="color:var(--sucesso)">${UI.moeda(receb)}</strong></span></div>`;
     ligarAcoes(alvo, 'receber');
   }
 
@@ -250,16 +312,17 @@ window.PaginaFinanceiro = (function () {
       <thead><tr><th>Descrição</th>${tipo === 'pagar' ? '<th>Fornecedor</th>' : ''}<th>Venc.</th><th>Valor</th><th>Situação</th><th></th></tr></thead>
       <tbody>${contas.map((c) => {
         const quitada = c.status === 'pago' || c.status === 'recebido';
+        const ehVista = c.tipo === 'venda_vista';
         return `<tr>
-          <td>${UI.escapar(c.descricao)}${tipo === 'pagar' && c.conta_fixa_id ? ' <span class="badge badge--muted" title="Gerada automaticamente de uma conta fixa">🔁 fixa</span>' : ''}</td>
+          <td>${UI.escapar(c.descricao)}${tipo === 'pagar' && c.conta_fixa_id ? ' <span class="badge badge--muted" title="Gerada automaticamente de uma conta fixa">🔁 fixa</span>' : ''}${tipo === 'pagar' && c.total_parcelas > 1 ? ` <span class="badge badge--muted">${c.parcela}/${c.total_parcelas}</span>` : ''}</td>
           ${tipo === 'pagar' ? `<td>${UI.escapar(c.fornecedor_nome || '—')}</td>` : ''}
           <td>${c.vencimento || '—'}</td>
           <td>${UI.moeda(c.valor)}</td>
           <td>${situacao(c)}</td>
           <td style="text-align:right;white-space:nowrap">
             ${!quitada && c.status !== 'cancelada' ? `<button class="btn" data-baixar="${c.id}">${tipo === 'pagar' ? 'Pagar' : 'Receber'}</button>` : ''}
-            ${quitada ? `<button class="btn btn--secundario" data-reabrir="${c.id}">Reabrir</button>` : ''}
-            <button class="btn btn--secundario" data-excluir="${c.id}">✕</button>
+            ${quitada && !ehVista ? `<button class="btn btn--secundario" data-reabrir="${c.id}">Reabrir</button>` : ''}
+            ${ehVista ? '' : `<button class="btn btn--secundario" data-excluir="${c.id}">✕</button>`}
           </td>
         </tr>`;
       }).join('')}</tbody></table>`;
@@ -279,19 +342,26 @@ window.PaginaFinanceiro = (function () {
     }));
   }
 
-  function baixar(tipo, id) {
+  async function baixar(tipo, id) {
     const ehPagar = tipo === 'pagar';
+    contasFin = await API.get('/api/financeiro/contas-financeiras').catch(() => []);
     Modal.abrir({
       titulo: ehPagar ? 'Registrar pagamento' : 'Registrar recebimento', tamanho: 'modal--pequeno',
       corpoHTML: `
         <div class="campo"><label>Data ${ehPagar ? 'do pagamento' : 'do recebimento'}</label><input id="bx-data" type="date" value="${new Date().toISOString().slice(0, 10)}" /></div>
         <div class="campo mt-16"><label>Forma</label><select id="bx-forma">
-          ${Object.entries(FORMAS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
-        </select></div>`,
+          ${Object.entries(FORMAS).filter(([k]) => k !== 'prazo').map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
+        </select></div>
+        <div class="campo mt-16"><label>${ehPagar ? 'Sai da conta' : 'Entra na conta'}</label><select id="bx-conta">
+          <option value="">Automático (pela forma)</option>
+          ${contasFin.map((c) => `<option value="${c.id}">${UI.escapar(c.nome)} — ${UI.moeda(c.saldo_atual)}</option>`).join('')}
+        </select><div class="dica">Deixe em "automático" para usar a conta ligada à forma de pagamento.</div></div>`,
       textoConfirmar: 'Confirmar',
       aoConfirmar: async (el) => {
-        const campo = ehPagar ? { data_pagamento: el.querySelector('#bx-data').value, forma_pagamento: el.querySelector('#bx-forma').value }
-          : { data_recebimento: el.querySelector('#bx-data').value, forma_recebimento: el.querySelector('#bx-forma').value };
+        const conta = el.querySelector('#bx-conta').value || null;
+        const campo = ehPagar
+          ? { data_pagamento: el.querySelector('#bx-data').value, forma_pagamento: el.querySelector('#bx-forma').value, conta_financeira_id: conta }
+          : { data_recebimento: el.querySelector('#bx-data').value, forma_recebimento: el.querySelector('#bx-forma').value, conta_financeira_id: conta };
         try {
           await API.post(`/api/financeiro/contas-${tipo}/${id}/baixar`, campo);
           UI.sucesso(ehPagar ? 'Pagamento registrado.' : 'Recebimento registrado.');
@@ -307,6 +377,16 @@ window.PaginaFinanceiro = (function () {
     const hoje = new Date().toISOString().slice(0, 10);
     const mesInicio = hoje.slice(0, 8) + '01';
     alvo.innerHTML = `
+      <div class="card mb-16">
+        <div class="flex flex--between" style="align-items:center;flex-wrap:wrap;gap:8px">
+          <h3 style="margin:0">💰 Saldos das contas</h3>
+          <div class="flex gap-12">
+            <button class="btn btn--secundario" id="fx-mapa">⚙️ Formas → contas</button>
+            <button class="btn" id="fx-nova-conta">+ Nova conta</button>
+          </div>
+        </div>
+        <div id="fx-contas" class="mt-16">Carregando…</div>
+      </div>
       <div class="barra-ferramentas">
         <div class="campo"><label class="dica">De</label><input type="date" id="fx-inicio" value="${mesInicio}"></div>
         <div class="campo"><label class="dica">Até</label><input type="date" id="fx-fim" value="${hoje}"></div>
@@ -314,6 +394,8 @@ window.PaginaFinanceiro = (function () {
       </div>
       <div id="fx-resultado"></div>`;
     alvo.querySelector('#fx-aplicar').addEventListener('click', carregarFluxo);
+    alvo.querySelector('#fx-nova-conta').addEventListener('click', () => formContaFinanceira());
+    alvo.querySelector('#fx-mapa').addEventListener('click', configMapa);
     await carregarFluxo();
   }
 
@@ -324,20 +406,137 @@ window.PaginaFinanceiro = (function () {
     let fx;
     try { fx = await API.get(`/api/financeiro/fluxo-caixa?inicio=${inicio}&fim=${fim}`); }
     catch (e) { alvo.innerHTML = UI.escapar(e.message); return; }
+
+    renderContasCards(fx.contas || [], fx.saldo_total_contas || 0);
+
     alvo.innerHTML = `
       <div class="grid grid--cards mb-16">
-        <div class="card stat"><span class="stat__label">Entradas</span><span class="stat__value" style="color:var(--sucesso)">${UI.moeda(fx.entradas)}</span></div>
-        <div class="card stat"><span class="stat__label">Saídas</span><span class="stat__value" style="color:var(--perigo)">${UI.moeda(fx.saidas)}</span></div>
-        <div class="card stat"><span class="stat__label">Saldo do período</span><span class="stat__value" style="color:${fx.saldo >= 0 ? 'var(--sucesso)' : 'var(--perigo)'}">${UI.moeda(fx.saldo)}</span></div>
+        <div class="card stat"><span class="stat__label">Entradas no período</span><span class="stat__value" style="color:var(--sucesso)">${UI.moeda(fx.entradas)}</span></div>
+        <div class="card stat"><span class="stat__label">Saídas no período</span><span class="stat__value" style="color:var(--perigo)">${UI.moeda(fx.saidas)}</span></div>
+        <div class="card stat"><span class="stat__label">Resultado do período</span><span class="stat__value" style="color:${fx.saldo >= 0 ? 'var(--sucesso)' : 'var(--perigo)'}">${UI.moeda(fx.saldo)}</span></div>
       </div>
       <div class="card">
-        <h3 style="margin-top:0">Composição</h3>
+        <h3 style="margin-top:0">Composição do período</h3>
         <table class="tabela">
           <tr><td>Vendas à vista (dinheiro, cartão, PIX)</td><td style="text-align:right;color:var(--sucesso)">+ ${UI.moeda(fx.detalhe.vendas_a_vista)}</td></tr>
           <tr><td>Recebimentos de contas (a prazo/parcelas)</td><td style="text-align:right;color:var(--sucesso)">+ ${UI.moeda(fx.detalhe.recebimentos)}</td></tr>
           <tr><td>Pagamentos de contas</td><td style="text-align:right;color:var(--perigo)">- ${UI.moeda(fx.detalhe.pagamentos)}</td></tr>
         </table>
       </div>`;
+  }
+
+  function renderContasCards(contas, saldoTotal) {
+    const alvo = document.getElementById('fx-contas');
+    if (!alvo) return;
+    if (!contas.length) { alvo.innerHTML = '<p class="muted">Nenhuma conta cadastrada. Crie uma conta (banco, caixa, máquina de cartão) para controlar os saldos.</p>'; return; }
+    alvo.innerHTML = `
+      <div class="grid grid--cards">
+        ${contas.map((c) => `
+          <div class="card stat" style="gap:6px">
+            <span class="stat__label">${(TIPOS_CONTA[c.tipo] || TIPOS_CONTA.outro)} · ${UI.escapar(c.nome)}</span>
+            <span class="stat__value" style="color:${Number(c.saldo_atual) >= 0 ? 'var(--sucesso)' : 'var(--perigo)'}">${UI.moeda(c.saldo_atual)}</span>
+            <div class="flex gap-12 mt-16" style="flex-wrap:wrap">
+              <button class="btn btn--secundario" data-conta-ajustar="${c.id}">Ajustar saldo</button>
+              <button class="btn btn--secundario" data-conta-extrato="${c.id}">Extrato</button>
+              <button class="btn btn--secundario" data-conta-editar="${c.id}">Editar</button>
+            </div>
+          </div>`).join('')}
+      </div>
+      <div class="flex flex--between mt-16"><span class="muted">Saldo total das contas</span><strong style="font-size:18px;color:${saldoTotal >= 0 ? 'var(--sucesso)' : 'var(--perigo)'}">${UI.moeda(saldoTotal)}</strong></div>`;
+
+    alvo.querySelectorAll('[data-conta-ajustar]').forEach((b) => b.addEventListener('click', () => ajustarSaldoConta(contas.find((c) => c.id === Number(b.dataset.contaAjustar)))));
+    alvo.querySelectorAll('[data-conta-extrato]').forEach((b) => b.addEventListener('click', () => verExtrato(contas.find((c) => c.id === Number(b.dataset.contaExtrato)))));
+    alvo.querySelectorAll('[data-conta-editar]').forEach((b) => b.addEventListener('click', () => formContaFinanceira(contas.find((c) => c.id === Number(b.dataset.contaEditar)))));
+  }
+
+  function formContaFinanceira(conta) {
+    const ehEdicao = !!conta;
+    Modal.abrir({
+      titulo: ehEdicao ? 'Editar conta' : 'Nova conta financeira', tamanho: 'modal--pequeno',
+      corpoHTML: `
+        <div class="campo"><label>Nome *</label><input id="fc-nome" value="${UI.escapar(conta ? conta.nome : '')}" placeholder="Ex.: Banco Itaú, Caixa, Máquina Cielo" /></div>
+        <div class="campo mt-16"><label>Tipo</label><select id="fc-tipo">
+          ${Object.entries(TIPOS_CONTA).map(([k, v]) => `<option value="${k}" ${conta && conta.tipo === k ? 'selected' : ''}>${v}</option>`).join('')}
+        </select></div>
+        <div class="campo mt-16"><label>Saldo inicial (R$)</label><input id="fc-saldo" type="number" step="0.01" value="${conta ? conta.saldo_inicial : 0}" />
+          <div class="dica">Saldo de abertura da conta (o "saldo de entrada"). Depois, use "Ajustar saldo" para correções.</div></div>
+        ${ehEdicao ? `<div class="mt-16"><button type="button" class="btn btn--perigo" id="fc-excluir">Excluir conta</button></div>` : ''}`,
+      textoConfirmar: 'Salvar',
+      aoAbrir: (el) => {
+        const btn = el.querySelector('#fc-excluir');
+        if (btn) btn.addEventListener('click', async () => {
+          const ok = await UI.confirmar('Excluir esta conta? Se já tiver movimentações, ela será apenas desativada.', { titulo: 'Excluir conta', textoConfirmar: 'Excluir' });
+          if (!ok) return;
+          try { const r = await API.del(`/api/financeiro/contas-financeiras/${conta.id}`); el.remove(); UI.sucesso(r.inativada ? 'Conta desativada (tinha movimentações).' : 'Conta excluída.'); await carregarFluxo(); }
+          catch (e) { UI.erro(e.message); }
+        });
+      },
+      aoConfirmar: async (el) => {
+        const dados = { nome: el.querySelector('#fc-nome').value, tipo: el.querySelector('#fc-tipo').value, saldo_inicial: el.querySelector('#fc-saldo').value };
+        try {
+          if (ehEdicao) await API.put(`/api/financeiro/contas-financeiras/${conta.id}`, dados);
+          else await API.post('/api/financeiro/contas-financeiras', dados);
+          UI.sucesso(ehEdicao ? 'Conta atualizada.' : 'Conta criada.');
+          await carregarFluxo();
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
+  function ajustarSaldoConta(conta) {
+    Modal.abrir({
+      titulo: `Ajustar saldo — ${conta.nome}`, tamanho: 'modal--pequeno',
+      corpoHTML: `
+        <div class="campo"><label>Saldo atual</label><input value="${UI.moeda(conta.saldo_atual)}" disabled /></div>
+        <div class="campo mt-16"><label>Novo saldo (R$) *</label><input id="aj-saldo" type="number" step="0.01" value="${conta.saldo_atual}" /></div>
+        <div class="campo mt-16"><label>Motivo</label><input id="aj-motivo" placeholder="Ex.: conferência do extrato, sangria, aporte" /></div>
+        <div class="dica mt-16">A diferença é registrada no extrato da conta como um ajuste.</div>`,
+      textoConfirmar: 'Salvar ajuste',
+      aoConfirmar: async (el) => {
+        try {
+          await API.post(`/api/financeiro/contas-financeiras/${conta.id}/ajustar-saldo`, { saldo: el.querySelector('#aj-saldo').value, motivo: el.querySelector('#aj-motivo').value });
+          UI.sucesso('Saldo ajustado.'); await carregarFluxo();
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
+  async function verExtrato(conta) {
+    let ext;
+    try { ext = await API.get(`/api/financeiro/contas-financeiras/${conta.id}/extrato`); }
+    catch (e) { UI.erro(e.message); return; }
+    const nomeOrigem = { venda: 'Venda', recebimento: 'Recebimento', pagamento: 'Pagamento', ajuste: 'Ajuste', abertura: 'Abertura' };
+    const corpo = `
+      <div class="flex flex--between mb-16"><strong>Saldo atual</strong><strong style="color:${ext.saldo_atual >= 0 ? 'var(--sucesso)' : 'var(--perigo)'}">${UI.moeda(ext.saldo_atual)}</strong></div>
+      ${ext.movimentos.length ? `<table class="tabela">
+        <thead><tr><th>Data</th><th>Origem</th><th>Descrição</th><th style="text-align:right">Valor</th></tr></thead>
+        <tbody>${ext.movimentos.map((m) => `<tr>
+          <td>${UI.dataHora(m.data)}</td>
+          <td>${nomeOrigem[m.origem] || m.origem}</td>
+          <td>${UI.escapar(m.descricao || '—')}</td>
+          <td style="text-align:right;color:${m.tipo === 'entrada' ? 'var(--sucesso)' : 'var(--perigo)'}">${m.tipo === 'entrada' ? '+' : '-'} ${UI.moeda(m.valor)}</td>
+        </tr>`).join('')}</tbody></table>` : '<p class="muted">Sem movimentações.</p>'}`;
+    Modal.abrir({ titulo: `Extrato — ${conta.nome}`, tamanho: 'modal--grande', corpoHTML: corpo, mostrarConfirmar: false });
+  }
+
+  async function configMapa() {
+    let mapa = {}; let contas = [];
+    try { [mapa, contas] = await Promise.all([API.get('/api/financeiro/mapa-contas'), API.get('/api/financeiro/contas-financeiras')]); }
+    catch (e) { UI.erro(e.message); return; }
+    const opcoes = (sel) => '<option value="">— nenhuma —</option>' + contas.map((c) => `<option value="${c.id}" ${String(sel) === String(c.id) ? 'selected' : ''}>${UI.escapar(c.nome)}</option>`).join('');
+    const corpo = `
+      <p class="dica" style="margin-top:0">Escolha em qual conta cada forma de pagamento entra (nas vendas do PDV) ou sai. Você pode sobrescrever na hora de pagar/receber.</p>
+      ${Object.entries(FORMAS_SALDO).map(([k, v]) => `
+        <div class="campo mt-16"><label>${v}</label><select data-mapa="${k}">${opcoes(mapa[k])}</select></div>`).join('')}`;
+    Modal.abrir({
+      titulo: 'Formas de pagamento → contas', tamanho: 'modal--pequeno', corpoHTML: corpo, textoConfirmar: 'Salvar',
+      aoConfirmar: async (el) => {
+        const novo = {};
+        el.querySelectorAll('[data-mapa]').forEach((s) => { novo[s.dataset.mapa] = s.value || null; });
+        try { await API.put('/api/financeiro/mapa-contas', novo); UI.sucesso('Configuração salva.'); }
+        catch (e) { UI.erro(e.message); return false; }
+      },
+    });
   }
 
   return { titulo: 'Financeiro', render };

@@ -131,16 +131,42 @@ function criarVenda(dados) {
       }
     }
 
+    // eslint-disable-next-line global-require
+    const fin = require('./financeiroService');
     const insPag = db.prepare('INSERT INTO vendas_pagamentos (venda_id, forma_pagamento, valor) VALUES (?, ?, ?)');
+    let totalVista = 0;
+    const formasVista = [];
+    let contaVista = null;
     for (const p of pagamentosGravar) {
       insPag.run(venda_id, p.forma_pagamento, Number(p.valor));
-      // Venda a prazo gera conta a receber.
       if (p.forma_pagamento === 'prazo') {
+        // Venda a prazo gera conta a receber pendente (recebe depois).
         db.prepare(
-          `INSERT INTO contas_receber (venda_id, cliente_id, descricao, valor, parcela, total_parcelas, vencimento, status)
-           VALUES (?, ?, ?, ?, 1, 1, ?, 'pendente')`
+          `INSERT INTO contas_receber (venda_id, cliente_id, descricao, valor, parcela, total_parcelas, vencimento, status, tipo)
+           VALUES (?, ?, ?, ?, 1, 1, ?, 'pendente', 'normal')`
         ).run(venda_id, dados.cliente_id || null, 'Venda #' + venda_id + ' (a prazo)', Number(p.valor), dados.vencimento_prazo || null);
+      } else {
+        // Venda a vista: alimenta o saldo da conta financeira mapeada.
+        totalVista = arred(totalVista + Number(p.valor));
+        formasVista.push(p.forma_pagamento);
+        const contaId = fin.contaDaForma(db, p.forma_pagamento);
+        if (contaId && contaVista == null) contaVista = contaId;
+        fin.lancarMovimentoConta(db, {
+          conta_id: contaId, tipo: 'entrada', valor: p.valor, origem: 'venda',
+          referencia_id: venda_id, descricao: `Venda #${venda_id} (${p.forma_pagamento})`,
+        });
       }
+    }
+
+    // Registra a parte a vista em Contas a Receber ja como "recebida"
+    // (tipo venda_vista: nao conta de novo no fluxo de caixa).
+    if (totalVista > 0) {
+      const formaResumo = formasVista.length === 1 ? formasVista[0] : 'diversos';
+      db.prepare(
+        `INSERT INTO contas_receber (venda_id, cliente_id, descricao, valor, parcela, total_parcelas,
+           vencimento, status, tipo, forma_recebimento, data_recebimento, conta_financeira_id)
+         VALUES (?, ?, ?, ?, 1, 1, date('now','localtime'), 'recebido', 'venda_vista', ?, date('now','localtime'), ?)`
+      ).run(venda_id, dados.cliente_id || null, 'Venda #' + venda_id, totalVista, formaResumo, contaVista);
     }
 
     return venda_id;
@@ -175,8 +201,10 @@ function cancelarVenda(id, motivo) {
         observacao: 'Estorno da venda #' + id,
       });
     }
-    // Cancela contas a receber vinculadas ainda pendentes.
-    db.prepare("UPDATE contas_receber SET status = 'cancelada' WHERE venda_id = ? AND status = 'pendente'").run(id);
+    // Estorna os saldos das contas financeiras alimentados por esta venda.
+    db.prepare("DELETE FROM contas_financeiras_mov WHERE origem = 'venda' AND referencia_id = ?").run(id);
+    // Cancela contas a receber vinculadas (a prazo pendentes e o registro da parte a vista).
+    db.prepare("UPDATE contas_receber SET status = 'cancelada' WHERE venda_id = ? AND status IN ('pendente','recebido')").run(id);
     db.prepare("UPDATE vendas SET status = 'cancelada', observacao = COALESCE(observacao,'') || ? WHERE id = ?")
       .run(motivo ? ` | Cancelada: ${motivo}` : ' | Cancelada', id);
   });
