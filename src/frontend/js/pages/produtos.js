@@ -134,7 +134,7 @@ window.PaginaProdutos = (function () {
         <div class="produto-card__foto">${fotoHTML}</div>
         <div class="produto-card__body">
           <div class="produto-card__nome">${p.eh_kit ? '<span class="badge badge--muted" style="margin-right:4px">Kit</span>' : ''}${UI.escapar(p.nome)}</div>
-          <div class="produto-card__preco">${UI.moeda(p.preco_venda)}</div>
+          <div class="produto-card__preco">${Number(p.preco_venda) > 0 ? UI.moeda(p.preco_venda) : '<span class="badge badge--alerta">definir preço</span>'}</div>
           <div class="produto-card__estoque">
             ${p.eh_kit ? 'Composto por outros produtos' : `Estoque: ${UI.numero(p.estoque_atual)} ${UI.escapar(p.unidade)}
             ${baixo ? '<span class="badge badge--alerta" style="margin-left:6px">baixo</span>' : ''}`}

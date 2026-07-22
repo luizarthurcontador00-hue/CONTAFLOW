@@ -3,7 +3,6 @@
 const { getDb } = require('../db/connection');
 const { AppError } = require('../utils/errors');
 const { registrarMovimentacao } = require('./estoqueService');
-const { precoPorMarkup, markupEfetivo } = require('./precificacaoService');
 
 /**
  * Tenta localizar um produto existente que corresponda ao item da NF:
@@ -135,11 +134,9 @@ function confirmarImportacao(dados) {
         if (!nome) throw new AppError('Informe o nome de todos os produtos novos antes de importar.');
 
         const custo = Number(item.valor_unitario || 0);
-        let preco = novo.preco_venda != null && novo.preco_venda !== '' ? Number(novo.preco_venda) : null;
-        if (preco == null) {
-          const mk = markupEfetivo({ markupProduto: novo.markup, categoriaId: novo.categoria_id });
-          preco = precoPorMarkup(custo, mk);
-        }
+        // Regra: produto importado passa pela Precificacao primeiro. Se o
+        // usuario nao informou um preco na tela de conferencia, fica 0.
+        const preco = novo.preco_venda != null && novo.preco_venda !== '' ? Number(novo.preco_venda) : 0;
 
         const pInfo = db.prepare(
           `INSERT INTO produtos

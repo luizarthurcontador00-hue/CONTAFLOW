@@ -63,10 +63,17 @@ function normalizar(dados) {
     ? Number(dados.preco_venda)
     : null;
 
-  // Se nao informaram preco mas ha markup (produto/categoria/global), calcula.
+  // Se nao informaram preco:
+  //  - em importacoes (_semPrecoAuto), fica 0: o preco sera definido na
+  //    Precificacao (regra: produto importado passa pela precificacao primeiro);
+  //  - caso contrario, calcula pelo markup (produto/categoria/global).
   if (preco_venda == null) {
-    const markup = markupEfetivo({ markupProduto: dados.markup, categoriaId: dados.categoria_id });
-    preco_venda = precoPorMarkup(custo, markup);
+    if (dados._semPrecoAuto) {
+      preco_venda = 0;
+    } else {
+      const markup = markupEfetivo({ markupProduto: dados.markup, categoriaId: dados.categoria_id });
+      preco_venda = precoPorMarkup(custo, markup);
+    }
   }
 
   return {
@@ -419,7 +426,9 @@ function criarLote(linhas) {
       if (!linha.nome || !String(linha.nome).trim()) {
         throw new AppError('Informe o nome do produto.');
       }
-      const dados = { ...linha };
+      // Importacao: se o usuario nao digitou um preco na grade, o produto fica
+      // sem preco (0) e sera precificado na aba Precificacao.
+      const dados = { ...linha, _semPrecoAuto: true };
       if (linha.categoria) dados.categoria_id = acharOuCriarCategoria(db, linha.categoria);
       if (linha.fornecedor) dados.fornecedor_id = acharOuCriarFornecedor(db, linha.fornecedor);
       const produto = criar(dados);
