@@ -329,3 +329,27 @@ kbd { background: #f1f5f9; border: 1px solid #cbd5e1; border-bottom-width: 2px; 
 .flex { display: flex; }
 .flex--between { justify-content: space-between; align-items: center; }
 .gap-12 { gap: 12px; }
+
+/* ===================== Subgrupos (abas internas) ===================== */
+.subtabs {
+  display: flex; gap: 4px; margin-bottom: 20px;
+  border-bottom: 1px solid var(--borda);
+}
+.subtab {
+  border: none; background: none; cursor: pointer;
+  padding: 10px 18px; font-size: 14px; font-weight: 600;
+  color: var(--texto-suave); border-bottom: 2px solid transparent;
+  margin-bottom: -1px; border-radius: 8px 8px 0 0;
+}
+.subtab:hover { background: #f8fafc; color: var(--texto); }
+.subtab--ativa { color: var(--primaria); border-bottom-color: var(--primaria); }
+
+/* ===================== Conferencia de estoque ===================== */
+.tabela--conferencia input[type="number"] {
+  padding: 6px 8px; border: 1px solid var(--borda); border-radius: 6px;
+}
+.tabela--conferencia tr.cf-linha--confere td { background: #f0fdf4; }
+.tabela--conferencia tr.cf-linha--divergente td { background: #fff7ed; }
+.tabela--conferencia tr.cf-linha--destaque td {
+  background: #dbeafe; transition: background .3s;
+}

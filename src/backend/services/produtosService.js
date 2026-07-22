@@ -188,6 +188,66 @@ function ajustarEstoque(id, novaQuantidade, motivo) {
 }
 
 /**
+ * Conferencia de estoque (inventario) em lote: recebe uma lista de itens
+ * contados fisicamente e ajusta o saldo de cada produto para a quantidade
+ * informada, gerando a movimentacao de entrada/saida correspondente a
+ * diferenca. Somente itens com contagem informada sao processados; produtos
+ * sem divergencia nao geram movimentacao. Tudo numa unica transacao.
+ *
+ * @param {Array<{id:number, contagem:number}>} itens
+ * @param {string} [observacao] rotulo aplicado as movimentacoes
+ * @returns {object} resumo { total, ajustados, sem_divergencia, erros, rotulo, resultados }
+ */
+function conferenciaEstoque(itens, observacao) {
+  if (!Array.isArray(itens) || !itens.length) {
+    throw new AppError('Nenhum item para conferir.');
+  }
+  const db = getDb();
+  const rotulo = (observacao && observacao.trim())
+    ? observacao.trim()
+    : `Conferência de estoque ${dataHoraRotulo()}`;
+
+  // 1) Valida e calcula tudo fora da transacao (apenas leituras).
+  const plano = [];
+  for (const item of itens) {
+    const id = Number(item.id);
+    const prod = db.prepare('SELECT id, nome, custo, estoque_atual, eh_kit FROM produtos WHERE id = ?').get(id);
+    if (!prod) { plano.push({ id, sucesso: false, erro: 'Produto não encontrado.' }); continue; }
+    if (prod.eh_kit) { plano.push({ id, nome: prod.nome, sucesso: false, erro: 'Kit não controla estoque próprio.' }); continue; }
+    const contagem = Number(item.contagem);
+    if (Number.isNaN(contagem) || contagem < 0) { plano.push({ id, nome: prod.nome, sucesso: false, erro: 'Contagem inválida.' }); continue; }
+    const anterior = Number(prod.estoque_atual);
+    const diferenca = Number((contagem - anterior).toFixed(3));
+    plano.push({ id, nome: prod.nome, custo: prod.custo, sucesso: true, anterior, contagem, diferenca });
+  }
+
+  // 2) Aplica os ajustes numa unica transacao (so os itens com divergencia).
+  const aplicar = plano.filter((r) => r.sucesso && r.diferenca !== 0);
+  const tx = db.transaction(() => {
+    for (const r of aplicar) {
+      registrarMovimentacao(db, {
+        produto_id: r.id,
+        tipo: r.diferenca > 0 ? 'entrada' : 'saida',
+        quantidade: Math.abs(r.diferenca),
+        custo_unitario: r.custo,
+        origem: 'ajuste',
+        observacao: rotulo,
+      });
+    }
+  });
+  tx();
+
+  return {
+    total: plano.length,
+    ajustados: aplicar.length,
+    sem_divergencia: plano.filter((r) => r.sucesso && r.diferenca === 0).length,
+    erros: plano.filter((r) => !r.sucesso).length,
+    rotulo,
+    resultados: plano,
+  };
+}
+
+/**
  * Exclusao: se o produto ja tem movimentacoes/vendas, apenas inativa
  * (soft delete) para preservar historico. Caso contrario, remove de fato.
  */
@@ -478,6 +538,7 @@ module.exports = {
   criar,
   atualizar,
   ajustarEstoque,
+  conferenciaEstoque,
   excluir,
   prepararEtiquetas,
   obterComposicao,

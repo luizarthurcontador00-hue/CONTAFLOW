@@ -30,6 +30,14 @@ router.post('/lote', asyncHandler((req, res) => {
   res.json(produtos.criarLote(linhas));
 }));
 
+// Conferencia de estoque (inventario) em lote: ajusta o saldo dos produtos
+// contados para a quantidade informada, registrando as diferencas.
+router.post('/conferencia', asyncHandler((req, res) => {
+  const itens = (req.body && req.body.itens) || [];
+  const observacao = (req.body && req.body.observacao) || null;
+  res.json(produtos.conferenciaEstoque(itens, observacao));
+}));
+
 // Excluir/editar varios produtos selecionados de uma vez.
 router.post('/lote-excluir', asyncHandler((req, res) => {
   const ids = (req.body && req.body.ids) || [];
