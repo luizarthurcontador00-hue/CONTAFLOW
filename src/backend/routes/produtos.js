@@ -64,6 +64,22 @@ router.post('/planilha/importar', uploadPlanilha.single('planilha'), asyncHandle
   res.json(planilha.analisarPlanilha(req.file.buffer));
 }));
 
+// ----------------------------- Fotos (galeria) -----------------------------
+router.get('/:id/fotos', asyncHandler((req, res) => res.json(produtos.listarFotos(req.params.id))));
+
+router.post('/:id/fotos', uploadFoto.array('fotos', 8), asyncHandler((req, res) => {
+  const arquivos = (req.files || []).map((f) => f.filename);
+  res.status(201).json(produtos.adicionarFotos(req.params.id, arquivos));
+}));
+
+router.post('/:id/fotos/:fotoId/principal', asyncHandler((req, res) => {
+  res.json(produtos.definirFotoPrincipal(req.params.id, req.params.fotoId));
+}));
+
+router.delete('/:id/fotos/:fotoId', asyncHandler((req, res) => {
+  res.json(produtos.removerFoto(req.params.id, req.params.fotoId));
+}));
+
 // Composicao de um kit/combo.
 router.get('/:id/composicao', asyncHandler((req, res) => {
   res.json(produtos.obterComposicao(req.params.id));

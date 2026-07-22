@@ -418,6 +418,30 @@ const migrations = [
         .run(JSON.stringify(mapa));
     },
   },
+  {
+    version: 8,
+    name: 'produtos-multiplas-fotos',
+    up(db) {
+      db.exec(`
+        -- Galeria de fotos por produto. A foto marcada como principal continua
+        -- refletida em produtos.foto_path (compatibilidade com cards/PDV/etc.).
+        CREATE TABLE IF NOT EXISTS produtos_fotos (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          produto_id INTEGER NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
+          arquivo    TEXT NOT NULL,
+          ordem      INTEGER NOT NULL DEFAULT 0,
+          principal  INTEGER NOT NULL DEFAULT 0,
+          criado_em  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_produtos_fotos_produto ON produtos_fotos(produto_id);
+
+        -- Migra a foto unica existente para a galeria (como principal).
+        INSERT INTO produtos_fotos (produto_id, arquivo, ordem, principal)
+          SELECT id, foto_path, 0, 1 FROM produtos
+          WHERE foto_path IS NOT NULL AND TRIM(foto_path) <> '';
+      `);
+    },
+  },
 ];
 
 /**

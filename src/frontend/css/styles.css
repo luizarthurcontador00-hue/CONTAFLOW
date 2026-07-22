@@ -353,3 +353,44 @@ kbd { background: #f1f5f9; border: 1px solid #cbd5e1; border-bottom-width: 2px; 
 .tabela--conferencia tr.cf-linha--destaque td {
   background: #dbeafe; transition: background .3s;
 }
+
+/* ===================== Galeria de fotos do produto ===================== */
+.galeria-fotos { display: flex; flex-wrap: wrap; gap: 10px; }
+.galeria-vazia {
+  color: var(--texto-suave); border: 1px dashed var(--borda);
+  border-radius: 10px; padding: 20px; width: 100%; text-align: center;
+}
+.galeria-item {
+  position: relative; width: 92px; height: 92px; border-radius: 10px;
+  overflow: hidden; border: 1px solid var(--borda); background: #f8fafc;
+}
+.galeria-item img { width: 100%; height: 100%; object-fit: cover; }
+.galeria-item--principal { border-color: var(--primaria); box-shadow: 0 0 0 2px var(--primaria); }
+.galeria-item__tag {
+  position: absolute; left: 4px; bottom: 4px; font-size: 10px; font-weight: 700;
+  background: var(--primaria); color: #fff; border-radius: 5px; padding: 1px 5px;
+}
+.galeria-item__btn {
+  position: absolute; border: none; cursor: pointer; width: 22px; height: 22px;
+  border-radius: 50%; font-size: 12px; line-height: 1; display: flex;
+  align-items: center; justify-content: center; color: #fff;
+}
+.galeria-item__btn--x { top: 4px; right: 4px; background: rgba(185,28,28,.9); }
+.galeria-item__btn--estrela { top: 4px; left: 4px; background: rgba(15,23,42,.7); }
+.galeria-item__btn:hover { filter: brightness(1.15); }
+
+/* Editor de enquadramento (cropper) */
+.cropper-frame {
+  position: relative; overflow: hidden; margin: 0 auto; border-radius: 12px;
+  border: 2px solid var(--primaria); background: #0f172a; cursor: grab; touch-action: none;
+}
+.cropper-frame:active { cursor: grabbing; }
+.cropper-frame img { position: absolute; left: 0; top: 0; user-select: none; -webkit-user-drag: none; }
+
+/* Miniaturas no detalhe do produto */
+.det-miniaturas { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; width: 180px; }
+.det-miniaturas img {
+  width: 40px; height: 40px; object-fit: cover; border-radius: 6px; cursor: pointer;
+  border: 2px solid transparent;
+}
+.det-miniaturas img.ativa { border-color: var(--primaria); }

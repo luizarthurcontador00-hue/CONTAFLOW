@@ -242,16 +242,17 @@ window.PaginaProdutos = (function () {
           </div>
         </div>
         <div class="campo col-2">
-          <label>Foto do produto</label>
-          <div class="flex gap-12" style="align-items:center">
-            <div class="foto-preview" id="fp-preview">${p.foto_path ? `<img src="/uploads/produtos/${encodeURIComponent(p.foto_path)}">` : '📷'}</div>
-            <div>
-              <input type="file" name="foto" id="fp-foto" accept="image/*" />
-              ${p.foto_path ? '<div class="mt-16"><label class="dica"><input type="checkbox" id="fp-remover"> Remover foto atual</label></div>' : ''}
-            </div>
-          </div>
+          <label>Fotos do produto <span class="dica">(a 1ª é a principal; dá para ajustar o enquadramento e adicionar várias)</span></label>
+          <div id="fp-galeria" class="galeria-fotos"></div>
+          <input type="file" id="fp-foto" accept="image/*" multiple style="display:none" />
+          <button type="button" class="btn btn--secundario mt-16" id="fp-add-foto">📷 Adicionar foto</button>
         </div>
       </form>`;
+
+    // Galeria: em edicao mexe direto no servidor; em cadastro novo, fica em memoria
+    // ate salvar o produto (quando ganha um id) e entao as fotos sao enviadas.
+    let fotos = ehEdicao && Array.isArray(p.fotos) ? p.fotos.slice() : [];
+    const novasFotos = []; // { blob, url } (apenas no cadastro novo)
 
     let kitItens = []; // { produto_componente_id, nome, custo, quantidade }
 
@@ -304,10 +305,63 @@ window.PaginaProdutos = (function () {
         const selF = el.querySelector('#fp-fornecedor');
         selF.innerHTML = '<option value="">Sem fornecedor</option>' +
           fornecedores.map((f) => `<option value="${f.id}" ${String(p.fornecedor_id) === String(f.id) ? 'selected' : ''}>${UI.escapar(f.nome)}</option>`).join('');
+        // ---------------------------- Galeria de fotos ----------------------------
+        const galeriaEl = el.querySelector('#fp-galeria');
+        function renderGaleria() {
+          const itens = ehEdicao
+            ? fotos.map((f) => `
+                <div class="galeria-item ${f.principal ? 'galeria-item--principal' : ''}">
+                  <img src="/uploads/produtos/${encodeURIComponent(f.arquivo)}" alt="">
+                  ${f.principal ? '<span class="galeria-item__tag">principal</span>' : `<button type="button" class="galeria-item__btn galeria-item__btn--estrela" data-principal="${f.id}" title="Tornar principal">★</button>`}
+                  <button type="button" class="galeria-item__btn galeria-item__btn--x" data-remover="${f.id}" title="Remover">✕</button>
+                </div>`).join('')
+            : novasFotos.map((nf, i) => `
+                <div class="galeria-item ${i === 0 ? 'galeria-item--principal' : ''}">
+                  <img src="${nf.url}" alt="">
+                  ${i === 0 ? '<span class="galeria-item__tag">principal</span>' : `<button type="button" class="galeria-item__btn galeria-item__btn--estrela" data-principal-nova="${i}" title="Tornar principal">★</button>`}
+                  <button type="button" class="galeria-item__btn galeria-item__btn--x" data-remover-nova="${i}" title="Remover">✕</button>
+                </div>`).join('');
+          galeriaEl.innerHTML = itens || '<div class="galeria-vazia">📷 Sem fotos ainda</div>';
+
+          galeriaEl.querySelectorAll('[data-principal]').forEach((b) => b.addEventListener('click', async () => {
+            try { fotos = await API.post(`/api/produtos/${p.id}/fotos/${b.dataset.principal}/principal`, {}); renderGaleria(); }
+            catch (e) { UI.erro(e.message); }
+          }));
+          galeriaEl.querySelectorAll('[data-remover]').forEach((b) => b.addEventListener('click', async () => {
+            try { fotos = await API.del(`/api/produtos/${p.id}/fotos/${b.dataset.remover}`); renderGaleria(); }
+            catch (e) { UI.erro(e.message); }
+          }));
+          galeriaEl.querySelectorAll('[data-principal-nova]').forEach((b) => b.addEventListener('click', () => {
+            const i = Number(b.dataset.principalNova);
+            const [item] = novasFotos.splice(i, 1); novasFotos.unshift(item); renderGaleria();
+          }));
+          galeriaEl.querySelectorAll('[data-remover-nova]').forEach((b) => b.addEventListener('click', () => {
+            const i = Number(b.dataset.removerNova);
+            URL.revokeObjectURL(novasFotos[i].url); novasFotos.splice(i, 1); renderGaleria();
+          }));
+        }
+        renderGaleria();
+
         const foto = el.querySelector('#fp-foto');
-        foto.addEventListener('change', () => {
-          const arq = foto.files[0];
-          if (arq) el.querySelector('#fp-preview').innerHTML = `<img src="${URL.createObjectURL(arq)}">`;
+        el.querySelector('#fp-add-foto').addEventListener('click', () => foto.click());
+        foto.addEventListener('change', async () => {
+          const arquivos = Array.from(foto.files);
+          foto.value = '';
+          for (const arq of arquivos) {
+            const blob = await ajustarFoto(arq); // abre o editor de enquadramento
+            if (!blob) continue;
+            if (ehEdicao) {
+              try {
+                const fd = new FormData();
+                fd.append('fotos', blob, 'foto.jpg');
+                fotos = await enviarMultipart('POST', `/api/produtos/${p.id}/fotos`, fd);
+                renderGaleria();
+              } catch (e) { UI.erro(e.message); }
+            } else {
+              novasFotos.push({ blob, url: URL.createObjectURL(blob) });
+              renderGaleria();
+            }
+          }
         });
 
         // ----- Kit: alternancia de visibilidade e carga da composicao atual -----
@@ -351,9 +405,7 @@ window.PaginaProdutos = (function () {
 
         const fd = new FormData(form);
         fd.set('eh_kit', ehKit ? '1' : '0'); // sempre explicito (checkbox desmarcado nao envia o campo)
-        const remover = el.querySelector('#fp-remover');
-        if (remover && remover.checked) fd.set('remover_foto', '1');
-        if (!el.querySelector('#fp-foto').files.length) fd.delete('foto');
+        fd.delete('foto'); // fotos agora sao gerenciadas pela galeria
 
         try {
           let salvo;
@@ -361,6 +413,14 @@ window.PaginaProdutos = (function () {
             salvo = await enviarMultipart('PUT', `/api/produtos/${produto.id}`, fd);
           } else {
             salvo = await enviarMultipart('POST', '/api/produtos', fd);
+            // Cadastro novo: envia as fotos preparadas para o produto recem-criado.
+            if (novasFotos.length) {
+              const fdFotos = new FormData();
+              novasFotos.forEach((nf) => fdFotos.append('fotos', nf.blob, 'foto.jpg'));
+              try { await enviarMultipart('POST', `/api/produtos/${salvo.id}/fotos`, fdFotos); }
+              catch (e) { UI.erro('Produto salvo, mas houve erro ao enviar as fotos: ' + e.message); }
+              novasFotos.forEach((nf) => URL.revokeObjectURL(nf.url));
+            }
           }
           if (ehKit) {
             await API.put(`/api/produtos/${salvo.id}/composicao`, {
@@ -467,8 +527,13 @@ window.PaginaProdutos = (function () {
     const corpo = `
       ${p.eh_kit ? '<span class="badge badge--muted mb-16" style="display:inline-block">🎁 Kit / Combo</span>' : ''}
       <div class="flex gap-12" style="align-items:flex-start;flex-wrap:wrap">
-        <div class="foto-preview" style="width:180px;height:180px">
-          ${p.foto_path ? `<img src="/uploads/produtos/${encodeURIComponent(p.foto_path)}">` : (p.eh_kit ? '🎁' : '📦')}
+        <div>
+          <div class="foto-preview" id="det-foto" style="width:180px;height:180px">
+            ${p.foto_path ? `<img src="/uploads/produtos/${encodeURIComponent(p.foto_path)}">` : (p.eh_kit ? '🎁' : '📦')}
+          </div>
+          ${p.fotos && p.fotos.length > 1 ? `<div class="det-miniaturas" id="det-miniaturas">
+            ${p.fotos.map((f) => `<img src="/uploads/produtos/${encodeURIComponent(f.arquivo)}" data-foto-src="/uploads/produtos/${encodeURIComponent(f.arquivo)}" class="${f.principal ? 'ativa' : ''}" alt="">`).join('')}
+          </div>` : ''}
         </div>
         <div style="flex:1;min-width:220px">
           <table class="tabela">
@@ -513,6 +578,12 @@ window.PaginaProdutos = (function () {
       corpoHTML: corpo,
       mostrarConfirmar: false,
       aoAbrir: (el) => {
+        const mini = el.querySelector('#det-miniaturas');
+        if (mini) mini.querySelectorAll('[data-foto-src]').forEach((img) => img.addEventListener('click', () => {
+          const grande = el.querySelector('#det-foto');
+          if (grande) grande.innerHTML = `<img src="${img.dataset.fotoSrc}">`;
+          mini.querySelectorAll('img').forEach((x) => x.classList.toggle('ativa', x === img));
+        }));
         const foot = el.querySelector('.modal__foot');
         foot.innerHTML = `
           <button class="btn btn--perigo" data-excluir>Excluir</button>
@@ -898,6 +969,109 @@ window.PaginaProdutos = (function () {
     if (texto) { try { dados = JSON.parse(texto); } catch (_) { dados = texto; } }
     if (!resp.ok) throw new Error((dados && dados.erro) ? dados.erro : 'Erro ao salvar.');
     return dados;
+  }
+
+  /**
+   * Editor de enquadramento (ajuste) da foto: mostra a imagem num quadro,
+   * permite arrastar e dar zoom, e devolve um Blob JPEG quadrado (ou null se
+   * o usuario cancelar).
+   */
+  function ajustarFoto(file) {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      const F = 300; // tamanho do quadro na tela (px)
+      const O = 640; // tamanho da imagem final (px)
+      let escala = 1; let baseEscala = 1; let tx = 0; let ty = 0; let natW = 0; let natH = 0;
+      let concluido = false;
+
+      const fechar = Modal.abrir({
+        titulo: 'Ajustar foto', tamanho: 'modal--pequeno',
+        corpoHTML: `
+          <p class="dica" style="margin-top:0">Arraste a imagem e use o zoom para enquadrar. A área dentro do quadro será salva.</p>
+          <div class="cropper-frame" id="cr-frame" style="width:${F}px;height:${F}px">
+            <img id="cr-img" src="${url}" draggable="false" alt="">
+          </div>
+          <div class="campo mt-16"><label>Zoom</label><input id="cr-zoom" type="range" min="1" max="4" step="0.01" value="1" style="width:100%"></div>`,
+        textoConfirmar: 'Usar foto',
+        aoAbrir: (el) => {
+          const img = el.querySelector('#cr-img');
+          const frame = el.querySelector('#cr-frame');
+          const zoom = el.querySelector('#cr-zoom');
+          function clamp() {
+            const w = natW * escala; const h = natH * escala;
+            tx = Math.min(0, Math.max(F - w, tx));
+            ty = Math.min(0, Math.max(F - h, ty));
+          }
+          function aplicar() {
+            img.style.width = (natW * escala) + 'px';
+            img.style.height = (natH * escala) + 'px';
+            img.style.left = tx + 'px';
+            img.style.top = ty + 'px';
+          }
+          function init() {
+            natW = img.naturalWidth; natH = img.naturalHeight;
+            baseEscala = Math.max(F / natW, F / natH);
+            escala = baseEscala;
+            tx = (F - natW * escala) / 2; ty = (F - natH * escala) / 2;
+            clamp(); aplicar();
+          }
+          if (img.complete && img.naturalWidth) init(); else img.onload = init;
+          zoom.addEventListener('input', () => { escala = baseEscala * Number(zoom.value); clamp(); aplicar(); });
+
+          let arrastando = false; let px = 0; let py = 0;
+          const ponto = (e) => (e.touches ? e.touches[0] : e);
+          const down = (e) => { arrastando = true; const pt = ponto(e); px = pt.clientX; py = pt.clientY; };
+          const move = (e) => {
+            if (!arrastando) return;
+            const pt = ponto(e); tx += pt.clientX - px; ty += pt.clientY - py; px = pt.clientX; py = pt.clientY;
+            clamp(); aplicar(); if (e.cancelable) e.preventDefault();
+          };
+          const up = () => { arrastando = false; };
+          frame.addEventListener('mousedown', down);
+          frame.addEventListener('touchstart', down, { passive: true });
+          window.addEventListener('mousemove', move);
+          frame.addEventListener('touchmove', move, { passive: false });
+          window.addEventListener('mouseup', up);
+          frame.addEventListener('touchend', up);
+          el._exportar = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = O; canvas.height = O;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, O, O);
+            const r = O / F;
+            ctx.drawImage(img, tx * r, ty * r, natW * escala * r, natH * escala * r);
+            return new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.9));
+          };
+          el._limpar = () => {
+            window.removeEventListener('mousemove', move);
+            window.removeEventListener('mouseup', up);
+          };
+          // Cancelar / fechar sem confirmar -> resolve(null).
+          el.querySelectorAll('[data-fechar]').forEach((b) => b.addEventListener('click', () => {
+            if (!concluido) { concluido = true; el._limpar(); URL.revokeObjectURL(url); resolve(null); }
+          }));
+        },
+        aoConfirmar: async (el) => {
+          concluido = true;
+          const blob = await el._exportar();
+          el._limpar();
+          URL.revokeObjectURL(url);
+          resolve(blob);
+        },
+      });
+      // Escape/click-fora fecham o overlay sem passar pelos handlers acima:
+      // garante o resolve(null) observando a remocao do modal.
+      const overlay = document.querySelector('.modal-overlay:last-child');
+      if (overlay) {
+        const obs = new MutationObserver(() => {
+          if (!document.body.contains(overlay) && !concluido) {
+            concluido = true; URL.revokeObjectURL(url); resolve(null); obs.disconnect();
+          }
+        });
+        obs.observe(document.body, { childList: true });
+      }
+      void fechar;
+    });
   }
 
   function debounce(fn, ms) {
