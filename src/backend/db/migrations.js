@@ -491,6 +491,58 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 11,
+    name: 'ordens-servico-e-orcamentos',
+    up(db) {
+      db.exec(`
+        -- Ordens de servico e orcamentos (mesma estrutura, campo tipo).
+        --  tipo 'os'        -> status: aberta|em_andamento|concluida|entregue|cancelada
+        --  tipo 'orcamento' -> status: aberto|aprovado|recusado|expirado|cancelada
+        CREATE TABLE IF NOT EXISTS ordens_servico (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          tipo           TEXT NOT NULL DEFAULT 'os',
+          numero         INTEGER NOT NULL,
+          cliente_id     INTEGER REFERENCES clientes(id) ON DELETE SET NULL,
+          status         TEXT NOT NULL DEFAULT 'aberta',
+          -- Dados do equipamento/objeto (OS de oficina/assistencia tecnica).
+          equipamento    TEXT,
+          marca_modelo   TEXT,
+          identificacao  TEXT,          -- serie/placa/patrimonio
+          defeito        TEXT,          -- defeito relatado / escopo do servico
+          laudo          TEXT,          -- diagnostico/solucao
+          responsavel    TEXT,          -- tecnico responsavel (texto livre)
+          observacao     TEXT,
+          desconto       REAL NOT NULL DEFAULT 0,
+          valor_total    REAL NOT NULL DEFAULT 0,
+          garantia_dias  INTEGER NOT NULL DEFAULT 0,
+          validade       TEXT,          -- validade do orcamento (data)
+          data_previsao  TEXT,
+          data_conclusao TEXT,
+          data_entrega   TEXT,
+          venda_id       INTEGER REFERENCES vendas(id) ON DELETE SET NULL,
+          criado_em      TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+          atualizado_em  TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_os_tipo ON ordens_servico(tipo);
+        CREATE INDEX IF NOT EXISTS idx_os_status ON ordens_servico(status);
+        CREATE INDEX IF NOT EXISTS idx_os_cliente ON ordens_servico(cliente_id);
+
+        CREATE TABLE IF NOT EXISTS ordens_servico_itens (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          os_id          INTEGER NOT NULL REFERENCES ordens_servico(id) ON DELETE CASCADE,
+          produto_id     INTEGER REFERENCES produtos(id) ON DELETE SET NULL,
+          tipo           TEXT NOT NULL DEFAULT 'produto',  -- produto | servico | livre
+          descricao      TEXT NOT NULL,
+          quantidade     REAL NOT NULL DEFAULT 1,
+          preco_unitario REAL NOT NULL DEFAULT 0,
+          custo_unitario REAL NOT NULL DEFAULT 0,
+          valor_total    REAL NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_os_itens_os ON ordens_servico_itens(os_id);
+      `);
+    },
+  },
 ];
 
 /**
