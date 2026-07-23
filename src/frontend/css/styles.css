@@ -398,3 +398,15 @@ kbd { background: #f1f5f9; border: 1px solid #cbd5e1; border-bottom-width: 2px; 
 /* ===================== DRE ===================== */
 .dre-tabela td { padding: 7px 4px; }
 .dre-tabela tr.dre-forte td { font-weight: 700; border-top: 1px solid var(--borda); }
+
+/* ===================== Onboarding (perfil do negócio) ===================== */
+.ob-perfil { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.ob-opcao {
+  display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
+  text-align: left; padding: 14px; border: 2px solid var(--borda);
+  border-radius: 12px; background: #fff; cursor: pointer;
+}
+.ob-opcao:hover { border-color: var(--primaria); }
+.ob-opcao.ativa { border-color: var(--primaria); box-shadow: 0 0 0 2px var(--primaria); background: #eff6ff; }
+.ob-opcao__ic { font-size: 26px; }
+@media (max-width: 640px) { .ob-perfil { grid-template-columns: 1fr; } }

@@ -477,6 +477,20 @@ const migrations = [
         .run();
     },
   },
+  {
+    version: 10,
+    name: 'servicos',
+    up(db) {
+      db.exec(`
+        -- Serviços: reaproveitam a tabela de produtos, mas nao controlam
+        -- estoque. eh_servico=1 marca o item como servico (ex.: corte de
+        -- cabelo, mao de obra, consultoria). duracao_min = duracao estimada.
+        ALTER TABLE produtos ADD COLUMN eh_servico INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE produtos ADD COLUMN duracao_min INTEGER;
+        CREATE INDEX IF NOT EXISTS idx_produtos_eh_servico ON produtos(eh_servico);
+      `);
+    },
+  },
 ];
 
 /**

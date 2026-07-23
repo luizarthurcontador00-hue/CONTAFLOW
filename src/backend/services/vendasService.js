@@ -103,7 +103,10 @@ function criarVenda(dados) {
     for (const i of itensCalc) {
       insItem.run(venda_id, i.prod.id, i.prod.nome, i.qtd, i.preco, i.custo, i.descItem, i.totalItem);
 
-      if (i.prod.eh_kit) {
+      if (i.prod.eh_servico) {
+        // Servico: nao movimenta estoque (nao ha mercadoria).
+        // (a receita/CMV entram no financeiro/DRE normalmente)
+      } else if (i.prod.eh_kit) {
         // Kit: nao tem estoque proprio - baixa os componentes que o compoem.
         const componentes = db.prepare('SELECT * FROM produtos_composicao WHERE produto_kit_id = ?').all(i.prod.id);
         for (const comp of componentes) {

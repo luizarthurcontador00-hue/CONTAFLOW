@@ -14,6 +14,13 @@ window.PaginaConfiguracoes = (function () {
         <h3 style="margin-top:0">Dados da loja</h3>
         <p class="dica">Aparecem no cupom de venda e nos relatórios impressos.</p>
         <form id="form-cfg" class="form-grid">
+          <div class="campo col-2"><label>Tipo de atividade</label>
+            <select name="perfil_negocio">
+              <option value="comercio" ${cfg.perfil_negocio === 'comercio' ? 'selected' : ''}>Comércio (produtos, estoque)</option>
+              <option value="servico" ${cfg.perfil_negocio === 'servico' ? 'selected' : ''}>Serviço (prestação de serviços)</option>
+              <option value="ambos" ${(cfg.perfil_negocio || 'ambos') === 'ambos' ? 'selected' : ''}>Comércio e Serviço</option>
+            </select>
+            <span class="dica">Define quais módulos aparecem no menu. Recarrega o menu ao salvar.</span></div>
           <div class="campo col-2"><label>Nome da loja</label><input name="nome_loja" value="${UI.escapar(cfg.nome_loja || '')}" /></div>
           <div class="campo"><label>Telefone</label><input name="loja_telefone" value="${UI.escapar(cfg.loja_telefone || '')}" /></div>
           <div class="campo"><label>CNPJ / CPF</label><input name="loja_cnpj" value="${UI.escapar(cfg.loja_cnpj || '')}" /></div>
@@ -39,8 +46,11 @@ window.PaginaConfiguracoes = (function () {
       const body = Object.fromEntries(new FormData(ev.target).entries());
       // Checkbox nao marcado nao entra no FormData: normaliza para '0'/'1'.
       body.gerar_codigo_auto = ev.target.querySelector('#cfg-cod-auto').checked ? '1' : '0';
-      try { await API.put('/api/config', body); UI.sucesso('Configurações salvas.'); }
-      catch (e) { UI.erro(e.message); }
+      try {
+        await API.put('/api/config', body);
+        UI.sucesso('Configurações salvas.');
+        if (window.__recarregarPerfil) await window.__recarregarPerfil();
+      } catch (e) { UI.erro(e.message); }
     });
   }
 

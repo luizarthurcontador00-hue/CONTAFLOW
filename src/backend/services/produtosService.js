@@ -15,10 +15,14 @@ const SELECT_BASE = `
   LEFT JOIN fornecedores f ON f.id = p.fornecedor_id
 `;
 
-function listar({ busca, categoria_id, estoque_baixo, incluir_inativos } = {}) {
+function listar({ busca, categoria_id, estoque_baixo, incluir_inativos, eh_servico } = {}) {
   const db = getDb();
   const where = [];
   const params = {};
+
+  // Por padrao lista produtos (eh_servico=0); a pagina de Servicos passa eh_servico=1.
+  if (eh_servico === '1' || eh_servico === 1 || eh_servico === true) where.push('p.eh_servico = 1');
+  else where.push('p.eh_servico = 0');
 
   if (!incluir_inativos) where.push('p.ativo = 1');
   if (busca) {
@@ -148,19 +152,23 @@ function normalizar(dados) {
     }
   }
 
+  const ehServico = (dados.eh_servico === true || dados.eh_servico === 1 || dados.eh_servico === '1' || dados.eh_servico === 'on') ? 1 : 0;
+
   return {
     nome: (dados.nome || '').trim(),
     descricao: dados.descricao || null,
     codigo_barras: dados.codigo_barras ? String(dados.codigo_barras).trim() : null,
     categoria_id: dados.categoria_id ? Number(dados.categoria_id) : null,
     fornecedor_id: dados.fornecedor_id ? Number(dados.fornecedor_id) : null,
-    unidade: (dados.unidade || 'UN').trim().toUpperCase(),
+    unidade: ehServico ? 'SERV' : (dados.unidade || 'UN').trim().toUpperCase(),
     custo,
     markup: dados.markup != null && dados.markup !== '' ? Number(dados.markup) : null,
     preco_venda,
-    estoque_minimo: Number(dados.estoque_minimo || 0),
+    estoque_minimo: ehServico ? 0 : Number(dados.estoque_minimo || 0),
     // Aceita boolean real (lote) ou string vinda de formulario ('1'/'on'/'0'/'false').
     eh_kit: (dados.eh_kit === true || dados.eh_kit === '1' || dados.eh_kit === 'on') ? 1 : 0,
+    eh_servico: ehServico,
+    duracao_min: dados.duracao_min != null && dados.duracao_min !== '' ? Number(dados.duracao_min) : null,
     grupo_variacao: dados.grupo_variacao ? String(dados.grupo_variacao).trim() || null : null,
     variacao: dados.variacao ? String(dados.variacao).trim() || null : null,
   };
@@ -171,8 +179,8 @@ function criar(dados) {
   const d = normalizar(dados);
   if (!d.nome) throw new AppError('O nome do produto e obrigatorio.');
 
-  // Kits nao tem estoque proprio: e sempre controlado pelos componentes.
-  const estoqueInicial = d.eh_kit ? 0 : Number(dados.estoque_atual || 0);
+  // Kits e servicos nao tem estoque proprio.
+  const estoqueInicial = (d.eh_kit || d.eh_servico) ? 0 : Number(dados.estoque_atual || 0);
 
   const tx = db.transaction(() => {
     const info = db
@@ -180,11 +188,11 @@ function criar(dados) {
         `INSERT INTO produtos
           (nome, descricao, codigo_barras, categoria_id, fornecedor_id, unidade,
            custo, markup, preco_venda, estoque_atual, estoque_minimo, foto_path,
-           eh_kit, grupo_variacao, variacao)
+           eh_kit, eh_servico, duracao_min, grupo_variacao, variacao)
          VALUES
           (@nome, @descricao, @codigo_barras, @categoria_id, @fornecedor_id, @unidade,
            @custo, @markup, @preco_venda, 0, @estoque_minimo, @foto_path,
-           @eh_kit, @grupo_variacao, @variacao)`
+           @eh_kit, @eh_servico, @duracao_min, @grupo_variacao, @variacao)`
       )
       .run({ ...d, foto_path: dados.foto_path || null });
 
@@ -229,7 +237,8 @@ function atualizar(id, dados) {
        categoria_id=@categoria_id, fornecedor_id=@fornecedor_id, unidade=@unidade,
        custo=@custo, markup=@markup, preco_venda=@preco_venda,
        estoque_minimo=@estoque_minimo, foto_path=@foto_path,
-       eh_kit=@eh_kit, grupo_variacao=@grupo_variacao, variacao=@variacao,
+       eh_kit=@eh_kit, eh_servico=@eh_servico, duracao_min=@duracao_min,
+       grupo_variacao=@grupo_variacao, variacao=@variacao,
        atualizado_em=datetime('now','localtime')
      WHERE id=@id`
   ).run({ ...d, foto_path, id });
