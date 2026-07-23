@@ -442,6 +442,41 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 9,
+    name: 'dre-categorias-despesa',
+    up(db) {
+      db.exec(`
+        -- Categorias de despesa (para o DRE). Categorias com considera_dre=0
+        -- (ex.: compra de mercadoria) ficam de fora das despesas operacionais
+        -- do DRE, pois entram no resultado via CMV quando o item e vendido.
+        CREATE TABLE IF NOT EXISTS categorias_despesa (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          nome          TEXT NOT NULL,
+          considera_dre INTEGER NOT NULL DEFAULT 1,
+          ordem         INTEGER NOT NULL DEFAULT 0,
+          criado_em     TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        ALTER TABLE contas_pagar ADD COLUMN categoria_despesa_id INTEGER REFERENCES categorias_despesa(id) ON DELETE SET NULL;
+      `);
+
+      const ins = db.prepare('INSERT INTO categorias_despesa (nome, considera_dre, ordem) VALUES (?, ?, ?)');
+      const operacionais = [
+        'Aluguel', 'Água / Luz / Internet', 'Salários e encargos', 'Pró-labore',
+        'Impostos e taxas', 'Marketing e propaganda', 'Manutenção', 'Frete / Logística',
+        'Despesas administrativas', 'Outras despesas',
+      ];
+      operacionais.forEach((n, i) => ins.run(n, 1, i));
+      // Categoria especial: compra de mercadoria (fora do DRE — vira CMV na venda).
+      const idCompras = ins.run('Compra de mercadoria', 0, operacionais.length).lastInsertRowid;
+
+      db.prepare("INSERT INTO config (chave, valor) VALUES ('categoria_compras_id', ?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor")
+        .run(String(idCompras));
+      // Gerar codigo de barras interno automaticamente ao importar produtos.
+      db.prepare("INSERT INTO config (chave, valor) VALUES ('gerar_codigo_auto', '1') ON CONFLICT(chave) DO NOTHING")
+        .run();
+    },
+  },
 ];
 
 /**

@@ -530,6 +530,13 @@ function salvarComposicao(kitId, itens) {
 
 // ----------------------------- Cadastro em lote -----------------------------
 
+/** Le a config que liga a geracao automatica de codigo de barras na importacao. */
+function codigoAutoLigado(db) {
+  const row = db.prepare("SELECT valor FROM config WHERE chave = 'gerar_codigo_auto'").get();
+  // Padrao ligado quando a chave nao existe.
+  return !row || row.valor == null ? true : String(row.valor) === '1';
+}
+
 function acharOuCriarCategoria(db, nome) {
   const limpo = (nome || '').toString().trim();
   if (!limpo) return null;
@@ -567,7 +574,12 @@ function criarLote(linhas) {
       const dados = { ...linha, _semPrecoAuto: true };
       if (linha.categoria) dados.categoria_id = acharOuCriarCategoria(db, linha.categoria);
       if (linha.fornecedor) dados.fornecedor_id = acharOuCriarFornecedor(db, linha.fornecedor);
-      const produto = criar(dados);
+      let produto = criar(dados);
+      // Gera codigo de barras interno automaticamente (se ligado nas Config).
+      if (codigoAutoLigado(db) && !(produto.codigo_barras && String(produto.codigo_barras).replace(/\D/g, '').length === 13)) {
+        garantirCodigoBarras(produto.id);
+        produto = obter(produto.id);
+      }
       return { linha: idx + 1, sucesso: true, produto };
     } catch (e) {
       return { linha: idx + 1, sucesso: false, nome: linha.nome || null, erro: (e && e.message) || 'Erro desconhecido.' };
@@ -626,4 +638,6 @@ module.exports = {
   adicionarFotos,
   definirFotoPrincipal,
   removerFoto,
+  garantirCodigoBarras,
+  codigoAutoLigado,
 };

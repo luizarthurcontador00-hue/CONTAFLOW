@@ -371,6 +371,24 @@ function importarProdutos(itens, rotulo) {
   return { criadas: itens.length, lote: rotulo };
 }
 
+/**
+ * Adiciona um produto ja cadastrado a planilha de precificacao (grupo avulsos),
+ * vinculado, para permitir "buscar produto" e precificar sob demanda.
+ */
+function adicionarProdutoExistente(produtoId) {
+  const db = getDb();
+  const prod = db.prepare('SELECT id, nome, codigo_barras, custo FROM produtos WHERE id = ?').get(produtoId);
+  if (!prod) throw new AppError('Produto nao encontrado.', 404);
+  const jaTem = db.prepare('SELECT id FROM precificacao_produtos WHERE produto_id = ? AND lote IS NULL').get(produtoId);
+  if (jaTem) return { ja_existe: true, estado: calcularTudo() };
+  const ordem = db.prepare('SELECT COALESCE(MAX(ordem),0)+1 o FROM precificacao_produtos').get().o;
+  db.prepare(`
+    INSERT INTO precificacao_produtos (produto_id, referencia, descricao, quantidade, valor_pedido, ordem)
+    VALUES (?, ?, ?, 1, ?, ?)
+  `).run(prod.id, prod.codigo_barras || null, prod.nome, Number(prod.custo || 0), ordem);
+  return { ok: true, estado: calcularTudo() };
+}
+
 /** Grava o preco sugerido de uma linha no produto real vinculado. */
 function aplicarPreco(id) {
   const db = getDb();
@@ -421,5 +439,5 @@ module.exports = {
   salvarConfig,
   criarDespesa, atualizarDespesa, excluirDespesa,
   criarProduto, atualizarProduto, excluirProduto,
-  importarProdutos, aplicarPreco, aplicarPrecoLote, excluirLote,
+  importarProdutos, adicionarProdutoExistente, aplicarPreco, aplicarPrecoLote, excluirLote,
 };

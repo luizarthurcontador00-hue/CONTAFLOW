@@ -18,6 +18,7 @@ router.put('/despesa/:id', asyncHandler((req, res) => res.json(svc.atualizarDesp
 router.delete('/despesa/:id', asyncHandler((req, res) => res.json(svc.excluirDespesa(req.params.id))));
 
 // Modulo 5 - produtos de precificacao
+router.post('/produto-existente', asyncHandler((req, res) => res.status(201).json(svc.adicionarProdutoExistente(req.body && req.body.produto_id))));
 router.post('/produto', asyncHandler((req, res) => res.status(201).json(svc.criarProduto(req.body || {}))));
 router.put('/produto/:id', asyncHandler((req, res) => res.json(svc.atualizarProduto(req.params.id, req.body || {}))));
 router.delete('/produto/:id', asyncHandler((req, res) => res.json(svc.excluirProduto(req.params.id))));

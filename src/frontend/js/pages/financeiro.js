@@ -9,6 +9,7 @@
 window.PaginaFinanceiro = (function () {
   let fornecedores = [];
   let contasFin = [];
+  let categoriasDespesa = [];
   let abaAtual = 'pagar';
   const FORMAS = { dinheiro: 'Dinheiro', cartao_credito: 'Cartão crédito', cartao_debito: 'Cartão débito', pix: 'PIX', prazo: 'A prazo', boleto: 'Boleto', transferencia: 'Transferência' };
   // Formas que alimentam um saldo (a prazo nao entra em conta na hora).
@@ -36,7 +37,10 @@ window.PaginaFinanceiro = (function () {
   }
 
   async function render(container) {
-    fornecedores = await API.get('/api/fornecedores').catch(() => []);
+    [fornecedores, categoriasDespesa] = await Promise.all([
+      API.get('/api/fornecedores').catch(() => []),
+      API.get('/api/financeiro/categorias-despesa').catch(() => []),
+    ]);
     container.innerHTML = `
       <div id="fin-alertas" class="mb-16"></div>
       <div class="tabs">
@@ -44,6 +48,7 @@ window.PaginaFinanceiro = (function () {
         <div class="tab" data-aba="fixas">Contas Fixas</div>
         <div class="tab" data-aba="receber">A Receber</div>
         <div class="tab" data-aba="fluxo">Fluxo de Caixa</div>
+        <div class="tab" data-aba="dre">DRE</div>
       </div>
       <div id="fin-conteudo"></div>`;
 
@@ -74,6 +79,7 @@ window.PaginaFinanceiro = (function () {
     if (abaAtual === 'pagar') renderPagar();
     else if (abaAtual === 'fixas') renderContasFixas();
     else if (abaAtual === 'receber') renderReceber();
+    else if (abaAtual === 'dre') renderDRE();
     else renderFluxo();
   }
 
@@ -152,18 +158,22 @@ window.PaginaFinanceiro = (function () {
       titulo: 'Nova conta a pagar', tamanho: 'modal--pequeno',
       corpoHTML: `
         <div class="campo"><label>Descrição *</label><input id="cp-desc" /></div>
-        <div class="campo mt-16"><label>Fornecedor</label><select id="cp-forn"><option value="">—</option>${fornecedores.map((f) => `<option value="${f.id}">${UI.escapar(f.nome)}</option>`).join('')}</select></div>
+        <div class="form-grid mt-16">
+          <div class="campo"><label>Fornecedor</label><select id="cp-forn"><option value="">—</option>${fornecedores.map((f) => `<option value="${f.id}">${UI.escapar(f.nome)}</option>`).join('')}</select></div>
+          <div class="campo"><label>Categoria (DRE)</label><select id="cp-cat"><option value="">— sem categoria —</option>${categoriasDespesa.map((c) => `<option value="${c.id}">${UI.escapar(c.nome)}${c.considera_dre ? '' : ' (fora do DRE)'}</option>`).join('')}</select></div>
+        </div>
         <div class="campo mt-16"><label>Valor total (R$) *</label><input id="cp-valor" type="number" step="0.01" min="0" /></div>
         <div class="form-grid mt-16">
           <div class="campo"><label>Parcelas</label><input id="cp-parc" type="number" min="1" value="1" /></div>
           <div class="campo"><label>1º vencimento</label><input id="cp-venc" type="date" value="${new Date().toISOString().slice(0, 10)}" /></div>
         </div>
-        <div class="dica mt-16">Com mais de uma parcela, o valor é dividido e cada parcela vence a cada mês (uma conta por parcela).</div>`,
+        <div class="dica mt-16">A categoria organiza a conta no DRE. Com mais de uma parcela, o valor é dividido e cada parcela vence a cada mês (uma conta por parcela).</div>`,
       textoConfirmar: 'Salvar',
       aoConfirmar: async (el) => {
         try {
           const r = await API.post('/api/financeiro/contas-pagar', {
             descricao: el.querySelector('#cp-desc').value, fornecedor_id: el.querySelector('#cp-forn').value || null,
+            categoria_despesa_id: el.querySelector('#cp-cat').value || null,
             valor: el.querySelector('#cp-valor').value, parcelas: el.querySelector('#cp-parc').value,
             primeiro_vencimento: el.querySelector('#cp-venc').value || null,
           });
@@ -314,7 +324,7 @@ window.PaginaFinanceiro = (function () {
         const quitada = c.status === 'pago' || c.status === 'recebido';
         const ehVista = c.tipo === 'venda_vista';
         return `<tr>
-          <td>${UI.escapar(c.descricao)}${tipo === 'pagar' && c.conta_fixa_id ? ' <span class="badge badge--muted" title="Gerada automaticamente de uma conta fixa">🔁 fixa</span>' : ''}${tipo === 'pagar' && c.total_parcelas > 1 ? ` <span class="badge badge--muted">${c.parcela}/${c.total_parcelas}</span>` : ''}</td>
+          <td>${UI.escapar(c.descricao)}${tipo === 'pagar' && c.conta_fixa_id ? ' <span class="badge badge--muted" title="Gerada automaticamente de uma conta fixa">🔁 fixa</span>' : ''}${tipo === 'pagar' && c.total_parcelas > 1 ? ` <span class="badge badge--muted">${c.parcela}/${c.total_parcelas}</span>` : ''}${tipo === 'pagar' && c.categoria_nome ? `<div class="dica">🏷️ ${UI.escapar(c.categoria_nome)}</div>` : ''}</td>
           ${tipo === 'pagar' ? `<td>${UI.escapar(c.fornecedor_nome || '—')}</td>` : ''}
           <td>${c.vencimento || '—'}</td>
           <td>${UI.moeda(c.valor)}</td>
@@ -535,6 +545,107 @@ window.PaginaFinanceiro = (function () {
         el.querySelectorAll('[data-mapa]').forEach((s) => { novo[s.dataset.mapa] = s.value || null; });
         try { await API.put('/api/financeiro/mapa-contas', novo); UI.sucesso('Configuração salva.'); }
         catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
+  // ------------------------------- DRE -------------------------------
+  const dreFiltro = { mes: mesCorrente() };
+
+  async function renderDRE() {
+    const alvo = document.getElementById('fin-conteudo');
+    alvo.innerHTML = `
+      <div class="barra-ferramentas">
+        <div class="flex gap-12" style="align-items:center">
+          <button class="btn btn--secundario" id="dre-ant">◀</button>
+          <strong style="min-width:150px;text-align:center">${mesLabel(dreFiltro.mes)}</strong>
+          <button class="btn btn--secundario" id="dre-prox">▶</button>
+        </div>
+        <div class="cresce"></div>
+        <button class="btn btn--secundario" id="dre-categorias">🏷️ Categorias de despesa</button>
+      </div>
+      <div id="dre-resultado">Carregando…</div>`;
+    alvo.querySelector('#dre-ant').addEventListener('click', () => { dreFiltro.mes = mudarMes(dreFiltro.mes, -1); renderDRE(); });
+    alvo.querySelector('#dre-prox').addEventListener('click', () => { dreFiltro.mes = mudarMes(dreFiltro.mes, 1); renderDRE(); });
+    alvo.querySelector('#dre-categorias').addEventListener('click', gerenciarCategorias);
+    await carregarDRE();
+  }
+
+  async function carregarDRE() {
+    const alvo = document.getElementById('dre-resultado');
+    const { inicio, fim } = periodoMes(dreFiltro.mes);
+    let d;
+    try { d = await API.get(`/api/financeiro/dre?inicio=${inicio}&fim=${fim}`); }
+    catch (e) { alvo.innerHTML = UI.escapar(e.message); return; }
+
+    const linha = (rotulo, valor, opts = {}) => `
+      <tr class="${opts.forte ? 'dre-forte' : ''}">
+        <td style="padding-left:${opts.recuo ? '24px' : '0'}">${opts.sinal || ''} ${UI.escapar(rotulo)}</td>
+        <td style="text-align:right;color:${opts.cor || 'inherit'}">${UI.moeda(valor)}</td>
+      </tr>`;
+
+    const despesasHTML = d.despesas.length
+      ? d.despesas.map((c) => linha(c.nome, c.total, { recuo: true, sinal: '−', cor: 'var(--perigo)' })).join('')
+      : '<tr><td class="muted" style="padding-left:24px">Nenhuma despesa no período</td><td></td></tr>';
+
+    alvo.innerHTML = `
+      <div class="grid grid--cards mb-16">
+        <div class="card stat"><span class="stat__label">Receita de vendas</span><span class="stat__value" style="color:var(--sucesso)">${UI.moeda(d.receita_bruta)}</span></div>
+        <div class="card stat"><span class="stat__label">Lucro bruto <span class="dica">(margem ${d.margem_bruta_pct}%)</span></span><span class="stat__value">${UI.moeda(d.lucro_bruto)}</span></div>
+        <div class="card stat"><span class="stat__label">Resultado do mês</span><span class="stat__value" style="color:${d.resultado_liquido >= 0 ? 'var(--sucesso)' : 'var(--perigo)'}">${UI.moeda(d.resultado_liquido)}</span></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Demonstração do Resultado — ${mesLabel(dreFiltro.mes)}</h3>
+        <table class="tabela dre-tabela">
+          <tbody>
+            ${linha('Receita de vendas', d.receita_bruta, { sinal: '', cor: 'var(--sucesso)' })}
+            ${linha('(−) CMV — custo da mercadoria vendida', d.cmv, { cor: 'var(--perigo)' })}
+            ${linha('= Lucro bruto', d.lucro_bruto, { forte: true })}
+            <tr><td colspan="2" style="padding-top:12px"><strong>Despesas operacionais</strong></td></tr>
+            ${despesasHTML}
+            ${linha('Total de despesas', d.total_despesas, { forte: true, cor: 'var(--perigo)' })}
+            ${linha('= Resultado líquido do mês', d.resultado_liquido, { forte: true, cor: d.resultado_liquido >= 0 ? 'var(--sucesso)' : 'var(--perigo)' })}
+          </tbody>
+        </table>
+        <p class="dica mt-16">A receita vem das vendas concluídas no mês; o CMV usa o custo dos itens vendidos; as despesas vêm das contas a pagar do mês, agrupadas por categoria. Compras de mercadoria não entram como despesa (elas viram CMV ao vender). Margem líquida: <strong>${d.margem_liquida_pct}%</strong>.</p>
+      </div>`;
+  }
+
+  async function gerenciarCategorias() {
+    const corpo = `
+      <form id="cat-form" class="barra-ferramentas" style="margin-bottom:16px">
+        <input id="cat-nome" class="cresce" placeholder="Nova categoria (ex.: Aluguel, Impostos)" required />
+        <label class="flex gap-12" style="align-items:center;font-size:13px"><input type="checkbox" id="cat-dre" checked> Entra no DRE</label>
+        <button class="btn" type="submit">Adicionar</button>
+      </form>
+      <div id="cat-lista"></div>`;
+    Modal.abrir({
+      titulo: 'Categorias de despesa', tamanho: 'modal--grande', corpoHTML: corpo, mostrarConfirmar: false,
+      aoAbrir: (el) => {
+        const render = () => {
+          el.querySelector('#cat-lista').innerHTML = categoriasDespesa.length ? `<table class="tabela">
+            <thead><tr><th>Categoria</th><th>No DRE?</th><th></th></tr></thead>
+            <tbody>${categoriasDespesa.map((c) => `<tr>
+              <td>${UI.escapar(c.nome)}</td>
+              <td>${c.considera_dre ? '<span class="badge badge--ok">Sim</span>' : '<span class="badge badge--muted">Não (compra/estoque)</span>'}</td>
+              <td style="text-align:right"><button class="btn btn--secundario" data-cat-del="${c.id}">✕</button></td>
+            </tr>`).join('')}</tbody></table>` : '<p class="muted">Nenhuma categoria.</p>';
+          el.querySelectorAll('[data-cat-del]').forEach((b) => b.addEventListener('click', async () => {
+            const ok = await UI.confirmar('Excluir esta categoria? As contas já lançadas ficam sem categoria.', { titulo: 'Excluir categoria', textoConfirmar: 'Excluir' });
+            if (!ok) return;
+            try { await API.del(`/api/financeiro/categorias-despesa/${b.dataset.catDel}`); categoriasDespesa = await API.get('/api/financeiro/categorias-despesa'); render(); UI.sucesso('Categoria excluída.'); }
+            catch (e) { UI.erro(e.message); }
+          }));
+        };
+        render();
+        el.querySelector('#cat-form').addEventListener('submit', async (ev) => {
+          ev.preventDefault();
+          try {
+            await API.post('/api/financeiro/categorias-despesa', { nome: el.querySelector('#cat-nome').value, considera_dre: el.querySelector('#cat-dre').checked });
+            categoriasDespesa = await API.get('/api/financeiro/categorias-despesa');
+            el.querySelector('#cat-nome').value = ''; render(); UI.sucesso('Categoria adicionada.');
+          } catch (e) { UI.erro(e.message); }
+        });
       },
     });
   }

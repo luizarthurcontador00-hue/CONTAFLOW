@@ -23,6 +23,13 @@ window.PaginaConfiguracoes = (function () {
           <div class="campo"><label>Markup padrão (%)</label>
             <input name="markup_padrao" type="number" step="0.01" min="0" value="${cfg.markup_padrao != null ? cfg.markup_padrao : 100}" />
             <span class="dica">Usado no cálculo de preço quando o produto não tem markup próprio.</span></div>
+          <div class="campo col-2" style="border-top:1px solid var(--borda);padding-top:16px">
+            <label class="flex gap-12" style="align-items:center">
+              <input type="checkbox" name="gerar_codigo_auto" id="cfg-cod-auto" ${String(cfg.gerar_codigo_auto ?? '1') === '1' ? 'checked' : ''} />
+              Gerar código de barras automaticamente ao importar produtos
+            </label>
+            <span class="dica">Ao cadastrar em lote ou importar por NF-e, produtos sem código de barras recebem um EAN-13 interno (para etiquetas e leitura no PDV).</span>
+          </div>
           <div class="campo col-2"><button class="btn" type="submit">Salvar configurações</button></div>
         </form>
       </div>`;
@@ -30,6 +37,8 @@ window.PaginaConfiguracoes = (function () {
     container.querySelector('#form-cfg').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const body = Object.fromEntries(new FormData(ev.target).entries());
+      // Checkbox nao marcado nao entra no FormData: normaliza para '0'/'1'.
+      body.gerar_codigo_auto = ev.target.querySelector('#cfg-cod-auto').checked ? '1' : '0';
       try { await API.put('/api/config', body); UI.sucesso('Configurações salvas.'); }
       catch (e) { UI.erro(e.message); }
     });

@@ -158,11 +158,47 @@ function listarPagar({ status, inicio, fim } = {}) {
   if (inicio) { where.push('date(cp.vencimento) >= date(@inicio)'); params.inicio = inicio; }
   if (fim) { where.push('date(cp.vencimento) <= date(@fim)'); params.fim = fim; }
   return db.prepare(`
-    SELECT cp.*, f.nome AS fornecedor_nome
-    FROM contas_pagar cp LEFT JOIN fornecedores f ON f.id = cp.fornecedor_id
+    SELECT cp.*, f.nome AS fornecedor_nome, cd.nome AS categoria_nome
+    FROM contas_pagar cp
+    LEFT JOIN fornecedores f ON f.id = cp.fornecedor_id
+    LEFT JOIN categorias_despesa cd ON cd.id = cp.categoria_despesa_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY (cp.status='pago'), date(cp.vencimento)
   `).all(params);
+}
+
+// ===================== Categorias de despesa (DRE) =====================
+
+function listarCategoriasDespesa() {
+  return getDb().prepare('SELECT * FROM categorias_despesa ORDER BY (considera_dre=0), ordem, id').all();
+}
+
+function criarCategoriaDespesa(dados) {
+  const db = getDb();
+  const nome = (dados.nome || '').trim();
+  if (!nome) throw new AppError('Informe o nome da categoria.');
+  const ordem = db.prepare('SELECT COALESCE(MAX(ordem),-1)+1 o FROM categorias_despesa').get().o;
+  const considera = dados.considera_dre === false || dados.considera_dre === 0 || dados.considera_dre === '0' ? 0 : 1;
+  const info = db.prepare('INSERT INTO categorias_despesa (nome, considera_dre, ordem) VALUES (?, ?, ?)').run(nome, considera, ordem);
+  return db.prepare('SELECT * FROM categorias_despesa WHERE id = ?').get(info.lastInsertRowid);
+}
+
+function atualizarCategoriaDespesa(id, dados) {
+  const db = getDb();
+  const atual = db.prepare('SELECT * FROM categorias_despesa WHERE id = ?').get(id);
+  if (!atual) throw new AppError('Categoria nao encontrada.', 404);
+  const nome = dados.nome !== undefined ? (dados.nome || '').trim() : atual.nome;
+  if (!nome) throw new AppError('Informe o nome da categoria.');
+  const considera = dados.considera_dre !== undefined
+    ? (dados.considera_dre ? 1 : 0) : atual.considera_dre;
+  db.prepare('UPDATE categorias_despesa SET nome=?, considera_dre=? WHERE id=?').run(nome, considera, id);
+  return db.prepare('SELECT * FROM categorias_despesa WHERE id = ?').get(id);
+}
+
+function excluirCategoriaDespesa(id) {
+  // As contas ja lancadas ficam sem categoria (SET NULL), sem perder historico.
+  getDb().prepare('DELETE FROM categorias_despesa WHERE id = ?').run(id);
+  return { ok: true };
 }
 
 /**
@@ -180,10 +216,11 @@ function criarPagar(dados) {
   const parcelas = Math.max(1, Number(dados.parcelas || 1));
   const primeiro = dados.primeiro_vencimento || dados.vencimento || null;
 
+  const categoria = dados.categoria_despesa_id ? Number(dados.categoria_despesa_id) : null;
   const valorParcela = arred(valor / parcelas);
   const ins = db.prepare(
-    `INSERT INTO contas_pagar (fornecedor_id, descricao, valor, vencimento, status, forma_pagamento, parcela, total_parcelas)
-     VALUES (?, ?, ?, ?, 'pendente', ?, ?, ?)`
+    `INSERT INTO contas_pagar (fornecedor_id, descricao, valor, vencimento, status, forma_pagamento, parcela, total_parcelas, categoria_despesa_id)
+     VALUES (?, ?, ?, ?, 'pendente', ?, ?, ?, ?)`
   );
   const tx = db.transaction(() => {
     let acumulado = 0;
@@ -193,7 +230,7 @@ function criarPagar(dados) {
       acumulado = arred(acumulado + v);
       const venc = primeiro ? somarMeses(primeiro, i - 1) : null;
       const desc = parcelas > 1 ? `${descricao} (${i}/${parcelas})` : descricao;
-      ids.push(ins.run(dados.fornecedor_id || null, desc, v, venc, dados.forma_pagamento || null, i, parcelas).lastInsertRowid);
+      ids.push(ins.run(dados.fornecedor_id || null, desc, v, venc, dados.forma_pagamento || null, i, parcelas, categoria).lastInsertRowid);
     }
     return ids;
   });
@@ -487,8 +524,80 @@ function fluxoCaixa({ inicio, fim } = {}) {
   };
 }
 
+// ============================ DRE (resultado) ============================
+
+function primeiroDiaMes() { return new Date().toISOString().slice(0, 8) + '01'; }
+function ultimoDiaMes() {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().slice(0, 10);
+}
+
+/**
+ * Demonstracao do Resultado (DRE) simplificada por periodo (competencia):
+ *   Receita de vendas (vendas concluidas, pelo valor liquido)
+ *   (-) CMV — custo da mercadoria vendida (custo dos itens vendidos)
+ *   = Lucro bruto
+ *   (-) Despesas operacionais (contas a pagar por categoria, no vencimento)
+ *   = Resultado liquido
+ * Categorias marcadas como "fora do DRE" (ex.: compra de mercadoria) nao
+ * entram nas despesas — elas ja aparecem no resultado via CMV, ao vender.
+ */
+function dre({ inicio, fim } = {}) {
+  const db = getDb();
+  const ini = inicio || primeiroDiaMes();
+  const f = fim || ultimoDiaMes();
+
+  const receita = db.prepare(
+    "SELECT COALESCE(SUM(valor_total),0) t FROM vendas WHERE status='concluida' AND date(data) BETWEEN date(?) AND date(?)"
+  ).get(ini, f).t;
+
+  const cmv = db.prepare(`
+    SELECT COALESCE(SUM(vi.custo_unitario * vi.quantidade),0) t
+    FROM vendas_itens vi JOIN vendas v ON v.id = vi.venda_id
+    WHERE v.status='concluida' AND date(v.data) BETWEEN date(?) AND date(?)
+  `).get(ini, f).t;
+
+  const lucroBruto = arred(Number(receita) - Number(cmv));
+
+  // Despesas operacionais por categoria (considera_dre=1), pela competencia
+  // (data de vencimento; se nula, usa a data de criacao).
+  const despesasCat = db.prepare(`
+    SELECT cd.id, cd.nome, COALESCE(SUM(cp.valor),0) total,
+      COALESCE(SUM(CASE WHEN cp.status='pago' THEN cp.valor ELSE 0 END),0) pago
+    FROM categorias_despesa cd
+    LEFT JOIN contas_pagar cp
+      ON cp.categoria_despesa_id = cd.id
+      AND date(COALESCE(cp.vencimento, cp.criado_em)) BETWEEN date(?) AND date(?)
+    WHERE cd.considera_dre = 1
+    GROUP BY cd.id ORDER BY cd.ordem, cd.id
+  `).all(ini, f).filter((c) => Number(c.total) > 0).map((c) => ({ nome: c.nome, total: arred(c.total), pago: arred(c.pago) }));
+
+  const semCategoria = db.prepare(`
+    SELECT COALESCE(SUM(valor),0) t FROM contas_pagar
+    WHERE categoria_despesa_id IS NULL AND date(COALESCE(vencimento, criado_em)) BETWEEN date(?) AND date(?)
+  `).get(ini, f).t;
+  if (Number(semCategoria) > 0) despesasCat.push({ nome: 'Sem categoria', total: arred(semCategoria), pago: 0 });
+
+  const totalDespesas = arred(despesasCat.reduce((s, c) => s + Number(c.total), 0));
+  const resultado = arred(lucroBruto - totalDespesas);
+
+  return {
+    periodo: { inicio: ini, fim: f },
+    receita_bruta: arred(receita),
+    cmv: arred(cmv),
+    lucro_bruto: lucroBruto,
+    margem_bruta_pct: receita > 0 ? arred((lucroBruto / receita) * 100) : 0,
+    despesas: despesasCat,
+    total_despesas: totalDespesas,
+    resultado_liquido: resultado,
+    margem_liquida_pct: receita > 0 ? arred((resultado / receita) * 100) : 0,
+  };
+}
+
 module.exports = {
   listarPagar, criarPagar, baixarPagar, reabrirPagar, excluirPagar,
+  listarCategoriasDespesa, criarCategoriaDespesa, atualizarCategoriaDespesa, excluirCategoriaDespesa,
+  dre,
   listarReceber, criarReceber, baixarReceber, reabrirReceber, excluirReceber,
   alertas, fluxoCaixa,
   listarContasFixas, criarContaFixa, atualizarContaFixa, excluirContaFixa, gerarContasFixasPendentes,

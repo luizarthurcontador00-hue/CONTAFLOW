@@ -12,6 +12,7 @@ window.PrecAvancada = (function () {
   let modulo = 'instrucoes';
   let moduloPendente = null;      // definido por solicitarModulo (ao vir de uma importacao)
   let raizEl = null;
+  let filtroProd = '';             // busca de produto no Modulo 5
   const gruposAbertos = new Set(); // lotes expandidos no Modulo 5
 
   // Permite abrir a planilha ja num modulo especifico (ex.: apos importar).
@@ -253,18 +254,39 @@ window.PrecAvancada = (function () {
   }
 
   // =============================== Módulo 5 ===============================
+  function gruposFiltrados() {
+    const grupos = estado.modulo5_grupos;
+    const termo = filtroProd.trim().toLowerCase();
+    if (!termo) return grupos;
+    return grupos
+      .map((g) => {
+        const itens = g.itens.filter((i) =>
+          (i.descricao || '').toLowerCase().includes(termo) || (i.referencia || '').toLowerCase().includes(termo));
+        return { ...g, itens, qtd: itens.length };
+      })
+      .filter((g) => g.itens.length);
+  }
+
   function htmlPrecificacao() {
     const impPct = estado.modulo2.total_impostos_atual_pct;
-    const grupos = estado.modulo5_grupos;
+    const grupos = gruposFiltrados();
+    const termo = filtroProd.trim();
     return `
       <div class="card mb-16" style="background:#f8fafc">
         <div class="flex flex--between" style="flex-wrap:wrap;gap:8px">
           <span class="dica">Impostos aplicados (do Faturamento): <strong>${pct(impPct)}</strong> · Atividade: <strong>${esc(estado.modulo4[estado.modulo3.atividade].nome)}</strong> (desp. fixa setor ${pct(estado.modulo3.max_desp_fixa_pct)})</span>
-          <button class="btn" id="prec-add">+ Adicionar produto avulso</button>
+          <div class="flex gap-12" style="flex-wrap:wrap">
+            <button class="btn btn--secundario" id="prec-buscar-cad">🔎 Buscar produto do cadastro</button>
+            <button class="btn" id="prec-add">+ Produto avulso</button>
+          </div>
         </div>
-        <p class="dica mt-16" style="margin-bottom:0">Produtos importados (cadastro em lote ou NF-e) aparecem aqui agrupados por importação. Clique em um grupo para preencher e depois use <strong>"Aplicar preços"</strong> para atualizar o preço de venda no cadastro.</p>
+        <div class="barra-ferramentas mt-16" style="margin-bottom:0">
+          <input type="search" id="prec-busca" class="cresce" placeholder="🔍 Filtrar produtos na planilha por nome ou referência…" value="${esc(filtroProd)}" />
+          ${termo ? `<button class="btn btn--secundario" id="prec-busca-limpar">Limpar</button>` : ''}
+        </div>
+        <p class="dica mt-16" style="margin-bottom:0">Produtos importados (cadastro em lote ou NF-e) aparecem agrupados por importação. Você também pode <strong>buscar um produto do cadastro</strong> para precificar sob demanda. Depois use <strong>"Aplicar preços"</strong> para atualizar o preço de venda.</p>
       </div>
-      ${grupos.length ? grupos.map(htmlGrupo).join('') : '<div class="card vazio">Nenhum produto na planilha. Importe produtos (cadastro em lote ou NF-e) ou adicione um produto avulso.</div>'}
+      ${grupos.length ? grupos.map(htmlGrupo).join('') : `<div class="card vazio">${termo ? 'Nenhum produto encontrado para “' + esc(termo) + '”.' : 'Nenhum produto na planilha. Importe produtos (cadastro em lote ou NF-e), busque um produto do cadastro ou adicione um avulso.'}</div>`}
       <div class="mt-16 flex gap-12" style="flex-wrap:wrap">
         <span class="prec-legenda"><span class="amostra" style="background:#dcfce7"></span> Verde = automático</span>
         <span class="prec-legenda">⭐ Preço de venda sugerido pelo markup divisor</span>
@@ -274,7 +296,8 @@ window.PrecAvancada = (function () {
 
   function htmlGrupo(g) {
     const chave = g.lote || '__avulsos__';
-    const aberto = gruposAbertos.has(chave);
+    // Ao filtrar, todos os grupos com resultado ficam abertos.
+    const aberto = !!filtroProd.trim() || gruposAbertos.has(chave);
     const dataTxt = g.lote_data ? UI.dataHora(g.lote_data) : '';
     return `
       <div class="card mb-16" data-grupo="${esc(chave)}">
@@ -334,6 +357,19 @@ window.PrecAvancada = (function () {
     alvo.querySelector('#prec-add').addEventListener('click', async () => {
       try { const r = await API.post('/api/precificacao-avancada/produto', {}); gruposAbertos.add('__avulsos__'); await recarregar(r); } catch (e) { UI.erro(e.message); }
     });
+    // Filtro de produtos na planilha (mantem o foco enquanto digita).
+    const busca = alvo.querySelector('#prec-busca');
+    if (busca) {
+      let t;
+      busca.addEventListener('input', () => {
+        clearTimeout(t);
+        t = setTimeout(() => { filtroProd = busca.value; renderModulo(); const b2 = raizEl.querySelector('#prec-busca'); if (b2) { b2.focus(); b2.setSelectionRange(b2.value.length, b2.value.length); } }, 200);
+      });
+    }
+    const limpar = alvo.querySelector('#prec-busca-limpar');
+    if (limpar) limpar.addEventListener('click', () => { filtroProd = ''; renderModulo(); });
+    // Buscar um produto ja cadastrado e adicionar a planilha (avulsos).
+    alvo.querySelector('#prec-buscar-cad').addEventListener('click', buscarProdutoCadastro);
     // Expandir/recolher grupos
     alvo.querySelectorAll('[data-toggle]').forEach((h) => h.addEventListener('click', () => {
       const chave = h.dataset.toggle;
@@ -372,6 +408,43 @@ window.PrecAvancada = (function () {
       if (del) del.addEventListener('click', async () => {
         try { await recarregar(await API.del('/api/precificacao-avancada/produto/' + del.dataset.ppDel)); } catch (e) { UI.erro(e.message); }
       });
+    });
+  }
+
+  // Busca um produto do cadastro e o adiciona a planilha (grupo avulsos).
+  function buscarProdutoCadastro() {
+    Modal.abrir({
+      titulo: 'Buscar produto do cadastro', tamanho: 'modal--pequeno', mostrarConfirmar: false,
+      corpoHTML: `
+        <div class="campo"><label>Nome ou código de barras</label>
+          <input id="pbc-termo" placeholder="Digite para buscar…" autocomplete="off" /></div>
+        <div id="pbc-res" class="mt-16"></div>`,
+      aoAbrir: (el) => {
+        const termo = el.querySelector('#pbc-termo');
+        const res = el.querySelector('#pbc-res');
+        let t;
+        termo.addEventListener('input', () => {
+          clearTimeout(t);
+          t = setTimeout(async () => {
+            const q = termo.value.trim();
+            if (!q) { res.innerHTML = ''; return; }
+            const achados = await API.get('/api/vendas/buscar-produto?termo=' + encodeURIComponent(q)).catch(() => []);
+            if (!achados.length) { res.innerHTML = '<div class="dica">Nenhum produto encontrado.</div>'; return; }
+            res.innerHTML = `<div class="pdv-resultados">${achados.map((c) => `
+              <button type="button" data-add="${c.id}">${esc(c.nome)} <span class="muted">— custo ${moeda(c.custo)}${c.codigo_barras ? ' · ' + esc(c.codigo_barras) : ''}</span></button>`).join('')}</div>`;
+            res.querySelectorAll('[data-add]').forEach((b) => b.addEventListener('click', async () => {
+              try {
+                const r = await API.post('/api/precificacao-avancada/produto-existente', { produto_id: Number(b.dataset.add) });
+                gruposAbertos.add('__avulsos__');
+                await recarregar(r.estado);
+                UI.sucesso(r.ja_existe ? 'Produto já estava na planilha.' : 'Produto adicionado à planilha.');
+                el.remove();
+              } catch (e) { UI.erro(e.message); }
+            }));
+          }, 250);
+        });
+        termo.focus();
+      },
     });
   }
 

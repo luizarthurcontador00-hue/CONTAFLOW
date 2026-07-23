@@ -89,9 +89,17 @@ window.PaginaCompras = (function () {
       }
       return `<tr data-idx="${idx}" data-tipo="novo">
         <td>
-          <span class="badge badge--alerta">Produto novo</span>
+          <span class="badge badge--alerta" data-badge-novo>Produto novo</span>
           <div class="dica">NF: ${UI.escapar(it.descricao)} | EAN: ${UI.escapar(it.ean || '—')}</div>
           <input class="mt-16" style="width:100%" data-campo="nome" value="${UI.escapar(it.descricao)}" placeholder="Nome do produto *" />
+          <div class="mt-16">
+            <button type="button" class="btn btn--secundario" data-link-toggle="${idx}">🔗 Vincular a produto já cadastrado</button>
+            <div data-link-box="${idx}" style="display:none;margin-top:8px">
+              <input data-link-busca="${idx}" placeholder="Buscar produto do cadastro…" style="width:100%" autocomplete="off" />
+              <div data-link-res="${idx}"></div>
+            </div>
+            <div data-link-sel="${idx}"></div>
+          </div>
         </td>
         <td>${UI.numero(it.quantidade)} ${UI.escapar(it.unidade)}</td>
         <td>${UI.moeda(it.valor_unitario)}</td>
@@ -138,6 +146,41 @@ window.PaginaCompras = (function () {
         chk.addEventListener('change', () => {
           el.querySelector('#cp-venc-wrap').style.display = chk.checked ? '' : 'none';
         });
+
+        // Conciliacao manual: vincular um item da nota a um produto ja cadastrado.
+        el.querySelectorAll('[data-link-toggle]').forEach((btn) => {
+          const idx = btn.dataset.linkToggle;
+          const box = el.querySelector(`[data-link-box="${idx}"]`);
+          btn.addEventListener('click', () => { box.style.display = box.style.display === 'none' ? '' : 'none'; });
+        });
+        el.querySelectorAll('[data-link-busca]').forEach((inp) => {
+          const idx = inp.dataset.linkBusca;
+          const res = el.querySelector(`[data-link-res="${idx}"]`);
+          let t;
+          inp.addEventListener('input', () => {
+            clearTimeout(t);
+            t = setTimeout(async () => {
+              const q = inp.value.trim();
+              if (!q) { res.innerHTML = ''; return; }
+              const achados = await API.get('/api/vendas/buscar-produto?termo=' + encodeURIComponent(q)).catch(() => []);
+              if (!achados.length) { res.innerHTML = '<div class="dica">Nenhum produto encontrado.</div>'; return; }
+              res.innerHTML = `<div class="pdv-resultados">${achados.map((c) => `<button type="button" data-pick="${c.id}" data-nome="${UI.escapar(c.nome)}">${UI.escapar(c.nome)}${c.codigo_barras ? ` <span class="muted">${UI.escapar(c.codigo_barras)}</span>` : ''}</button>`).join('')}</div>`;
+              res.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => {
+                const tr = el.querySelector(`tr[data-idx="${idx}"]`);
+                tr.dataset.tipo = 'vinculado';
+                tr.dataset.produtoId = b.dataset.pick;
+                el.querySelector(`[data-link-sel="${idx}"]`).innerHTML = `<span class="badge badge--ok mt-16" style="display:inline-block">Vinculado a: ${b.dataset.nome}</span> <button type="button" class="btn btn--secundario" data-link-undo="${idx}">desfazer</button>`;
+                el.querySelector(`[data-link-box="${idx}"]`).style.display = 'none';
+                const badge = tr.querySelector('[data-badge-novo]'); if (badge) badge.style.display = 'none';
+                el.querySelector(`[data-link-undo="${idx}"]`).addEventListener('click', () => {
+                  tr.dataset.tipo = 'novo'; delete tr.dataset.produtoId;
+                  el.querySelector(`[data-link-sel="${idx}"]`).innerHTML = '';
+                  if (badge) badge.style.display = '';
+                });
+              }));
+            }, 250);
+          });
+        });
       },
       aoConfirmar: async (el) => {
         // monta itens
@@ -147,6 +190,9 @@ window.PaginaCompras = (function () {
           const base = prev.itens[idx];
           if (tr.dataset.tipo === 'existente') {
             itens.push({ ...base, produto_id: base.produto_existente.id });
+          } else if (tr.dataset.tipo === 'vinculado' && tr.dataset.produtoId) {
+            // Conciliacao manual: item da nota vinculado a um produto existente.
+            itens.push({ ...base, produto_id: Number(tr.dataset.produtoId) });
           } else {
             const nome = tr.querySelector('[data-campo="nome"]').value.trim();
             if (!nome) { UI.erro('Informe o nome de todos os produtos novos.'); return false; }

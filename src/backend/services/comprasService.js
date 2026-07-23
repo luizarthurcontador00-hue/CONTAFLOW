@@ -154,6 +154,13 @@ function confirmarImportacao(dados) {
           Number(novo.estoque_minimo || 0)
         );
         produto_id = pInfo.lastInsertRowid;
+        // Gera codigo de barras interno automaticamente (se ligado nas Config)
+        // e o produto novo nao tiver um EAN vindo da nota.
+        // eslint-disable-next-line global-require
+        const prodSvc = require('./produtosService');
+        if (prodSvc.codigoAutoLigado(db) && !(item.ean && String(item.ean).replace(/\D/g, '').length === 13)) {
+          prodSvc.garantirCodigoBarras(produto_id);
+        }
       } else {
         // Produto existente: atualiza o custo com o valor da NF.
         db.prepare("UPDATE produtos SET custo = ?, atualizado_em = datetime('now','localtime') WHERE id = ?")
@@ -192,17 +199,21 @@ function confirmarImportacao(dados) {
       });
     }
 
-    // Conta a pagar (opcional).
+    // Conta a pagar (opcional). Categorizada como "Compra de mercadoria"
+    // (fora do DRE: entra no resultado como CMV quando o item for vendido).
     if (dados.gerar_conta_pagar) {
+      const catRow = db.prepare("SELECT valor FROM config WHERE chave = 'categoria_compras_id'").get();
+      const categoriaCompras = catRow && catRow.valor ? Number(catRow.valor) : null;
       db.prepare(
-        `INSERT INTO contas_pagar (fornecedor_id, compra_id, descricao, valor, vencimento, status)
-         VALUES (?, ?, ?, ?, ?, 'pendente')`
+        `INSERT INTO contas_pagar (fornecedor_id, compra_id, descricao, valor, vencimento, status, categoria_despesa_id)
+         VALUES (?, ?, ?, ?, ?, 'pendente', ?)`
       ).run(
         fornecedor_id,
         compra_id,
         `NF ${dados.numero_nf || ''}`.trim() || 'Compra',
         Number(dados.valor_total || 0),
-        dados.vencimento || null
+        dados.vencimento || null,
+        categoriaCompras
       );
     }
 

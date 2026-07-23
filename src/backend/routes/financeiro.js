@@ -37,8 +37,15 @@ router.delete('/contas-financeiras/:id', asyncHandler((req, res) => res.json(fin
 router.get('/mapa-contas', asyncHandler((req, res) => res.json(fin.getMapaContas(require('../db/connection').getDb()))));
 router.put('/mapa-contas', asyncHandler((req, res) => res.json(fin.salvarMapaContas(req.body || {}))));
 
-// ----------------------- Alertas / fluxo de caixa -------------------
+// ------------------ Categorias de despesa (DRE) ---------------------
+router.get('/categorias-despesa', asyncHandler((req, res) => res.json(fin.listarCategoriasDespesa())));
+router.post('/categorias-despesa', asyncHandler((req, res) => res.status(201).json(fin.criarCategoriaDespesa(req.body || {}))));
+router.put('/categorias-despesa/:id', asyncHandler((req, res) => res.json(fin.atualizarCategoriaDespesa(req.params.id, req.body || {}))));
+router.delete('/categorias-despesa/:id', asyncHandler((req, res) => res.json(fin.excluirCategoriaDespesa(req.params.id))));
+
+// ----------------------- Alertas / fluxo / DRE ----------------------
 router.get('/alertas', asyncHandler((req, res) => res.json(fin.alertas(req.query))));
 router.get('/fluxo-caixa', asyncHandler((req, res) => res.json(fin.fluxoCaixa(req.query))));
+router.get('/dre', asyncHandler((req, res) => res.json(fin.dre(req.query))));
 
 module.exports = router;

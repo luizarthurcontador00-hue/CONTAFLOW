@@ -394,3 +394,7 @@ kbd { background: #f1f5f9; border: 1px solid #cbd5e1; border-bottom-width: 2px; 
   border: 2px solid transparent;
 }
 .det-miniaturas img.ativa { border-color: var(--primaria); }
+
+/* ===================== DRE ===================== */
+.dre-tabela td { padding: 7px 4px; }
+.dre-tabela tr.dre-forte td { font-weight: 700; border-top: 1px solid var(--borda); }
