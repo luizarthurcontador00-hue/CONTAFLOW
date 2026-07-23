@@ -30,7 +30,7 @@
   // Perfil do negócio: 'comercio' | 'servico' | 'ambos'. Controla quais
   // itens do menu (e rotas) ficam visíveis.
   let perfil = 'ambos';
-  const rotaPerfil = { produtos: 'comercio', compras: 'comercio', etiquetas: 'comercio', servicos: 'servico' };
+  const rotaPerfil = { produtos: 'comercio', compras: 'comercio', servicos: 'servico' };
 
   function rotaVisivel(nome) {
     const p = rotaPerfil[nome];
