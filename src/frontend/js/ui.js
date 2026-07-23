@@ -53,5 +53,48 @@ const UI = (function () {
       .replace(/"/g, '&quot;');
   }
 
-  return { toast, sucesso, erro, confirmar, moeda, numero, dataHora, escapar };
+  /**
+   * Imprime um documento HTML completo usando um iframe oculto. Funciona no
+   * app empacotado (Electron) e no navegador, sem depender de pop-ups
+   * (window.open costuma ser bloqueado no Electron, o que gerava o erro
+   * "Cannot read properties of null (reading 'document')").
+   */
+  function imprimir(html) {
+    try {
+      const iframe = document.createElement('iframe');
+      iframe.setAttribute('aria-hidden', 'true');
+      iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+      document.body.appendChild(iframe);
+
+      let feito = false;
+      const acionarImpressao = () => {
+        if (feito) return;
+        feito = true;
+        try {
+          const win = iframe.contentWindow;
+          win.focus();
+          win.print();
+        } catch (e) { erro('Não foi possível abrir a impressão.'); }
+        setTimeout(() => { try { iframe.remove(); } catch (_) { /* ok */ } }, 1000);
+      };
+
+      const doc = iframe.contentWindow && iframe.contentWindow.document;
+      if (!doc) { iframe.remove(); erro('Não foi possível preparar a impressão.'); return; }
+      doc.open();
+      doc.write(html);
+      doc.close();
+
+      // Aguarda o conteúdo (e imagens) carregarem antes de imprimir.
+      if (iframe.contentWindow.document.readyState === 'complete') {
+        setTimeout(acionarImpressao, 250);
+      } else {
+        iframe.contentWindow.addEventListener('load', () => setTimeout(acionarImpressao, 250));
+        setTimeout(acionarImpressao, 800); // fallback
+      }
+    } catch (e) {
+      erro('Falha ao imprimir: ' + (e && e.message ? e.message : 'erro desconhecido'));
+    }
+  }
+
+  return { toast, sucesso, erro, confirmar, moeda, numero, dataHora, escapar, imprimir };
 })();

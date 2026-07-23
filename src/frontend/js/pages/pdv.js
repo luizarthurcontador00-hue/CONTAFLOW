@@ -443,9 +443,7 @@ window.PaginaPDV = (function () {
       <div class="center">${escaparTxt(cfg.loja_rodape_cupom || 'Obrigado pela preferência!')}</div>
       </body></html>`;
 
-    const win = window.open('', '_blank', 'width=380,height=600');
-    win.document.write(html); win.document.close(); win.focus();
-    setTimeout(() => win.print(), 300);
+    UI.imprimir(html);
   }
 
   function escaparTxt(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }

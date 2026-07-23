@@ -168,11 +168,7 @@ window.PaginaEtiquetas = (function () {
       </style></head>
       <body><div class="folha">${htmlEtiquetas}</div></body></html>`;
 
-    const win = window.open('', '_blank');
-    win.document.write(html);
-    win.document.close();
-    win.focus();
-    setTimeout(() => win.print(), 400);
+    UI.imprimir(html);
   }
 
   function escaparTxt(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }

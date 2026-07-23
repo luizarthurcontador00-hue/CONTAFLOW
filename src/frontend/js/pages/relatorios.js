@@ -124,8 +124,7 @@ window.PaginaRelatorios = (function () {
   function imprimir() {
     const area = document.getElementById('print-area');
     if (!area) { UI.erro('Gere o relatório antes de imprimir.'); return; }
-    const win = window.open('', '_blank');
-    win.document.write(`<html><head><title>Relatório</title>
+    UI.imprimir(`<html><head><title>Relatório</title>
       <style>
         body{font-family:Segoe UI,Arial,sans-serif;padding:24px;color:#111}
         table{width:100%;border-collapse:collapse;margin-top:8px}
@@ -136,9 +135,6 @@ window.PaginaRelatorios = (function () {
       <div style="text-align:right;color:#666;font-size:11px">Emitido em ${new Date().toLocaleString('pt-BR')}</div>
       ${area.innerHTML}
       </body></html>`);
-    win.document.close();
-    win.focus();
-    setTimeout(() => { win.print(); }, 300);
   }
 
   return { titulo: 'Relatórios', render };

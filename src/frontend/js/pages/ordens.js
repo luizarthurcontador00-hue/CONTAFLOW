@@ -318,10 +318,7 @@ window.PaginaOrdens = (function () {
       ${o.observacao ? `<div class="box"><strong>Observações:</strong> ${UI.escapar(o.observacao)}</div>` : ''}
       <p class="muted" style="margin-top:24px;text-align:center">${UI.escapar(loja.loja_rodape_cupom || '')}</p>
       </body></html>`;
-    const w = window.open('', '_blank');
-    if (!w) { UI.erro('Permita pop-ups para imprimir.'); return; }
-    w.document.write(html); w.document.close(); w.focus();
-    setTimeout(() => w.print(), 300);
+    UI.imprimir(html);
   }
 
   function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
