@@ -410,3 +410,12 @@ kbd { background: #f1f5f9; border: 1px solid #cbd5e1; border-bottom-width: 2px; 
 .ob-opcao.ativa { border-color: var(--primaria); box-shadow: 0 0 0 2px var(--primaria); background: #eff6ff; }
 .ob-opcao__ic { font-size: 26px; }
 @media (max-width: 640px) { .ob-perfil { grid-template-columns: 1fr; } }
+
+/* ===================== Personalização (logo) ===================== */
+.sidebar__logo { overflow: hidden; }
+.sidebar__logo img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; }
+.cfg-logo-preview {
+  width: 90px; height: 90px; border-radius: 12px; border: 1px solid var(--borda);
+  background: #f8fafc; display: grid; place-items: center; overflow: hidden; color: var(--texto-suave);
+}
+.cfg-logo-preview img { width: 100%; height: 100%; object-fit: contain; }

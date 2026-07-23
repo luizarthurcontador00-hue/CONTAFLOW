@@ -304,8 +304,8 @@ window.PaginaOrdens = (function () {
       table{width:100%;border-collapse:collapse;margin-top:12px} th,td{border-bottom:1px solid #ddd;padding:6px;font-size:13px;text-align:left}
       .tot{text-align:right;font-size:16px;margin-top:12px} .box{border:1px solid #ccc;border-radius:8px;padding:10px;margin-top:10px;font-size:13px}
       .muted{color:#666}</style></head><body>
-      <div class="cab"><div><h1>${UI.escapar(loja.nome_loja || 'Minha Empresa')}</h1>
-        <div class="muted">${UI.escapar(loja.loja_telefone || '')} ${UI.escapar(loja.loja_cnpj || '')}</div></div>
+      <div class="cab"><div style="display:flex;gap:12px;align-items:center">${loja.loja_logo ? `<img src="${loja.loja_logo}" style="width:56px;height:56px;object-fit:contain">` : ''}<div><h1>${UI.escapar(loja.nome_loja || 'Minha Empresa')}</h1>
+        <div class="muted">${UI.escapar(loja.loja_telefone || '')} ${UI.escapar(loja.loja_cnpj || '')}</div></div></div>
         <div style="text-align:right"><strong>${rotulo(o.tipo)} #${o.numero}</strong><br><span class="muted">${UI.dataHora(o.criado_em)}</span></div></div>
       <div class="box"><strong>Cliente:</strong> ${UI.escapar(o.cliente_nome || '—')} ${o.cliente_telefone ? '· ' + UI.escapar(o.cliente_telefone) : ''}
       ${o.tipo === 'os' ? `<br><strong>Equipamento:</strong> ${UI.escapar(o.equipamento || '—')} ${o.marca_modelo ? '· ' + UI.escapar(o.marca_modelo) : ''} ${o.identificacao ? '· ' + UI.escapar(o.identificacao) : ''}` : ''}

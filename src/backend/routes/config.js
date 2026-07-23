@@ -7,7 +7,7 @@ const { asyncHandler } = require('../utils/errors');
 const router = express.Router();
 
 // Chaves de configuracao editaveis pela tela de Configuracoes.
-const CHAVES_LOJA = ['nome_loja', 'loja_endereco', 'loja_telefone', 'loja_cnpj', 'loja_rodape_cupom', 'markup_padrao', 'gerar_codigo_auto', 'perfil_negocio', 'onboarding_ok'];
+const CHAVES_LOJA = ['nome_loja', 'loja_endereco', 'loja_telefone', 'loja_cnpj', 'loja_rodape_cupom', 'markup_padrao', 'gerar_codigo_auto', 'perfil_negocio', 'onboarding_ok', 'loja_logo', 'cor_primaria', 'fonte_escala'];
 
 function lerConfig() {
   const db = getDb();

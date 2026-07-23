@@ -100,7 +100,45 @@
     try { cfg = await API.get('/api/config'); } catch (_) { cfg = {}; }
     perfil = ['comercio', 'servico', 'ambos'].includes(cfg.perfil_negocio) ? cfg.perfil_negocio : 'ambos';
     aplicarPerfil();
+    aplicarAparencia(cfg);
     return cfg;
+  }
+
+  // Escurece uma cor hex em ~12% para o estado :hover dos botões.
+  function escurecer(hex, fator = 0.85) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+    if (!m) return hex;
+    const n = parseInt(m[1], 16);
+    const r = Math.round(((n >> 16) & 255) * fator);
+    const g = Math.round(((n >> 8) & 255) * fator);
+    const b = Math.round((n & 255) * fator);
+    return '#' + [r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('');
+  }
+
+  // Aplica logo, nome, cor principal e tamanho da fonte (personalização).
+  function aplicarAparencia(cfg) {
+    const root = document.documentElement;
+    if (cfg.cor_primaria) {
+      root.style.setProperty('--primaria', cfg.cor_primaria);
+      root.style.setProperty('--primaria-escura', escurecer(cfg.cor_primaria));
+    }
+    const escalas = { pequeno: '14px', normal: '15px', grande: '17px', maior: '19px' };
+    document.body.style.fontSize = escalas[cfg.fonte_escala] || '15px';
+
+    const logoEl = document.querySelector('.sidebar__logo');
+    if (logoEl) {
+      if (cfg.loja_logo) logoEl.innerHTML = `<img src="${cfg.loja_logo}" alt="logo">`;
+      else logoEl.textContent = iniciais(cfg.nome_loja) || 'GV';
+    }
+    const tituloEl = document.querySelector('.sidebar__title');
+    if (tituloEl && cfg.nome_loja) tituloEl.textContent = cfg.nome_loja;
+    if (cfg.nome_loja) document.title = cfg.nome_loja;
+  }
+
+  function iniciais(nome) {
+    if (!nome) return '';
+    const partes = String(nome).trim().split(/\s+/).slice(0, 2);
+    return partes.map((p) => p[0]).join('').toUpperCase();
   }
 
   // Permite que a tela de Configurações reaplique o perfil sem recarregar tudo.

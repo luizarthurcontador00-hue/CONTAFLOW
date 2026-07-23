@@ -420,6 +420,7 @@ window.PaginaPDV = (function () {
         hr { border:none; border-top:1px dashed #000; margin:6px 0; }
         .tot { font-size:14px; font-weight:bold; }
       </style></head><body>
+      ${cfg.loja_logo ? `<div class="center"><img src="${cfg.loja_logo}" style="max-width:120px;max-height:60px;object-fit:contain"></div>` : ''}
       <h2>${escaparTxt(cfg.nome_loja || 'Comprovante de Venda')}</h2>
       <div class="center">
         ${cfg.loja_endereco ? escaparTxt(cfg.loja_endereco) + '<br>' : ''}
