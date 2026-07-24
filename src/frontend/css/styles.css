@@ -419,3 +419,24 @@ kbd { background: #f1f5f9; border: 1px solid #cbd5e1; border-bottom-width: 2px; 
   background: #f8fafc; display: grid; place-items: center; overflow: hidden; color: var(--texto-suave);
 }
 .cfg-logo-preview img { width: 100%; height: 100%; object-fit: contain; }
+
+/* ===================== Agenda ===================== */
+.agenda-lista { display: flex; flex-direction: column; gap: 10px; }
+.agenda-item {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 12px 14px; border: 1px solid var(--borda); border-left: 5px solid var(--primaria);
+  border-radius: 10px; background: #fff;
+}
+.agenda-item:hover { box-shadow: var(--sombra); }
+.agenda-item__hora {
+  font-weight: 700; font-size: 17px; min-width: 76px;
+  display: flex; flex-direction: column; line-height: 1.2;
+}
+.agenda-item__hora .dica { font-weight: 400; font-size: 11px; }
+.agenda-item__info { flex: 1; min-width: 180px; }
+.agenda-item__valor { font-weight: 700; color: var(--primaria); }
+.agenda-item__acoes { display: flex; gap: 8px; }
+.agenda-cor {
+  display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+  margin-right: 6px; vertical-align: middle;
+}

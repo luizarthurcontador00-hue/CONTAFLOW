@@ -543,6 +543,45 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 12,
+    name: 'agenda-e-profissionais',
+    up(db) {
+      db.exec(`
+        -- Profissionais / equipe (usados na Agenda e nas Comissões).
+        CREATE TABLE IF NOT EXISTS profissionais (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          nome         TEXT NOT NULL,
+          telefone     TEXT,
+          cor          TEXT NOT NULL DEFAULT '#2563eb',
+          comissao_pct REAL NOT NULL DEFAULT 0,
+          ativo        INTEGER NOT NULL DEFAULT 1,
+          criado_em    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+
+        -- Agendamentos (horários marcados). Podem virar venda ao "atender".
+        CREATE TABLE IF NOT EXISTS agendamentos (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          data           TEXT NOT NULL,                 -- YYYY-MM-DD
+          hora_inicio    TEXT NOT NULL,                 -- HH:MM
+          hora_fim       TEXT,                          -- HH:MM
+          cliente_id     INTEGER REFERENCES clientes(id) ON DELETE SET NULL,
+          cliente_nome   TEXT,                          -- avulso (sem cadastro)
+          telefone       TEXT,
+          profissional_id INTEGER REFERENCES profissionais(id) ON DELETE SET NULL,
+          produto_id     INTEGER REFERENCES produtos(id) ON DELETE SET NULL,  -- serviço
+          servico_nome   TEXT,
+          valor          REAL NOT NULL DEFAULT 0,
+          status         TEXT NOT NULL DEFAULT 'agendado', -- agendado|confirmado|atendido|cancelado|faltou
+          observacao     TEXT,
+          venda_id       INTEGER REFERENCES vendas(id) ON DELETE SET NULL,
+          criado_em      TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agenda_data ON agendamentos(data);
+        CREATE INDEX IF NOT EXISTS idx_agenda_prof ON agendamentos(profissional_id);
+      `);
+    },
+  },
 ];
 
 /**
