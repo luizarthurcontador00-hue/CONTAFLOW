@@ -16,20 +16,61 @@
       </div>
       <nav class="sidebar__nav" id="menu">
         <a href="#/inicio" data-rota="inicio" class="nav-item" title="Início"><span class="nav-item__icone">🏠</span><span class="nav-item__texto">Início</span></a>
-        <a href="#/produtos" data-rota="produtos" data-perfil="comercio" class="nav-item" title="Produtos"><span class="nav-item__icone">📦</span><span class="nav-item__texto">Produtos</span></a>
-        <a href="#/servicos" data-rota="servicos" data-perfil="servico" class="nav-item" title="Serviços"><span class="nav-item__icone">🧰</span><span class="nav-item__texto">Serviços</span></a>
-        <a href="#/agenda" data-rota="agenda" data-perfil="servico" class="nav-item" title="Agenda"><span class="nav-item__icone">📅</span><span class="nav-item__texto">Agenda</span></a>
-        <a href="#/ordens" data-rota="ordens" class="nav-item" title="Ordens & Orçamentos"><span class="nav-item__icone">🛠️</span><span class="nav-item__texto">Ordens/Orçam.</span></a>
-        <a href="#/clientes" data-rota="clientes" class="nav-item" title="Clientes"><span class="nav-item__icone">👥</span><span class="nav-item__texto">Clientes</span></a>
-        <a href="#/compras" data-rota="compras" data-perfil="comercio" class="nav-item" title="Compras"><span class="nav-item__icone">🧾</span><span class="nav-item__texto">Compras</span></a>
-        <a href="#/vendas" data-rota="vendas" class="nav-item" title="Vendas"><span class="nav-item__icone">🛒</span><span class="nav-item__texto">Vendas</span></a>
-        <a href="#/pdv" data-rota="pdv" class="nav-item" title="PDV"><span class="nav-item__icone">💳</span><span class="nav-item__texto">PDV</span></a>
-        <a href="#/precificacao" data-rota="precificacao" class="nav-item" title="Precificação"><span class="nav-item__icone">🏷️</span><span class="nav-item__texto">Precificação</span></a>
-        <a href="#/financeiro" data-rota="financeiro" class="nav-item" title="Financeiro"><span class="nav-item__icone">💰</span><span class="nav-item__texto">Financeiro</span></a>
-        <a href="#/dashboard" data-rota="dashboard" class="nav-item" title="Dashboard"><span class="nav-item__icone">📊</span><span class="nav-item__texto">Dashboard</span></a>
-        <a href="#/relatorios" data-rota="relatorios" class="nav-item" title="Relatórios"><span class="nav-item__icone">📄</span><span class="nav-item__texto">Relatórios</span></a>
-        <a href="#/configuracoes" data-rota="configuracoes" class="nav-item" title="Configurações"><span class="nav-item__icone">⚙️</span><span class="nav-item__texto">Configurações</span></a>
-        <a href="#/backup" data-rota="backup" class="nav-item" title="Backup"><span class="nav-item__icone">💾</span><span class="nav-item__texto">Backup</span></a>
+
+        <div class="nav-group" data-grupo="cadastro">
+          <div class="nav-item nav-group__cabecalho" tabindex="0" role="button" aria-haspopup="true" title="Cadastro">
+            <span class="nav-item__icone">🗂️</span><span class="nav-item__texto">Cadastro</span><span class="nav-group__seta">›</span>
+          </div>
+          <div class="nav-submenu">
+            <a href="#/produtos" data-rota="produtos" data-perfil="comercio" class="nav-item" title="Produtos"><span class="nav-item__icone">📦</span><span class="nav-item__texto">Produtos</span></a>
+            <a href="#/servicos" data-rota="servicos" data-perfil="servico" class="nav-item" title="Serviços"><span class="nav-item__icone">🧰</span><span class="nav-item__texto">Serviços</span></a>
+            <a href="#/clientes" data-rota="clientes" class="nav-item" title="Clientes"><span class="nav-item__icone">👥</span><span class="nav-item__texto">Clientes</span></a>
+            <a href="#/fornecedores" data-rota="fornecedores" data-perfil="comercio" class="nav-item" title="Fornecedores"><span class="nav-item__icone">🚚</span><span class="nav-item__texto">Fornecedores</span></a>
+          </div>
+        </div>
+
+        <div class="nav-group" data-grupo="operacoes">
+          <div class="nav-item nav-group__cabecalho" tabindex="0" role="button" aria-haspopup="true" title="Operações">
+            <span class="nav-item__icone">🛎️</span><span class="nav-item__texto">Operações</span><span class="nav-group__seta">›</span>
+          </div>
+          <div class="nav-submenu">
+            <a href="#/pdv" data-rota="pdv" class="nav-item" title="PDV"><span class="nav-item__icone">💳</span><span class="nav-item__texto">PDV</span></a>
+            <a href="#/vendas" data-rota="vendas" class="nav-item" title="Vendas"><span class="nav-item__icone">🛒</span><span class="nav-item__texto">Vendas</span></a>
+            <a href="#/agenda" data-rota="agenda" data-perfil="servico" class="nav-item" title="Agenda"><span class="nav-item__icone">📅</span><span class="nav-item__texto">Agenda</span></a>
+            <a href="#/ordens" data-rota="ordens" class="nav-item" title="Ordens & Orçamentos"><span class="nav-item__icone">🛠️</span><span class="nav-item__texto">Ordens/Orçam.</span></a>
+            <a href="#/compras" data-rota="compras" data-perfil="comercio" class="nav-item" title="Compras"><span class="nav-item__icone">🧾</span><span class="nav-item__texto">Compras</span></a>
+          </div>
+        </div>
+
+        <div class="nav-group" data-grupo="financeiro">
+          <div class="nav-item nav-group__cabecalho" tabindex="0" role="button" aria-haspopup="true" title="Financeiro">
+            <span class="nav-item__icone">💰</span><span class="nav-item__texto">Financeiro</span><span class="nav-group__seta">›</span>
+          </div>
+          <div class="nav-submenu">
+            <a href="#/financeiro" data-rota="financeiro" class="nav-item" title="Financeiro"><span class="nav-item__icone">💰</span><span class="nav-item__texto">Financeiro</span></a>
+            <a href="#/precificacao" data-rota="precificacao" class="nav-item" title="Precificação"><span class="nav-item__icone">🏷️</span><span class="nav-item__texto">Precificação</span></a>
+          </div>
+        </div>
+
+        <div class="nav-group" data-grupo="relatorios">
+          <div class="nav-item nav-group__cabecalho" tabindex="0" role="button" aria-haspopup="true" title="Relatórios">
+            <span class="nav-item__icone">📊</span><span class="nav-item__texto">Relatórios</span><span class="nav-group__seta">›</span>
+          </div>
+          <div class="nav-submenu">
+            <a href="#/dashboard" data-rota="dashboard" class="nav-item" title="Dashboard"><span class="nav-item__icone">📊</span><span class="nav-item__texto">Dashboard</span></a>
+            <a href="#/relatorios" data-rota="relatorios" class="nav-item" title="Relatórios"><span class="nav-item__icone">📄</span><span class="nav-item__texto">Relatórios</span></a>
+          </div>
+        </div>
+
+        <div class="nav-group" data-grupo="sistema">
+          <div class="nav-item nav-group__cabecalho" tabindex="0" role="button" aria-haspopup="true" title="Sistema">
+            <span class="nav-item__icone">⚙️</span><span class="nav-item__texto">Sistema</span><span class="nav-group__seta">›</span>
+          </div>
+          <div class="nav-submenu">
+            <a href="#/configuracoes" data-rota="configuracoes" class="nav-item" title="Configurações"><span class="nav-item__icone">⚙️</span><span class="nav-item__texto">Configurações</span></a>
+            <a href="#/backup" data-rota="backup" class="nav-item" title="Backup"><span class="nav-item__icone">💾</span><span class="nav-item__texto">Backup</span></a>
+          </div>
+        </div>
       </nav>
       <div class="sidebar__footer">
         <span id="versao-app">v0.1.0</span>
@@ -61,6 +102,7 @@
   <script src="js/pages/ordens.js"></script>
   <script src="js/pages/lote.js"></script>
   <script src="js/pages/clientes.js"></script>
+  <script src="js/pages/fornecedores.js"></script>
   <script src="js/pages/etiquetas.js"></script>
   <script src="js/pages/compras.js"></script>
   <script src="js/pages/vendas.js"></script>

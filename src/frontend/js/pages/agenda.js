@@ -7,6 +7,8 @@
  */
 window.PaginaAgenda = (function () {
   let dia = new Date().toISOString().slice(0, 10);
+  let mesAtual = dia.slice(0, 7); // 'YYYY-MM', usado na visão de calendário
+  let vista = 'dia'; // 'dia' | 'mes'
   let profissionais = [];
   let clientes = [];
   let servicos = [];
@@ -29,6 +31,16 @@ window.PaginaAgenda = (function () {
     const semana = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
     return `${d.toLocaleDateString('pt-BR')} · ${semana[d.getDay()]}`;
   }
+  function mesLabel(aaMm) {
+    const [a, m] = aaMm.split('-').map(Number);
+    const nomes = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    return `${nomes[m - 1]} de ${a}`;
+  }
+  function mudarMes(aaMm, delta) {
+    const [a, m] = aaMm.split('-').map(Number);
+    const d = new Date(a, m - 1 + delta, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
 
   async function render(container) {
     [profissionais, clientes, servicos] = await Promise.all([
@@ -38,6 +50,25 @@ window.PaginaAgenda = (function () {
     ]);
 
     container.innerHTML = `
+      <div class="subtabs">
+        <button class="subtab ${vista === 'dia' ? 'subtab--ativa' : ''}" data-vista="dia">📋 Dia</button>
+        <button class="subtab ${vista === 'mes' ? 'subtab--ativa' : ''}" data-vista="mes">📆 Mês</button>
+      </div>
+      <div id="ag-corpo"></div>`;
+    container.querySelectorAll('[data-vista]').forEach((b) => b.addEventListener('click', () => {
+      if (vista === b.dataset.vista) return;
+      vista = b.dataset.vista; render(container);
+    }));
+
+    if (vista === 'mes') await renderMes();
+    else await renderDia();
+  }
+
+  // ------------------------------ Visão: Dia ------------------------------
+  async function renderDia() {
+    const alvo = document.getElementById('ag-corpo');
+    if (!alvo) return;
+    alvo.innerHTML = `
       <div class="barra-ferramentas">
         <div class="flex gap-12" style="align-items:center">
           <button class="btn btn--secundario" id="ag-ant">◀</button>
@@ -57,13 +88,13 @@ window.PaginaAgenda = (function () {
       <div id="ag-resumo"></div>
       <div id="ag-lista"><div class="card">Carregando…</div></div>`;
 
-    container.querySelector('#ag-ant').addEventListener('click', () => { mudarDia(-1); render(container); });
-    container.querySelector('#ag-prox').addEventListener('click', () => { mudarDia(1); render(container); });
-    container.querySelector('#ag-hoje').addEventListener('click', () => { dia = new Date().toISOString().slice(0, 10); render(container); });
-    container.querySelector('#ag-data').addEventListener('change', (e) => { dia = e.target.value || dia; render(container); });
-    container.querySelector('#ag-prof-filtro').addEventListener('change', (e) => { filtroProf = e.target.value; listar(); });
-    container.querySelector('#ag-equipe').addEventListener('click', gerenciarEquipe);
-    container.querySelector('#ag-novo').addEventListener('click', () => abrirForm());
+    alvo.querySelector('#ag-ant').addEventListener('click', () => { mudarDia(-1); renderDia(); });
+    alvo.querySelector('#ag-prox').addEventListener('click', () => { mudarDia(1); renderDia(); });
+    alvo.querySelector('#ag-hoje').addEventListener('click', () => { dia = new Date().toISOString().slice(0, 10); renderDia(); });
+    alvo.querySelector('#ag-data').addEventListener('change', (e) => { dia = e.target.value || dia; renderDia(); });
+    alvo.querySelector('#ag-prof-filtro').addEventListener('change', (e) => { filtroProf = e.target.value; listar(); });
+    alvo.querySelector('#ag-equipe').addEventListener('click', gerenciarEquipe);
+    alvo.querySelector('#ag-novo').addEventListener('click', () => abrirForm());
 
     await listar();
   }
@@ -122,6 +153,92 @@ window.PaginaAgenda = (function () {
     }));
   }
 
+  // ------------------------------ Visão: Mês (calendário) ------------------------------
+  async function renderMes() {
+    const alvo = document.getElementById('ag-corpo');
+    if (!alvo) return;
+    alvo.innerHTML = `
+      <div class="barra-ferramentas">
+        <div class="flex gap-12" style="align-items:center">
+          <button class="btn btn--secundario" id="ag-mes-ant">◀</button>
+          <strong style="min-width:170px;text-align:center">${mesLabel(mesAtual)}</strong>
+          <button class="btn btn--secundario" id="ag-mes-prox">▶</button>
+          <button class="btn btn--secundario" id="ag-mes-hoje">Hoje</button>
+        </div>
+        <select id="ag-prof-filtro-mes">
+          <option value="">Todos os profissionais</option>
+          ${profissionais.map((p) => `<option value="${p.id}" ${String(filtroProf) === String(p.id) ? 'selected' : ''}>${UI.escapar(p.nome)}</option>`).join('')}
+        </select>
+        <div class="cresce"></div>
+        <button class="btn btn--secundario" id="ag-equipe-mes">👥 Equipe</button>
+        <button class="btn" id="ag-novo-mes">+ Novo agendamento</button>
+      </div>
+      <div id="ag-calendario"><div class="card">Carregando…</div></div>`;
+
+    alvo.querySelector('#ag-mes-ant').addEventListener('click', () => { mesAtual = mudarMes(mesAtual, -1); renderMes(); });
+    alvo.querySelector('#ag-mes-prox').addEventListener('click', () => { mesAtual = mudarMes(mesAtual, 1); renderMes(); });
+    alvo.querySelector('#ag-mes-hoje').addEventListener('click', () => { mesAtual = new Date().toISOString().slice(0, 7); renderMes(); });
+    alvo.querySelector('#ag-prof-filtro-mes').addEventListener('change', (e) => { filtroProf = e.target.value; carregarCalendario(); });
+    alvo.querySelector('#ag-equipe-mes').addEventListener('click', gerenciarEquipe);
+    alvo.querySelector('#ag-novo-mes').addEventListener('click', () => abrirForm());
+
+    await carregarCalendario();
+  }
+
+  async function carregarCalendario() {
+    const cal = document.getElementById('ag-calendario');
+    if (!cal) return;
+    const [ano, mes] = mesAtual.split('-').map(Number);
+    const ultimoDia = new Date(ano, mes, 0).getDate();
+    const params = new URLSearchParams({ inicio: `${mesAtual}-01`, fim: `${mesAtual}-${String(ultimoDia).padStart(2, '0')}` });
+    if (filtroProf) params.set('profissional_id', filtroProf);
+
+    let itens;
+    try { itens = await API.get('/api/agenda?' + params.toString()); }
+    catch (e) { cal.innerHTML = `<div class="card"><span class="badge badge--erro">Erro</span> ${UI.escapar(e.message)}</div>`; return; }
+
+    const porDia = new Map();
+    itens.forEach((a) => { if (!porDia.has(a.data)) porDia.set(a.data, []); porDia.get(a.data).push(a); });
+
+    const primeiroDiaSemana = new Date(ano, mes - 1, 1).getDay(); // 0 = domingo
+    const diasNomes = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    const hojeISO = new Date().toISOString().slice(0, 10);
+
+    const celulas = [];
+    for (let i = 0; i < primeiroDiaSemana; i++) celulas.push(null);
+    for (let d = 1; d <= ultimoDia; d++) celulas.push(`${mesAtual}-${String(d).padStart(2, '0')}`);
+    while (celulas.length % 7 !== 0) celulas.push(null);
+
+    const MOSTRAR = 3;
+    cal.innerHTML = `<div class="cal-grade">
+      ${diasNomes.map((n) => `<div class="cal-cabecalho">${n}</div>`).join('')}
+      ${celulas.map((iso) => {
+        if (!iso) return '<div class="cal-dia cal-dia--vazio"></div>';
+        const evs = (porDia.get(iso) || []).slice().sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || ''));
+        const extras = evs.length - MOSTRAR;
+        return `<div class="cal-dia ${iso === hojeISO ? 'cal-dia--hoje' : ''}" data-dia="${iso}">
+          <div class="cal-dia__numero">${Number(iso.slice(8, 10))}</div>
+          <div class="cal-dia__eventos">
+            ${evs.slice(0, MOSTRAR).map((a) => {
+              const nome = a.cliente_cadastro || a.cliente_nome || 'Sem cliente';
+              return `<div class="cal-evento" data-evento="${a.id}" style="background:${a.profissional_cor || 'var(--primaria)'}" title="${UI.escapar(a.hora_inicio + ' — ' + nome)}">${UI.escapar(a.hora_inicio)} ${UI.escapar(nome)}</div>`;
+            }).join('')}
+            ${extras > 0 ? `<div class="cal-evento cal-evento--mais">+${extras} mais</div>` : ''}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+
+    cal.querySelectorAll('.cal-dia[data-dia]').forEach((el) => el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-evento]')) return;
+      dia = el.dataset.dia; vista = 'dia'; render(document.getElementById('view'));
+    }));
+    cal.querySelectorAll('[data-evento]').forEach((el) => el.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try { abrirDetalhe(await API.get('/api/agenda/' + el.dataset.evento)); } catch (err) { UI.erro(err.message); }
+    }));
+  }
+
   // --------------------------- Form de agendamento ---------------------------
   function abrirForm(ag) {
     const ehEdicao = !!ag;
@@ -168,7 +285,7 @@ window.PaginaAgenda = (function () {
           if (ehEdicao) await API.put(`/api/agenda/${a.id}`, dados);
           else await API.post('/api/agenda', dados);
           UI.sucesso(ehEdicao ? 'Agendamento atualizado.' : 'Agendamento criado.');
-          if (dados.data && dados.data !== dia) dia = dados.data;
+          if (dados.data) { dia = dados.data; mesAtual = dados.data.slice(0, 7); }
           await render(document.getElementById('view'));
         } catch (e) { UI.erro(e.message); return false; }
       },
@@ -208,7 +325,7 @@ window.PaginaAgenda = (function () {
             ${!a.venda_id ? '<button class="btn" id="d-faturar">💲 Faturar</button>' : ''}
           </div>`;
         foot.querySelector('#d-status').addEventListener('click', async () => {
-          try { await API.post(`/api/agenda/${a.id}/status`, { status: el.querySelector('#det-status').value }); UI.sucesso('Status atualizado.'); el.remove(); await listar(); }
+          try { await API.post(`/api/agenda/${a.id}/status`, { status: el.querySelector('#det-status').value }); UI.sucesso('Status atualizado.'); el.remove(); await atualizarVistaAtual(); }
           catch (e) { UI.erro(e.message); }
         });
         const zap = foot.querySelector('#d-zap');
@@ -219,7 +336,7 @@ window.PaginaAgenda = (function () {
         if (ex) ex.addEventListener('click', async () => {
           const ok = await UI.confirmar('Excluir este agendamento?', { titulo: 'Excluir', textoConfirmar: 'Excluir' });
           if (!ok) return;
-          try { await API.del(`/api/agenda/${a.id}`); UI.sucesso('Agendamento excluído.'); el.remove(); await listar(); }
+          try { await API.del(`/api/agenda/${a.id}`); UI.sucesso('Agendamento excluído.'); el.remove(); await atualizarVistaAtual(); }
           catch (e) { UI.erro(e.message); }
         });
         const fat = foot.querySelector('#d-faturar');
@@ -245,10 +362,16 @@ window.PaginaAgenda = (function () {
           await API.post(`/api/agenda/${a.id}/faturar`, { forma_pagamento: el.querySelector('#f-forma').value, vencimento_prazo: el.querySelector('#f-venc').value || null });
           UI.sucesso('Atendimento faturado!');
           if (detalheEl) detalheEl.remove();
-          await listar();
+          await atualizarVistaAtual();
         } catch (e) { UI.erro(e.message); return false; }
       },
     });
+  }
+
+  /** Atualiza a lista do dia ou o calendário do mês, conforme a visão atual. */
+  async function atualizarVistaAtual() {
+    if (vista === 'mes') await carregarCalendario();
+    else await listar();
   }
 
   // ------------------------------ WhatsApp ------------------------------

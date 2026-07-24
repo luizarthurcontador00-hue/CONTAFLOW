@@ -440,3 +440,57 @@ kbd { background: #f1f5f9; border: 1px solid #cbd5e1; border-bottom-width: 2px; 
   display: inline-block; width: 12px; height: 12px; border-radius: 50%;
   margin-right: 6px; vertical-align: middle;
 }
+
+/* ===================== Menu lateral agrupado (submenus) ===================== */
+.nav-group { position: relative; }
+.nav-group__cabecalho { cursor: pointer; user-select: none; }
+.nav-group__cabecalho:focus-visible { outline: 2px solid var(--primaria); outline-offset: -2px; }
+.nav-group__cabecalho.ativo { background: var(--primaria); color: #fff; }
+.nav-group__seta {
+  margin-left: auto; font-size: 13px; opacity: 0; flex-shrink: 0;
+  transition: opacity .12s ease .04s;
+}
+.sidebar:hover .nav-group__seta, .sidebar:focus-within .nav-group__seta { opacity: .8; }
+
+.nav-submenu {
+  display: none;
+  position: fixed;
+  min-width: 220px;
+  background: #1f2937;
+  border-radius: 10px;
+  padding: 6px;
+  box-shadow: 6px 0 24px rgba(0,0,0,.35);
+  z-index: 200;
+}
+.nav-group.nav-group--aberto > .nav-submenu { display: flex; flex-direction: column; }
+/* Dentro do submenu (flyout), o texto sempre aparece — nao depende do hover/foco do trilho. */
+.nav-submenu .nav-item__texto { opacity: 1; }
+.nav-submenu .nav-item { padding: 9px 12px; }
+
+/* ===================== Agenda: calendário mensal ===================== */
+.cal-grade { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.cal-cabecalho {
+  text-align: center; font-size: 12px; font-weight: 700; color: var(--texto-suave);
+  text-transform: uppercase; padding-bottom: 4px;
+}
+.cal-dia {
+  min-height: 96px; border: 1px solid var(--borda); border-radius: 8px;
+  background: #fff; padding: 6px; cursor: pointer; display: flex; flex-direction: column; gap: 4px;
+  transition: box-shadow .1s, border-color .1s;
+}
+.cal-dia:hover { border-color: var(--primaria); box-shadow: 0 0 0 1px var(--primaria); }
+.cal-dia--vazio { background: transparent; border: none; cursor: default; min-height: 96px; }
+.cal-dia--hoje { border-color: var(--primaria); background: #eff6ff; }
+.cal-dia__numero { font-size: 13px; font-weight: 700; color: var(--texto-suave); }
+.cal-dia--hoje .cal-dia__numero { color: var(--primaria); }
+.cal-dia__eventos { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+.cal-evento {
+  font-size: 10.5px; color: #fff; border-radius: 4px; padding: 1px 5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+}
+.cal-evento:hover { filter: brightness(1.1); }
+.cal-evento--mais { color: var(--texto-suave); font-style: italic; cursor: default; padding-left: 5px; }
+@media (max-width: 900px) {
+  .cal-dia { min-height: 70px; }
+  .cal-cabecalho { font-size: 10px; }
+}

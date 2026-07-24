@@ -13,6 +13,7 @@
     ordens: { titulo: 'Ordens & Orçamentos', pagina: () => window.PaginaOrdens },
     lote: { titulo: 'Cadastro em Lote', pagina: () => window.PaginaLote },
     clientes: { titulo: 'Clientes', pagina: () => window.PaginaClientes },
+    fornecedores: { titulo: 'Fornecedores', pagina: () => window.PaginaFornecedores },
     etiquetas: { titulo: 'Etiquetas', pagina: () => window.PaginaEtiquetas },
     compras: { titulo: 'Compras', pagina: () => window.PaginaCompras },
     vendas: { titulo: 'Vendas', pagina: () => window.PaginaVendas },
@@ -31,7 +32,7 @@
   // Perfil do negócio: 'comercio' | 'servico' | 'ambos'. Controla quais
   // itens do menu (e rotas) ficam visíveis.
   let perfil = 'ambos';
-  const rotaPerfil = { produtos: 'comercio', compras: 'comercio', servicos: 'servico' };
+  const rotaPerfil = { produtos: 'comercio', compras: 'comercio', fornecedores: 'comercio', servicos: 'servico', agenda: 'servico' };
 
   function rotaVisivel(nome) {
     const p = rotaPerfil[nome];
@@ -42,6 +43,12 @@
     document.querySelectorAll('.nav-item[data-perfil]').forEach((a) => {
       const mostra = perfil === 'ambos' || perfil === a.dataset.perfil;
       a.style.display = mostra ? '' : 'none';
+    });
+    // Esconde o grupo inteiro (cabeçalho) quando nenhum item dele estiver visível.
+    document.querySelectorAll('.nav-group').forEach((grupo) => {
+      const filhos = Array.from(grupo.querySelectorAll('.nav-submenu > .nav-item'));
+      const algumVisivel = filhos.some((a) => a.style.display !== 'none');
+      grupo.style.display = algumVisivel ? '' : 'none';
     });
   }
 
@@ -54,8 +61,80 @@
   }
 
   function marcarMenu(nome) {
-    document.querySelectorAll('.nav-item').forEach((a) => {
+    document.querySelectorAll('.nav-item[data-rota]').forEach((a) => {
       a.classList.toggle('ativo', a.dataset.rota === nome);
+    });
+    // Destaca também o cabeçalho do grupo que contém a rota atual.
+    document.querySelectorAll('.nav-group__cabecalho').forEach((c) => c.classList.remove('ativo'));
+    const linkAtivo = Array.from(document.querySelectorAll('.nav-item[data-rota]')).find((a) => a.dataset.rota === nome);
+    const grupo = linkAtivo && linkAtivo.closest('.nav-group');
+    if (grupo) {
+      const cabecalho = grupo.querySelector('.nav-group__cabecalho');
+      if (cabecalho) cabecalho.classList.add('ativo');
+    }
+  }
+
+  // ----------------------- Submenus do menu lateral (flyout ao passar o mouse) -----------------------
+  function configurarSubmenus() {
+    const grupos = Array.from(document.querySelectorAll('.nav-group'));
+    let timerFechar = null;
+
+    function fecharTodos() {
+      grupos.forEach((g) => g.classList.remove('nav-group--aberto'));
+    }
+
+    function abrir(grupo) {
+      clearTimeout(timerFechar);
+      grupos.forEach((g) => g.classList.toggle('nav-group--aberto', g === grupo));
+      const cabecalho = grupo.querySelector('.nav-group__cabecalho');
+      const submenu = grupo.querySelector('.nav-submenu');
+      const rSidebar = document.querySelector('.sidebar').getBoundingClientRect();
+      const rCabecalho = cabecalho.getBoundingClientRect();
+      submenu.style.left = rSidebar.right + 'px';
+      // Mantem o submenu dentro da tela verticalmente.
+      const alturaEstimada = submenu.offsetHeight || (submenu.children.length * 40 + 12);
+      const topo = Math.max(6, Math.min(rCabecalho.top, window.innerHeight - alturaEstimada - 6));
+      submenu.style.top = topo + 'px';
+    }
+
+    function agendarFechamento() {
+      clearTimeout(timerFechar);
+      timerFechar = setTimeout(fecharTodos, 220);
+    }
+
+    grupos.forEach((grupo) => {
+      const cabecalho = grupo.querySelector('.nav-group__cabecalho');
+      const submenu = grupo.querySelector('.nav-submenu');
+
+      cabecalho.addEventListener('mouseenter', () => abrir(grupo));
+      submenu.addEventListener('mouseenter', () => clearTimeout(timerFechar));
+      cabecalho.addEventListener('mouseleave', agendarFechamento);
+      submenu.addEventListener('mouseleave', agendarFechamento);
+
+      cabecalho.addEventListener('click', () => {
+        if (grupo.classList.contains('nav-group--aberto')) fecharTodos();
+        else abrir(grupo);
+      });
+      cabecalho.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          if (grupo.classList.contains('nav-group--aberto')) fecharTodos(); else abrir(grupo);
+        } else if (e.key === 'Escape') {
+          fecharTodos(); cabecalho.blur();
+        }
+      });
+
+      // Teclado: manter aberto enquanto o foco estiver em qualquer item do grupo.
+      grupo.addEventListener('focusin', () => abrir(grupo));
+      grupo.addEventListener('focusout', (e) => {
+        if (!grupo.contains(e.relatedTarget)) agendarFechamento();
+      });
+
+      submenu.querySelectorAll('.nav-item').forEach((a) => a.addEventListener('click', fecharTodos));
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.nav-group')) fecharTodos();
     });
   }
 
@@ -198,6 +277,7 @@
   window.addEventListener('hashchange', navegar);
   window.addEventListener('DOMContentLoaded', async () => {
     if (!location.hash) location.hash = '#/inicio';
+    configurarSubmenus();
     verificarConexao();
     const cfg = await carregarPerfil();
     if (cfg.onboarding_ok !== '1') {
