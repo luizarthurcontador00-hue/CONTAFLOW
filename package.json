@@ -1,6 +1,6 @@
 {
   "name": "gestor-vendas-desktop",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "Sistema de gestao de vendas desktop (Electron + Express + SQLite) - vendas, estoque, PDV, financeiro e relatorios. Uso local, sem emissao de nota fiscal.",
   "author": "ContaFlow",
   "license": "UNLICENSED",

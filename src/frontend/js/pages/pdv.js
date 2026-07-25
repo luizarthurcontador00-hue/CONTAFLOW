@@ -13,6 +13,7 @@ window.PaginaPDV = (function () {
   let resultados = [];
   let selIdx = 0;
   let handlerTeclado = null;
+  let origemOS = null; // { osId, rotulo, cliente_id, desconto, itens } — quando vem de "Finalizar no PDV" (Ordens/Orçamentos)
 
   const FORMAS = [
     ['dinheiro', 'Dinheiro'], ['cartao_credito', 'Cartão crédito'],
@@ -21,12 +22,27 @@ window.PaginaPDV = (function () {
 
   async function render(container) {
     carrinho = [];
+    origemOS = null;
     caixa = await API.get('/api/caixa/atual').catch(() => null);
+
+    // Carrinho pre-carregado (ex.: "Finalizar no PDV" a partir de uma Ordem de Serviço).
+    const precarga = window.__pdvPreCarga;
+    if (precarga) {
+      window.__pdvPreCarga = null;
+      origemOS = precarga;
+      carrinho = precarga.itens.map((i) => ({
+        produto: { id: i.produto_id, nome: i.descricao },
+        quantidade: Number(i.quantidade) || 1,
+        preco: Number(i.preco_unitario) || 0,
+      }));
+    }
 
     container.innerHTML = `
       <div id="pdv-root" class="pdv">
         <div class="pdv__esq">
           <div id="caixa-bar"></div>
+          ${origemOS ? `<div class="pdv-os-banner" id="pdv-os-banner">🛠️ Carrinho vindo de <strong>${UI.escapar(origemOS.rotulo)}</strong> — ao concluir, a ordem será marcada como entregue.
+            <button class="btn btn--secundario" id="pdv-os-remover">Remover vínculo</button></div>` : ''}
           <div class="pdv-busca">
             <input id="pdv-input" type="text" placeholder="Código de barras ou nome do produto…  (F2)" autocomplete="off" />
             <button class="btn" id="pdv-add">Adicionar</button>
@@ -45,7 +61,7 @@ window.PaginaPDV = (function () {
             <div class="linha"><span>Subtotal</span><span id="pdv-subtotal">R$ 0,00</span></div>
             <div class="pdv-desconto linha" style="display:block">
               <span>Desconto (R$)</span>
-              <input id="pdv-desconto" type="number" min="0" step="0.01" value="0" />
+              <input id="pdv-desconto" type="number" min="0" step="0.01" value="${origemOS && origemOS.desconto ? origemOS.desconto : 0}" />
             </div>
             <hr style="border-color:#374151;margin:12px 0" />
             <div class="linha" style="align-items:baseline"><span>TOTAL</span><span class="total" id="pdv-total">R$ 0,00</span></div>
@@ -59,6 +75,14 @@ window.PaginaPDV = (function () {
           </div>
         </div>
       </div>`;
+
+    const remBtn = container.querySelector('#pdv-os-remover');
+    if (remBtn) remBtn.addEventListener('click', () => {
+      origemOS = null;
+      const banner = document.getElementById('pdv-os-banner');
+      if (banner) banner.remove();
+      UI.toast('Vínculo removido. Os itens continuam no carrinho.', 'info');
+    });
 
     renderCaixaBar();
     renderCarrinho();
@@ -323,6 +347,7 @@ window.PaginaPDV = (function () {
           if (!sel) return;
           sel.innerHTML = '<option value="">— sem cliente —</option>' +
             cls.map((c) => `<option value="${c.id}">${UI.escapar(c.nome)}${Number(c.saldo_devedor) > 0 ? ' (deve ' + UI.moeda(c.saldo_devedor) + ')' : ''}</option>`).join('');
+          if (origemOS && origemOS.cliente_id) sel.value = String(origemOS.cliente_id);
         }).catch(() => {});
 
         const recalc = () => {
@@ -362,19 +387,29 @@ window.PaginaPDV = (function () {
             cliente_id: clienteId,
             vencimento_prazo: vencInp && vencInp.value ? vencInp.value : null,
           });
+
+          const osFinalizada = origemOS;
+          if (osFinalizada) {
+            try { await API.post(`/api/ordens/${osFinalizada.osId}/vincular-venda`, { venda_id: venda.id }); }
+            catch (e2) { UI.erro('Venda concluída, mas houve erro ao vincular a ordem: ' + e2.message); }
+            origemOS = null;
+            const banner = document.getElementById('pdv-os-banner');
+            if (banner) banner.remove();
+          }
+
           carrinho = [];
           document.getElementById('pdv-desconto').value = 0;
           renderCarrinho(); limparBusca();
           caixa = await API.get('/api/caixa/atual').catch(() => caixa);
           renderCaixaBar();
-          abrirConclusao(venda);
+          abrirConclusao(venda, osFinalizada);
         } catch (e) { UI.erro(e.message); return false; }
       },
     });
   }
 
   // ----------------------- Conclusao / cupom -----------------------
-  function abrirConclusao(venda) {
+  function abrirConclusao(venda, osInfo) {
     Modal.abrir({
       titulo: `✅ Venda #${venda.id} concluída`,
       tamanho: 'modal--pequeno',
@@ -383,6 +418,7 @@ window.PaginaPDV = (function () {
           <div class="stat__value" style="color:var(--sucesso)">${UI.moeda(venda.valor_total)}</div>
           ${venda.troco > 0 ? `<p style="font-size:18px">Troco: <strong>${UI.moeda(venda.troco)}</strong></p>` : ''}
           <p class="muted">${venda.itens.length} item(ns)</p>
+          ${osInfo ? `<p class="dica">🛠️ ${UI.escapar(osInfo.rotulo)} marcada como entregue.</p>` : ''}
         </div>`,
       textoConfirmar: '🖨️ Imprimir cupom',
       aoConfirmar: async () => { await imprimirCupom(venda); return false; },

@@ -10,6 +10,7 @@
  */
 window.PaginaOrdens = (function () {
   let tipoAtual = 'os';       // 'os' | 'orcamento'
+  let vistaOS = 'lista';      // 'lista' | 'patio' (só se aplica a tipoAtual === 'os')
   let clientes = [];
   const filtros = { os: { busca: '', status: '' }, orcamento: { busca: '', status: '' } };
 
@@ -38,11 +39,27 @@ window.PaginaOrdens = (function () {
         <button class="subtab ${tipoAtual === 'os' ? 'subtab--ativa' : ''}" data-tipo="os">🛠️ Ordens de Serviço</button>
         <button class="subtab ${tipoAtual === 'orcamento' ? 'subtab--ativa' : ''}" data-tipo="orcamento">📄 Orçamentos</button>
       </div>
+      ${tipoAtual === 'os' ? `
+      <div class="subtabs">
+        <button class="subtab ${vistaOS === 'lista' ? 'subtab--ativa' : ''}" data-vista-os="lista">📋 Lista</button>
+        <button class="subtab ${vistaOS === 'patio' ? 'subtab--ativa' : ''}" data-vista-os="patio">🅿️ Pátio</button>
+      </div>` : ''}
       <div id="ord-conteudo"></div>`;
     container.querySelectorAll('[data-tipo]').forEach((b) => b.addEventListener('click', () => {
       tipoAtual = b.dataset.tipo; render(container);
     }));
-    await renderLista();
+    container.querySelectorAll('[data-vista-os]').forEach((b) => b.addEventListener('click', () => {
+      vistaOS = b.dataset.vistaOs; render(container);
+    }));
+
+    if (tipoAtual === 'os' && vistaOS === 'patio') await renderPatio();
+    else await renderLista();
+  }
+
+  /** Atualiza a lista ou o Pátio, conforme a visão atual (usado apos acoes). */
+  async function atualizarListaOuPatio() {
+    if (tipoAtual === 'os' && vistaOS === 'patio') await carregarPatio();
+    else await listar();
   }
 
   async function renderLista() {
@@ -244,10 +261,11 @@ window.PaginaOrdens = (function () {
             <button class="btn btn--secundario" id="det-print">🖨️ Imprimir</button>
             ${o.tipo === 'orcamento' && !o.venda_id ? '<button class="btn btn--secundario" id="det-geraros">→ Gerar OS</button>' : ''}
             ${podeEditar ? '<button class="btn btn--secundario" id="det-editar">Editar</button>' : ''}
-            ${!o.venda_id ? `<button class="btn" id="det-faturar">💲 Faturar</button>` : ''}
+            ${!o.venda_id ? `<button class="btn btn--secundario" id="det-faturar">💲 Faturar rápido</button>` : ''}
+            ${!o.venda_id ? `<button class="btn" id="det-pdv">🧾 Finalizar no PDV</button>` : ''}
           </div>`;
         el.querySelector('#det-status-btn').addEventListener('click', async () => {
-          try { await API.post(`/api/ordens/${o.id}/status`, { status: el.querySelector('#det-status').value }); UI.sucesso('Status atualizado.'); el.remove(); await listar(); }
+          try { await API.post(`/api/ordens/${o.id}/status`, { status: el.querySelector('#det-status').value }); UI.sucesso('Status atualizado.'); el.remove(); await atualizarListaOuPatio(); }
           catch (e) { UI.erro(e.message); }
         });
         el.querySelector('#det-print').addEventListener('click', () => imprimir(o));
@@ -260,6 +278,8 @@ window.PaginaOrdens = (function () {
         });
         const fat = el.querySelector('#det-faturar');
         if (fat) fat.addEventListener('click', () => faturar(o, el));
+        const pdv = el.querySelector('#det-pdv');
+        if (pdv) pdv.addEventListener('click', () => { el.remove(); enviarParaPDV(o); });
       },
     });
   }
@@ -282,7 +302,7 @@ window.PaginaOrdens = (function () {
           await API.post(`/api/ordens/${o.id}/faturar`, { forma_pagamento: forma, vencimento_prazo: el.querySelector('#fat-venc').value || null });
           UI.sucesso('Faturado! Venda gerada.');
           if (detalheEl) detalheEl.remove();
-          await listar();
+          await atualizarListaOuPatio();
         } catch (e) { UI.erro(e.message); return false; }
       },
     });
@@ -291,6 +311,30 @@ window.PaginaOrdens = (function () {
   function ehServicoResumo(o) {
     const temPeca = o.itens.some((i) => i.tipo === 'produto');
     return temPeca ? '' : 'Só há serviços — nenhum estoque é movimentado.';
+  }
+
+  /**
+   * Leva o usuário ao PDV com o carrinho pré-carregado pelos itens da ordem,
+   * para finalizar o pagamento com todos os recursos do balcão (múltiplas
+   * formas de pagamento, desconto, cupom). Ao concluir a venda no PDV, a
+   * ordem é automaticamente vinculada e marcada como entregue.
+   */
+  function enviarParaPDV(o) {
+    if (!o.itens.length) { UI.erro('Adicione itens antes de finalizar.'); return; }
+    const semVinculo = o.itens.filter((i) => !i.produto_id);
+    if (semVinculo.length) {
+      UI.erro('Para finalizar no PDV, todos os itens precisam estar vinculados a um produto ou serviço do cadastro.');
+      return;
+    }
+    const veiculo = o.tipo === 'os' && o.equipamento ? ' — ' + o.equipamento : '';
+    window.__pdvPreCarga = {
+      osId: o.id,
+      rotulo: `${rotulo(o.tipo)} #${o.numero}${veiculo}`,
+      cliente_id: o.cliente_id || null,
+      desconto: Number(o.desconto || 0),
+      itens: o.itens.map((i) => ({ produto_id: i.produto_id, descricao: i.descricao, quantidade: i.quantidade, preco_unitario: i.preco_unitario })),
+    };
+    location.hash = '#/pdv';
   }
 
   // ------------------------------ Impressão ------------------------------
@@ -319,6 +363,103 @@ window.PaginaOrdens = (function () {
       <p class="muted" style="margin-top:24px;text-align:center">${UI.escapar(loja.loja_rodape_cupom || '')}</p>
       </body></html>`;
     UI.imprimir(html);
+  }
+
+  // ------------------------------ Pátio da Oficina (Kanban) ------------------------------
+  const COLUNAS_PATIO = [
+    { status: 'aberta', titulo: '🅿️ Aguardando', avancarPara: 'em_andamento', avancarTxt: '▶ Iniciar' },
+    { status: 'em_andamento', titulo: '🔧 Em manutenção', avancarPara: 'concluida', avancarTxt: '✅ Concluir' },
+    { status: 'concluida', titulo: '✅ Concluído', avancarPara: null },
+    { status: 'entregue', titulo: '💲 Entregue / Pago', avancarPara: null },
+  ];
+
+  async function renderPatio() {
+    const alvo = document.getElementById('ord-conteudo');
+    alvo.innerHTML = `
+      <div class="barra-ferramentas">
+        <input type="search" id="pat-busca" class="cresce" placeholder="Buscar por nº, cliente, veículo…" />
+        <button class="btn" id="pat-novo">+ Nova OS</button>
+      </div>
+      <div id="pat-resumo" class="grid grid--cards mb-16"></div>
+      <div id="pat-kanban"><div class="card">Carregando…</div></div>`;
+    alvo.querySelector('#pat-busca').addEventListener('input', debounce(() => carregarPatio(), 250));
+    alvo.querySelector('#pat-novo').addEventListener('click', () => abrirForm());
+    await carregarPatio();
+  }
+
+  async function carregarPatio() {
+    const kanban = document.getElementById('pat-kanban');
+    if (!kanban) return;
+    const buscaEl = document.getElementById('pat-busca');
+    const busca = buscaEl ? buscaEl.value : '';
+    const params = new URLSearchParams({ tipo: 'os' });
+    if (busca) params.set('busca', busca);
+
+    let itens;
+    try { itens = await API.get('/api/ordens?' + params.toString()); }
+    catch (e) { kanban.innerHTML = `<div class="card"><span class="badge badge--erro">Erro</span> ${UI.escapar(e.message)}</div>`; return; }
+
+    // "Entregue" so mostra os ultimos 14 dias no painel, para nao virar uma lista sem fim.
+    const limite = new Date(); limite.setDate(limite.getDate() - 14);
+    const porColuna = { aberta: [], em_andamento: [], concluida: [], entregue: [] };
+    itens.forEach((o) => {
+      if (o.status === 'cancelada' || !porColuna[o.status]) return;
+      if (o.status === 'entregue') {
+        const dt = o.data_entrega ? new Date(String(o.data_entrega).replace(' ', 'T')) : null;
+        if (dt && dt < limite) return;
+      }
+      porColuna[o.status].push(o);
+    });
+
+    const resumo = document.getElementById('pat-resumo');
+    const noPatio = porColuna.aberta.length + porColuna.em_andamento.length + porColuna.concluida.length;
+    resumo.innerHTML = `
+      <div class="card stat"><span class="stat__label">Carros no pátio</span><span class="stat__value">${noPatio}</span></div>
+      <div class="card stat"><span class="stat__label">Aguardando</span><span class="stat__value" style="color:var(--alerta)">${porColuna.aberta.length}</span></div>
+      <div class="card stat"><span class="stat__label">Em manutenção</span><span class="stat__value" style="color:var(--primaria)">${porColuna.em_andamento.length}</span></div>
+      <div class="card stat"><span class="stat__label">Concluídos (aguard. pagamento)</span><span class="stat__value" style="color:var(--sucesso)">${porColuna.concluida.length}</span></div>`;
+
+    kanban.innerHTML = `<div class="patio-kanban">
+      ${COLUNAS_PATIO.map((c) => `
+        <div class="patio-coluna">
+          <div class="patio-coluna__titulo">${c.titulo} <span class="badge badge--muted">${porColuna[c.status].length}</span></div>
+          <div class="patio-coluna__cards">
+            ${porColuna[c.status].length ? porColuna[c.status].map((o) => cardPatio(o, c)).join('') : '<div class="patio-vazio">Nenhum</div>'}
+          </div>
+        </div>`).join('')}
+    </div>`;
+
+    kanban.querySelectorAll('[data-abrir]').forEach((el) => el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-acao]')) return;
+      verDetalhe(Number(el.dataset.abrir));
+    }));
+    kanban.querySelectorAll('[data-avancar]').forEach((b) => b.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try { await API.post(`/api/ordens/${b.dataset.avancar}/status`, { status: b.dataset.para }); await carregarPatio(); }
+      catch (err) { UI.erro(err.message); }
+    }));
+    kanban.querySelectorAll('[data-pdv]').forEach((b) => b.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try { enviarParaPDV(await API.get('/api/ordens/' + b.dataset.pdv)); } catch (err) { UI.erro(err.message); }
+    }));
+  }
+
+  function cardPatio(o, coluna) {
+    const veiculo = [o.equipamento, o.marca_modelo].filter(Boolean).join(' · ') || 'Sem veículo informado';
+    let acao = '';
+    if (coluna.avancarPara) {
+      acao = `<button class="btn btn--secundario" data-avancar="${o.id}" data-para="${coluna.avancarPara}">${coluna.avancarTxt}</button>`;
+    } else if (coluna.status === 'concluida') {
+      acao = `<button class="btn" data-pdv="${o.id}">🧾 Finalizar no PDV</button>`;
+    }
+    return `<div class="patio-card" data-abrir="${o.id}">
+      <div class="patio-card__num">#${o.numero}</div>
+      <div class="patio-card__cliente">${UI.escapar(o.cliente_nome || 'Sem cliente')}</div>
+      <div class="patio-card__veiculo">🚗 ${UI.escapar(veiculo)}</div>
+      ${o.responsavel ? `<div class="patio-card__resp">👤 ${UI.escapar(o.responsavel)}</div>` : ''}
+      <div class="patio-card__valor">${UI.moeda(o.valor_total)}</div>
+      ${acao ? `<div class="patio-card__acao" data-acao>${acao}</div>` : ''}
+    </div>`;
   }
 
   function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }

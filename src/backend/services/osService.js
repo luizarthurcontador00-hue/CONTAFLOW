@@ -193,15 +193,28 @@ function faturar(id, { forma_pagamento = 'dinheiro', vencimento_prazo, data } = 
     observacao: rotulo,
   });
 
+  return { os: vincularVenda(id, venda.id), venda };
+}
+
+/**
+ * Vincula uma venda ja existente (criada em outro lugar, ex.: PDV) a uma
+ * ordem/orcamento: grava venda_id e avanca o status, sem criar nova venda.
+ * Usada quando o usuario finaliza o pagamento diretamente na tela do PDV
+ * (carrinho pre-carregado com os itens da ordem).
+ */
+function vincularVenda(id, vendaId) {
+  const db = getDb();
+  const os = obter(id);
+  if (os.venda_id) throw new AppError('Esta ordem já foi faturada.');
+  if (!vendaId) throw new AppError('Informe a venda a vincular.');
   const novoStatus = os.tipo === 'orcamento' ? 'aprovado' : 'entregue';
   db.prepare(`
     UPDATE ordens_servico SET venda_id=?, status=?,
       data_entrega=COALESCE(data_entrega, datetime('now','localtime')),
       atualizado_em=datetime('now','localtime')
     WHERE id=?
-  `).run(venda.id, novoStatus, id);
-
-  return { os: obter(id), venda };
+  `).run(Number(vendaId), novoStatus, id);
+  return obter(id);
 }
 
 /** Gera uma OS a partir de um orçamento aprovado (copiando os itens). */
@@ -230,5 +243,5 @@ function excluir(id) {
 }
 
 module.exports = {
-  STATUS, listar, obter, criar, atualizar, mudarStatus, faturar, gerarOSDeOrcamento, excluir,
+  STATUS, listar, obter, criar, atualizar, mudarStatus, faturar, vincularVenda, gerarOSDeOrcamento, excluir,
 };
