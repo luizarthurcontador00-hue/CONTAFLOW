@@ -582,6 +582,32 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 13,
+    name: 'comissoes',
+    up(db) {
+      db.exec(`
+        -- Vincula a OS a um profissional cadastrado (opcional), para que o
+        -- trabalho de oficina/assistencia tecnica tambem entre no relatorio
+        -- de comissoes (alem dos atendimentos da Agenda, que ja tem o vinculo).
+        ALTER TABLE ordens_servico ADD COLUMN profissional_id INTEGER REFERENCES profissionais(id) ON DELETE SET NULL;
+        CREATE INDEX IF NOT EXISTS idx_os_profissional ON ordens_servico(profissional_id);
+
+        -- Registro de comissao ja lancada em Contas a Pagar, para nao lancar
+        -- a mesma comissao (profissional + periodo) duas vezes.
+        CREATE TABLE IF NOT EXISTS comissoes_lancamentos (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          profissional_id INTEGER NOT NULL REFERENCES profissionais(id) ON DELETE CASCADE,
+          periodo_inicio  TEXT NOT NULL,
+          periodo_fim     TEXT NOT NULL,
+          valor           REAL NOT NULL DEFAULT 0,
+          conta_pagar_id  INTEGER REFERENCES contas_pagar(id) ON DELETE SET NULL,
+          criado_em       TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_comissoes_lanc_prof ON comissoes_lancamentos(profissional_id);
+      `);
+    },
+  },
 ];
 
 /**

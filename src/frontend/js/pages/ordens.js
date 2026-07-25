@@ -12,6 +12,7 @@ window.PaginaOrdens = (function () {
   let tipoAtual = 'os';       // 'os' | 'orcamento'
   let vistaOS = 'lista';      // 'lista' | 'patio' (só se aplica a tipoAtual === 'os')
   let clientes = [];
+  let profissionais = [];
   const filtros = { os: { busca: '', status: '' }, orcamento: { busca: '', status: '' } };
 
   const STATUS = {
@@ -33,7 +34,10 @@ window.PaginaOrdens = (function () {
   function rotulo(tipo) { return tipo === 'orcamento' ? 'Orçamento' : 'OS'; }
 
   async function render(container) {
-    clientes = await API.get('/api/clientes').catch(() => []);
+    [clientes, profissionais] = await Promise.all([
+      API.get('/api/clientes').catch(() => []),
+      API.get('/api/agenda/profissionais').catch(() => []),
+    ]);
     container.innerHTML = `
       <div class="subtabs">
         <button class="subtab ${tipoAtual === 'os' ? 'subtab--ativa' : ''}" data-tipo="os">🛠️ Ordens de Serviço</button>
@@ -121,6 +125,8 @@ window.PaginaOrdens = (function () {
         <div class="campo ${isOS ? '' : 'col-2'}"><label>Cliente</label>
           <select name="cliente_id"><option value="">— sem cliente —</option>${clientes.map((c) => `<option value="${c.id}" ${String(o.cliente_id) === String(c.id) ? 'selected' : ''}>${UI.escapar(c.nome)}</option>`).join('')}</select></div>
         ${isOS ? `<div class="campo"><label>Responsável / técnico</label><input name="responsavel" value="${UI.escapar(o.responsavel || '')}" /></div>
+        <div class="campo"><label>Profissional <span class="dica">(para comissão)</span></label>
+          <select name="profissional_id"><option value="">— sem profissional —</option>${profissionais.map((p) => `<option value="${p.id}" ${String(o.profissional_id) === String(p.id) ? 'selected' : ''}>${UI.escapar(p.nome)}</option>`).join('')}</select></div>
         <div class="campo"><label>Equipamento / objeto</label><input name="equipamento" value="${UI.escapar(o.equipamento || '')}" placeholder="Ex.: Notebook Dell, Fiat Uno" /></div>
         <div class="campo"><label>Marca / modelo</label><input name="marca_modelo" value="${UI.escapar(o.marca_modelo || '')}" /></div>
         <div class="campo"><label>Série / placa / patrimônio</label><input name="identificacao" value="${UI.escapar(o.identificacao || '')}" /></div>
@@ -232,6 +238,7 @@ window.PaginaOrdens = (function () {
         <tr><th>Cliente</th><td>${UI.escapar(o.cliente_nome || '—')}${o.cliente_telefone ? ' · ' + UI.escapar(o.cliente_telefone) : ''}</td></tr>
         ${isOS ? `<tr><th>Equipamento</th><td>${UI.escapar(o.equipamento || '—')}${o.marca_modelo ? ' · ' + UI.escapar(o.marca_modelo) : ''}${o.identificacao ? ' · ' + UI.escapar(o.identificacao) : ''}</td></tr>
         <tr><th>Responsável</th><td>${UI.escapar(o.responsavel || '—')}</td></tr>
+        ${o.profissional_nome ? `<tr><th>Profissional</th><td>${UI.escapar(o.profissional_nome)}</td></tr>` : ''}
         <tr><th>Garantia</th><td>${o.garantia_dias ? o.garantia_dias + ' dias' : '—'}</td></tr>` : ''}
         ${o.defeito ? `<tr><th>${isOS ? 'Defeito/escopo' : 'Descrição'}</th><td>${UI.escapar(o.defeito)}</td></tr>` : ''}
         ${o.validade ? `<tr><th>Validade</th><td>${o.validade}</td></tr>` : ''}

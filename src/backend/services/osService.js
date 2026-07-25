@@ -59,10 +59,11 @@ function listar({ tipo, status, cliente_id, busca } = {}) {
     params.busca = `%${busca}%`;
   }
   return db.prepare(`
-    SELECT os.*, c.nome AS cliente_nome,
+    SELECT os.*, c.nome AS cliente_nome, p.nome AS profissional_nome, p.cor AS profissional_cor,
       (SELECT COUNT(*) FROM ordens_servico_itens i WHERE i.os_id = os.id) AS total_itens
     FROM ordens_servico os
     LEFT JOIN clientes c ON c.id = os.cliente_id
+    LEFT JOIN profissionais p ON p.id = os.profissional_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY os.numero DESC
   `).all(params);
@@ -71,8 +72,11 @@ function listar({ tipo, status, cliente_id, busca } = {}) {
 function obter(id) {
   const db = getDb();
   const os = db.prepare(`
-    SELECT os.*, c.nome AS cliente_nome, c.telefone AS cliente_telefone, c.cpf AS cliente_cpf
-    FROM ordens_servico os LEFT JOIN clientes c ON c.id = os.cliente_id
+    SELECT os.*, c.nome AS cliente_nome, c.telefone AS cliente_telefone, c.cpf AS cliente_cpf,
+      p.nome AS profissional_nome, p.cor AS profissional_cor
+    FROM ordens_servico os
+    LEFT JOIN clientes c ON c.id = os.cliente_id
+    LEFT JOIN profissionais p ON p.id = os.profissional_id
     WHERE os.id = ?
   `).get(id);
   if (!os) throw new AppError('Ordem/orçamento não encontrado.', 404);
@@ -89,6 +93,7 @@ function montarCabecalho(dados) {
     defeito: dados.defeito || null,
     laudo: dados.laudo || null,
     responsavel: dados.responsavel || null,
+    profissional_id: dados.profissional_id ? Number(dados.profissional_id) : null,
     observacao: dados.observacao || null,
     desconto: Number(dados.desconto || 0),
     garantia_dias: Number(dados.garantia_dias || 0),
@@ -110,9 +115,9 @@ function criar(dados) {
     const info = db.prepare(`
       INSERT INTO ordens_servico
         (tipo, numero, cliente_id, status, equipamento, marca_modelo, identificacao, defeito, laudo,
-         responsavel, observacao, desconto, valor_total, garantia_dias, validade, data_previsao)
+         responsavel, profissional_id, observacao, desconto, valor_total, garantia_dias, validade, data_previsao)
       VALUES (@tipo, @numero, @cliente_id, @status, @equipamento, @marca_modelo, @identificacao, @defeito, @laudo,
-         @responsavel, @observacao, @desconto, @valor_total, @garantia_dias, @validade, @data_previsao)
+         @responsavel, @profissional_id, @observacao, @desconto, @valor_total, @garantia_dias, @validade, @data_previsao)
     `).run({ tipo, numero, status: statusInicial, valor_total: total, ...h });
     const osId = info.lastInsertRowid;
     inserirItens(db, osId, itens);
@@ -141,7 +146,7 @@ function atualizar(id, dados) {
     db.prepare(`
       UPDATE ordens_servico SET
         cliente_id=@cliente_id, equipamento=@equipamento, marca_modelo=@marca_modelo, identificacao=@identificacao,
-        defeito=@defeito, laudo=@laudo, responsavel=@responsavel, observacao=@observacao, desconto=@desconto,
+        defeito=@defeito, laudo=@laudo, responsavel=@responsavel, profissional_id=@profissional_id, observacao=@observacao, desconto=@desconto,
         valor_total=@valor_total, garantia_dias=@garantia_dias, validade=@validade, data_previsao=@data_previsao,
         atualizado_em=datetime('now','localtime')
       WHERE id=@id

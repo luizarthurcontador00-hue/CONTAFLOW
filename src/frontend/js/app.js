@@ -20,6 +20,7 @@
     pdv: { titulo: 'PDV', pagina: () => window.PaginaPDV },
     precificacao: { titulo: 'Precificação', pagina: () => window.PaginaPrecificacao },
     financeiro: { titulo: 'Financeiro', pagina: () => window.PaginaFinanceiro },
+    comissoes: { titulo: 'Comissões', pagina: () => window.PaginaComissoes },
     dashboard: { titulo: 'Dashboard', pagina: () => window.PaginaDashboard },
     relatorios: { titulo: 'Relatórios', pagina: () => window.PaginaRelatorios },
     configuracoes: { titulo: 'Configurações', pagina: () => window.PaginaConfiguracoes },
@@ -36,7 +37,7 @@
   // 'salao' | 'oficina' | 'geral'. Refina ainda mais o que aparece —
   // ex.: Ordens de Serviço/Pátio (foco oficina) não faz sentido num salão.
   let ramo = 'geral';
-  const rotaPerfil = { produtos: 'comercio', compras: 'comercio', fornecedores: 'comercio', servicos: 'servico', agenda: 'servico' };
+  const rotaPerfil = { produtos: 'comercio', compras: 'comercio', fornecedores: 'comercio', servicos: 'servico', agenda: 'servico', comissoes: 'servico' };
 
   function rotaVisivel(nome) {
     if (nome === 'ordens') return perfil === 'comercio' || ramo !== 'salao';
