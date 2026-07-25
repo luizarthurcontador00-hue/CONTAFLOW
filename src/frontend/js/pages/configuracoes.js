@@ -21,6 +21,15 @@ window.PaginaConfiguracoes = (function () {
               <option value="ambos" ${(cfg.perfil_negocio || 'ambos') === 'ambos' ? 'selected' : ''}>Comércio e Serviço</option>
             </select>
             <span class="dica">Define quais módulos aparecem no menu. Recarrega o menu ao salvar.</span></div>
+          <div class="campo col-2" id="cfg-ramo-wrap" style="display:${(cfg.perfil_negocio === 'servico' || (cfg.perfil_negocio || 'ambos') === 'ambos') ? '' : 'none'}">
+            <label>Ramo de serviço</label>
+            <select name="ramo_servico">
+              <option value="salao" ${(cfg.ramo_servico || 'salao') === 'salao' ? 'selected' : ''}>💇 Salão / Barbearia / Estética</option>
+              <option value="oficina" ${cfg.ramo_servico === 'oficina' ? 'selected' : ''}>🔧 Oficina / Assistência técnica</option>
+              <option value="geral" ${cfg.ramo_servico === 'geral' ? 'selected' : ''}>💼 Outros serviços</option>
+            </select>
+            <span class="dica">Refina o que aparece no menu — ex.: "Ordens & Orçamentos" (Pátio/OS) fica escondido para Salão.</span>
+          </div>
           <div class="campo col-2"><label>Nome da loja</label><input name="nome_loja" value="${UI.escapar(cfg.nome_loja || '')}" /></div>
           <div class="campo"><label>Telefone</label><input name="loja_telefone" value="${UI.escapar(cfg.loja_telefone || '')}" /></div>
           <div class="campo"><label>CNPJ / CPF</label><input name="loja_cnpj" value="${UI.escapar(cfg.loja_cnpj || '')}" /></div>
@@ -68,6 +77,11 @@ window.PaginaConfiguracoes = (function () {
           </div>
         </form>
       </div>`;
+
+    container.querySelector('select[name="perfil_negocio"]').addEventListener('change', (e) => {
+      const wrap = container.querySelector('#cfg-ramo-wrap');
+      wrap.style.display = (e.target.value === 'servico' || e.target.value === 'ambos') ? '' : 'none';
+    });
 
     container.querySelector('#form-cfg').addEventListener('submit', async (ev) => {
       ev.preventDefault();

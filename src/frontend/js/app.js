@@ -32,9 +32,14 @@
   // Perfil do negócio: 'comercio' | 'servico' | 'ambos'. Controla quais
   // itens do menu (e rotas) ficam visíveis.
   let perfil = 'ambos';
+  // Ramo de atividade (só importa quando perfil inclui 'servico'):
+  // 'salao' | 'oficina' | 'geral'. Refina ainda mais o que aparece —
+  // ex.: Ordens de Serviço/Pátio (foco oficina) não faz sentido num salão.
+  let ramo = 'geral';
   const rotaPerfil = { produtos: 'comercio', compras: 'comercio', fornecedores: 'comercio', servicos: 'servico', agenda: 'servico' };
 
   function rotaVisivel(nome) {
+    if (nome === 'ordens') return perfil === 'comercio' || ramo !== 'salao';
     const p = rotaPerfil[nome];
     return !p || perfil === 'ambos' || perfil === p;
   }
@@ -44,6 +49,9 @@
       const mostra = perfil === 'ambos' || perfil === a.dataset.perfil;
       a.style.display = mostra ? '' : 'none';
     });
+    // Regra composta: Ordens & Orçamentos (Pátio/OS) some para o ramo "salão".
+    const linkOrdens = document.querySelector('.nav-item[data-rota="ordens"]');
+    if (linkOrdens) linkOrdens.style.display = rotaVisivel('ordens') ? '' : 'none';
     // Esconde o grupo inteiro (cabeçalho) quando nenhum item dele estiver visível.
     document.querySelectorAll('.nav-group').forEach((grupo) => {
       const filhos = Array.from(grupo.querySelectorAll('.nav-submenu > .nav-item'));
@@ -179,6 +187,7 @@
     let cfg = {};
     try { cfg = await API.get('/api/config'); } catch (_) { cfg = {}; }
     perfil = ['comercio', 'servico', 'ambos'].includes(cfg.perfil_negocio) ? cfg.perfil_negocio : 'ambos';
+    ramo = ['salao', 'oficina', 'geral'].includes(cfg.ramo_servico) ? cfg.ramo_servico : 'geral';
     aplicarPerfil();
     aplicarAparencia(cfg);
     return cfg;
@@ -239,15 +248,32 @@
             <button type="button" class="ob-opcao" data-p="servico"><span class="ob-opcao__ic">🧰</span><strong>Serviço</strong><span class="dica">Prestação de serviços (sem estoque)</span></button>
             <button type="button" class="ob-opcao ativa" data-p="ambos"><span class="ob-opcao__ic">🧩</span><strong>Comércio e Serviço</strong><span class="dica">Os dois no mesmo sistema</span></button>
           </div>
+        </div>
+        <div class="campo mt-16" id="ob-ramo-wrap" style="display:none">
+          <label>Qual o seu ramo de serviço? <span class="dica">(refina o que aparece no menu)</span></label>
+          <div id="ob-ramo" class="ob-perfil">
+            <button type="button" class="ob-opcao ativa" data-r="salao"><span class="ob-opcao__ic">💇</span><strong>Salão / Barbearia / Estética</strong><span class="dica">Agenda e catálogo de serviços</span></button>
+            <button type="button" class="ob-opcao" data-r="oficina"><span class="ob-opcao__ic">🔧</span><strong>Oficina / Assistência técnica</strong><span class="dica">Ordens de serviço, pátio e peças</span></button>
+            <button type="button" class="ob-opcao" data-r="geral"><span class="ob-opcao__ic">💼</span><strong>Outros serviços</strong><span class="dica">Consultoria, autônomo, geral</span></button>
+          </div>
         </div>`;
       let escolha = 'ambos';
+      let ramoEscolha = 'salao';
       Modal.abrir({
         titulo: 'Configuração inicial', tamanho: 'modal--grande', corpoHTML: corpo, textoConfirmar: 'Concluir',
         aoAbrir: (el) => {
-          el.querySelectorAll('.ob-opcao').forEach((b) => b.addEventListener('click', () => {
+          const ramoWrap = el.querySelector('#ob-ramo-wrap');
+          const atualizarRamoWrap = () => { ramoWrap.style.display = (escolha === 'servico' || escolha === 'ambos') ? '' : 'none'; };
+          el.querySelectorAll('#ob-perfil .ob-opcao').forEach((b) => b.addEventListener('click', () => {
             escolha = b.dataset.p;
-            el.querySelectorAll('.ob-opcao').forEach((x) => x.classList.toggle('ativa', x === b));
+            el.querySelectorAll('#ob-perfil .ob-opcao').forEach((x) => x.classList.toggle('ativa', x === b));
+            atualizarRamoWrap();
           }));
+          el.querySelectorAll('#ob-ramo .ob-opcao').forEach((b) => b.addEventListener('click', () => {
+            ramoEscolha = b.dataset.r;
+            el.querySelectorAll('#ob-ramo .ob-opcao').forEach((x) => x.classList.toggle('ativa', x === b));
+          }));
+          atualizarRamoWrap();
           // Sem botão de cancelar: o onboarding é obrigatório no primeiro uso.
           const cancelar = el.querySelector('.modal__foot .btn--secundario');
           if (cancelar) cancelar.style.display = 'none';
@@ -263,6 +289,7 @@
               loja_telefone: el.querySelector('#ob-tel').value,
               loja_cnpj: el.querySelector('#ob-doc').value,
               perfil_negocio: escolha,
+              ramo_servico: (escolha === 'servico' || escolha === 'ambos') ? ramoEscolha : 'geral',
               onboarding_ok: '1',
             });
             // Alinha a atividade da precificação ao perfil escolhido.
