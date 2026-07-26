@@ -40,6 +40,18 @@ const MAPA_TIPOS = {
   chat: 'texto', image: 'imagem', video: 'video',
   audio: 'audio', ptt: 'audio', document: 'documento', sticker: 'sticker',
 };
+/**
+ * Eventos internos do protocolo do WhatsApp (nao sao mensagens reais de
+ * alguem) que o whatsapp-web.js as vezes emite pelo mesmo evento "message":
+ * notificacao de troca de chave de criptografia, metadados de chamada/grupo,
+ * mensagem ainda nao decifrada, etc. Sem esse filtro, esses eventos criavam
+ * uma "mensagem recebida" fantasma no sistema que nunca existiu de verdade
+ * no WhatsApp do cliente.
+ */
+const TIPOS_SISTEMA = new Set([
+  'e2e_notification', 'notification_template', 'notification', 'gp2',
+  'group_notification', 'call_log', 'protocol', 'ciphertext', 'unknown', 'revoked',
+]);
 const EXT_POR_MIME = {
   'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif',
   'video/mp4': 'mp4', 'audio/ogg': 'ogg', 'audio/ogg; codecs=opus': 'ogg', 'audio/mpeg': 'mp3',
@@ -304,6 +316,7 @@ async function enviarRespostasBot(conversa, respostas) {
 /** Processa uma mensagem recebida do whatsapp-web.js: persiste, baixa midia, atualiza a conversa. */
 async function tratarMensagemRecebida(msg) {
   if (!msg.from || msg.from.endsWith('@g.us') || msg.from.endsWith('@newsletter') || msg.from === 'status@broadcast') return;
+  if (TIPOS_SISTEMA.has(msg.type)) return; // notificacao interna do protocolo, nao e mensagem de verdade
   const db = getDb();
 
   const wamid = (msg.id && msg.id._serialized) || null;
