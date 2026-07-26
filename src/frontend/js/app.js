@@ -15,6 +15,7 @@
     clientes: { titulo: 'Clientes', pagina: () => window.PaginaClientes },
     fornecedores: { titulo: 'Fornecedores', pagina: () => window.PaginaFornecedores },
     etiquetas: { titulo: 'Etiquetas', pagina: () => window.PaginaEtiquetas },
+    catalogo: { titulo: 'Catálogo', pagina: () => window.PaginaCatalogo },
     compras: { titulo: 'Compras', pagina: () => window.PaginaCompras },
     vendas: { titulo: 'Vendas', pagina: () => window.PaginaVendas },
     pdv: { titulo: 'PDV', pagina: () => window.PaginaPDV },
