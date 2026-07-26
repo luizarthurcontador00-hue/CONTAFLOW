@@ -215,6 +215,7 @@
     }
     const escalas = { pequeno: '14px', normal: '15px', grande: '17px', maior: '19px' };
     document.body.style.fontSize = escalas[cfg.fonte_escala] || '15px';
+    root.dataset.tema = cfg.tema === 'escuro' ? 'escuro' : 'claro';
 
     const logoEl = document.querySelector('.sidebar__logo');
     if (logoEl) {

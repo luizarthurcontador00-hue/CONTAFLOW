@@ -82,4 +82,30 @@ router.get('/financeiro', asyncHandler((req, res) => {
   enviar(res, { formato: req.query.formato, titulo: 'Relatorio Financeiro', colunas, linhas, json: dados });
 }));
 
+// ------------------------- Produtos parados -------------------------
+router.get('/parados', asyncHandler((req, res) => {
+  const dados = rel.produtosParados(req.query);
+  const colunas = [
+    { chave: 'nome', titulo: 'Produto' },
+    { chave: 'categoria', titulo: 'Categoria' },
+    { chave: 'estoque_atual', titulo: 'Estoque' },
+    { chave: 'dias_sem_venda', titulo: 'Dias sem venda' },
+    { chave: 'valor_parado', titulo: 'Valor parado (custo)' },
+  ];
+  const linhas = dados.itens.map((i) => ({
+    ...i, dias_sem_venda: i.dias_sem_venda == null ? 'Nunca vendido' : i.dias_sem_venda,
+    valor_parado: money(i.valor_parado),
+  }));
+  enviar(res, { formato: req.query.formato, titulo: 'Produtos Parados', colunas, linhas, json: dados });
+}));
+
+// ------------------------- Exportar para o contador -------------------------
+router.get('/contador', asyncHandler((req, res) => {
+  const buffer = rel.exportarContador(req.query);
+  const nome = `fechamento-${req.query.inicio || 'periodo'}.xlsx`;
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${nome}"`);
+  res.send(buffer);
+}));
+
 module.exports = router;

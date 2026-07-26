@@ -103,6 +103,11 @@ window.PaginaConfiguracoes = (function () {
             <select id="ap-fonte">
               ${[['pequeno', 'Pequeno'], ['normal', 'Normal'], ['grande', 'Grande'], ['maior', 'Maior']].map(([v, t]) => `<option value="${v}" ${(cfg.fonte_escala || 'normal') === v ? 'selected' : ''}>${t}</option>`).join('')}
             </select></div>
+          <div class="campo"><label>Tema</label>
+            <select id="ap-tema">
+              <option value="claro" ${(cfg.tema || 'claro') === 'claro' ? 'selected' : ''}>☀️ Claro</option>
+              <option value="escuro" ${cfg.tema === 'escuro' ? 'selected' : ''}>🌙 Escuro</option>
+            </select></div>
           <div class="campo col-2 flex gap-12">
             <button class="btn" type="submit">Salvar aparência</button>
             <button class="btn btn--secundario" type="button" id="ap-restaurar">Restaurar padrão</button>
@@ -170,6 +175,7 @@ window.PaginaConfiguracoes = (function () {
       const body = {
         cor_primaria: container.querySelector('#ap-cor').value,
         fonte_escala: container.querySelector('#ap-fonte').value,
+        tema: container.querySelector('#ap-tema').value,
       };
       if (remover) body.loja_logo = '';
       else if (logoNovo) body.loja_logo = logoNovo;
@@ -182,7 +188,7 @@ window.PaginaConfiguracoes = (function () {
 
     container.querySelector('#ap-restaurar').addEventListener('click', async () => {
       try {
-        await API.put('/api/config', { cor_primaria: '#2563eb', fonte_escala: 'normal', loja_logo: '' });
+        await API.put('/api/config', { cor_primaria: '#2563eb', fonte_escala: 'normal', tema: 'claro', loja_logo: '' });
         UI.sucesso('Aparência restaurada.');
         if (window.__recarregarPerfil) await window.__recarregarPerfil();
         render(container);

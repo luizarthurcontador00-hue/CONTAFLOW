@@ -17,16 +17,28 @@ window.PaginaRelatorios = (function () {
             <option value="estoque">Estoque atual</option>
             <option value="vendas">Vendas detalhado</option>
             <option value="financeiro">Financeiro</option>
+            <option value="parados">Produtos parados</option>
           </select></div>
         <div class="campo" id="r-periodo"><label class="dica">De</label><input type="date" id="r-inicio" value="${mesIni}"></div>
         <div class="campo" id="r-periodo2"><label class="dica">Até</label><input type="date" id="r-fim" value="${hoje}"></div>
+        <div class="campo" id="r-dias" style="display:none"><label class="dica">Sem vender há pelo menos (dias)</label><input type="number" id="r-dias-input" min="1" value="30" style="width:90px"></div>
         <button class="btn btn--secundario" id="r-gerar" style="align-self:end">Gerar</button>
         <div class="cresce"></div>
         <button class="btn btn--secundario" id="r-excel" style="align-self:end">⬇️ Excel</button>
         <button class="btn btn--secundario" id="r-csv" style="align-self:end">⬇️ CSV</button>
         <button class="btn" id="r-pdf" style="align-self:end">🖨️ Imprimir / PDF</button>
       </div>
-      <div class="card"><div id="r-conteudo">Selecione um relatório e clique em Gerar.</div></div>`;
+      <div class="card"><div id="r-conteudo">Selecione um relatório e clique em Gerar.</div></div>
+
+      <div class="card mt-16">
+        <h3 style="margin-top:0">📊 Exportar para o contador</h3>
+        <p class="dica">Gera uma planilha Excel com Vendas, Compras, Contas Pagas e Contas Recebidas do período — pronta para mandar pro contador fechar o mês.</p>
+        <div class="barra-ferramentas" style="margin-bottom:0">
+          <div class="campo"><label class="dica">De</label><input type="date" id="ec-inicio" value="${mesIni}"></div>
+          <div class="campo"><label class="dica">Até</label><input type="date" id="ec-fim" value="${hoje}"></div>
+          <button class="btn" id="ec-exportar" style="align-self:end">⬇️ Baixar planilha</button>
+        </div>
+      </div>`;
 
     const tipo = container.querySelector('#r-tipo');
     tipo.addEventListener('change', () => { relatorio = tipo.value; ajustarPeriodo(); });
@@ -34,23 +46,37 @@ window.PaginaRelatorios = (function () {
     container.querySelector('#r-excel').addEventListener('click', () => exportar('xls'));
     container.querySelector('#r-csv').addEventListener('click', () => exportar('csv'));
     container.querySelector('#r-pdf').addEventListener('click', imprimir);
+    container.querySelector('#ec-exportar').addEventListener('click', exportarContador);
     ajustarPeriodo();
     await gerar();
   }
 
   function ajustarPeriodo() {
-    const mostrar = relatorio !== 'estoque';
-    document.getElementById('r-periodo').style.display = mostrar ? '' : 'none';
-    document.getElementById('r-periodo2').style.display = mostrar ? '' : 'none';
+    const mostrarPeriodo = relatorio !== 'estoque' && relatorio !== 'parados';
+    document.getElementById('r-periodo').style.display = mostrarPeriodo ? '' : 'none';
+    document.getElementById('r-periodo2').style.display = mostrarPeriodo ? '' : 'none';
+    document.getElementById('r-dias').style.display = relatorio === 'parados' ? '' : 'none';
   }
 
   function params() {
     const p = new URLSearchParams();
-    if (relatorio !== 'estoque') {
+    if (relatorio !== 'estoque' && relatorio !== 'parados') {
       p.set('inicio', document.getElementById('r-inicio').value);
       p.set('fim', document.getElementById('r-fim').value);
     }
+    if (relatorio === 'parados') {
+      p.set('dias', document.getElementById('r-dias-input').value || 30);
+    }
     return p;
+  }
+
+  function exportarContador() {
+    const inicio = document.getElementById('ec-inicio').value;
+    const fim = document.getElementById('ec-fim').value;
+    const url = `/api/relatorios/contador?inicio=${inicio}&fim=${fim}`;
+    const a = document.createElement('a');
+    a.href = url; a.download = '';
+    document.body.appendChild(a); a.click(); a.remove();
   }
 
   async function gerar() {
@@ -62,7 +88,23 @@ window.PaginaRelatorios = (function () {
 
     if (relatorio === 'estoque') alvo.innerHTML = tabelaEstoque(dados);
     else if (relatorio === 'vendas') alvo.innerHTML = tabelaVendas(dados);
+    else if (relatorio === 'parados') alvo.innerHTML = tabelaParados(dados);
     else alvo.innerHTML = tabelaFinanceiro(dados);
+  }
+
+  function tabelaParados(d) {
+    return `
+      <div class="flex gap-12 mb-16" style="flex-wrap:wrap">
+        ${mini('Produtos parados', d.totais.itens)} ${mini('Valor parado (custo)', UI.moeda(d.totais.valor_parado))}
+      </div>
+      <div id="print-area"><h2 class="print-titulo">Produtos Parados</h2>
+      <p class="dica" style="margin-top:0">Itens com estoque que não vendem há um tempo — candidatos a promoção ou revisão de compra.</p>
+      <table class="tabela"><thead><tr><th>Produto</th><th>Categoria</th><th>Estoque</th><th>Dias sem venda</th><th>Valor parado</th></tr></thead>
+      <tbody>${d.itens.length ? d.itens.map((i) => `<tr>
+        <td>${UI.escapar(i.nome)}</td><td>${UI.escapar(i.categoria || '—')}</td><td>${UI.numero(i.estoque_atual)}</td>
+        <td>${i.dias_sem_venda == null ? '<span class="badge badge--erro">Nunca vendido</span>' : i.dias_sem_venda}</td>
+        <td>${UI.moeda(i.valor_parado)}</td>
+      </tr>`).join('') : '<tr><td colspan="5" class="muted">Nenhum produto parado nesse período.</td></tr>'}</tbody></table></div>`;
   }
 
   function tabelaEstoque(d) {

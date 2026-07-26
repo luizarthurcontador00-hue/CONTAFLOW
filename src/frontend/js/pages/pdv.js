@@ -13,6 +13,7 @@ window.PaginaPDV = (function () {
   let resultados = [];
   let selIdx = 0;
   let handlerTeclado = null;
+  let relogioInterval = null;
   let origemOS = null; // { osId, rotulo, cliente_id, desconto, itens } — quando vem de "Finalizar no PDV" (Ordens/Orçamentos)
 
   const FORMAS = [
@@ -57,6 +58,9 @@ window.PaginaPDV = (function () {
         </div>
         <div class="pdv__dir">
           <div class="pdv-total-card">
+            <div class="linha" style="margin-bottom:14px;font-size:12px;text-transform:uppercase;letter-spacing:1px">
+              <span>🖥️ PDV</span><span id="pdv-relogio" style="font-family:'Courier New',monospace"></span>
+            </div>
             <div class="linha"><span>Itens</span><span id="pdv-qtd-itens">0</span></div>
             <div class="linha"><span>Subtotal</span><span id="pdv-subtotal">R$ 0,00</span></div>
             <div class="pdv-desconto linha" style="display:block">
@@ -86,6 +90,15 @@ window.PaginaPDV = (function () {
 
     renderCaixaBar();
     renderCarrinho();
+
+    if (relogioInterval) clearInterval(relogioInterval);
+    const atualizarRelogio = () => {
+      const el = document.getElementById('pdv-relogio');
+      if (!el) { clearInterval(relogioInterval); return; }
+      el.textContent = new Date().toLocaleTimeString('pt-BR');
+    };
+    atualizarRelogio();
+    relogioInterval = setInterval(atualizarRelogio, 1000);
 
     const input = container.querySelector('#pdv-input');
     input.addEventListener('keydown', onInputKey);

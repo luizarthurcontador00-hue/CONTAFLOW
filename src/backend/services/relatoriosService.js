@@ -1,5 +1,6 @@
 'use strict';
 
+const XLSX = require('xlsx');
 const { getDb } = require('../db/connection');
 const { arred } = require('./precificacaoService');
 
@@ -76,6 +77,37 @@ function financeiro({ inicio, fim } = {}) {
   };
 }
 
+/**
+ * Produtos ativos, com estoque, que nao vendem ha X dias (ou nunca venderam).
+ * Ajuda a identificar estoque encalhado.
+ */
+function produtosParados({ dias } = {}) {
+  const db = getDb();
+  const limite = Math.max(0, dias !== undefined && dias !== null && dias !== '' ? Number(dias) : 30);
+  const itens = db.prepare(`
+    SELECT p.id, p.nome, c.nome AS categoria, p.estoque_atual, p.custo, p.preco_venda,
+      (p.estoque_atual * p.custo) AS valor_parado,
+      (SELECT MAX(v.data) FROM vendas_itens vi JOIN vendas v ON v.id = vi.venda_id
+        WHERE vi.produto_id = p.id AND v.status = 'concluida') AS ultima_venda
+    FROM produtos p LEFT JOIN categorias c ON c.id = p.categoria_id
+    WHERE p.ativo = 1 AND p.eh_kit = 0 AND p.eh_servico = 0 AND p.estoque_atual > 0
+  `).all();
+
+  const agora = Date.now();
+  const diasDesde = (dataISO) => Math.floor((agora - new Date(dataISO).getTime()) / 86400000);
+
+  const parados = itens
+    .map((i) => ({ ...i, dias_sem_venda: i.ultima_venda ? diasDesde(i.ultima_venda) : null }))
+    .filter((i) => i.dias_sem_venda === null || i.dias_sem_venda >= limite)
+    .map((i) => ({ ...i, valor_parado: arred(i.valor_parado) }))
+    .sort((a, b) => (b.dias_sem_venda ?? Infinity) - (a.dias_sem_venda ?? Infinity));
+
+  return {
+    itens: parados,
+    totais: { itens: parados.length, valor_parado: arred(parados.reduce((s, i) => s + Number(i.valor_parado), 0)) },
+  };
+}
+
 // ------------------------- Exportacao -------------------------
 
 function escaparCSV(v) {
@@ -106,7 +138,55 @@ function gerarXLS(titulo, colunas, linhas) {
     <table border="1"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></body></html>`;
 }
 
+/**
+ * Gera uma planilha .xlsx (varias abas) com vendas, compras e financeiro do
+ * periodo, pronta para mandar para o contador fechar o mes.
+ */
+function exportarContador({ inicio, fim } = {}) {
+  const db = getDb();
+  const ini = inicio || '0000-01-01';
+  const f = fim || '9999-12-31';
+
+  const vendas = db.prepare(`
+    SELECT v.id AS "Venda", date(v.data) AS "Data", v.valor_bruto AS "Bruto",
+      v.desconto AS "Desconto", v.valor_total AS "Total", v.status AS "Status",
+      (SELECT GROUP_CONCAT(forma_pagamento, ', ') FROM vendas_pagamentos vp WHERE vp.venda_id=v.id) AS "Formas de pagamento"
+    FROM vendas v WHERE date(v.data) BETWEEN date(?) AND date(?) ORDER BY v.id
+  `).all(ini, f);
+
+  const compras = db.prepare(`
+    SELECT c.id AS "Compra", c.numero_nf AS "Nº NF", f.nome AS "Fornecedor",
+      date(c.data_emissao) AS "Emissão", c.valor_total AS "Valor total", c.status AS "Status"
+    FROM compras c LEFT JOIN fornecedores f ON f.id = c.fornecedor_id
+    WHERE date(c.data_emissao) BETWEEN date(?) AND date(?) ORDER BY c.id
+  `).all(ini, f);
+
+  const contasPagas = db.prepare(`
+    SELECT cp.descricao AS "Descrição", f.nome AS "Fornecedor", cp.data_pagamento AS "Pago em", cp.valor AS "Valor"
+    FROM contas_pagar cp LEFT JOIN fornecedores f ON f.id = cp.fornecedor_id
+    WHERE cp.status = 'pago' AND date(cp.data_pagamento) BETWEEN date(?) AND date(?) ORDER BY date(cp.data_pagamento)
+  `).all(ini, f);
+
+  const contasRecebidas = db.prepare(`
+    SELECT cr.descricao AS "Descrição", c.nome AS "Cliente", cr.data_recebimento AS "Recebido em", cr.valor AS "Valor"
+    FROM contas_receber cr LEFT JOIN clientes c ON c.id = cr.cliente_id
+    WHERE cr.status = 'recebido' AND date(cr.data_recebimento) BETWEEN date(?) AND date(?) ORDER BY date(cr.data_recebimento)
+  `).all(ini, f);
+
+  const wb = XLSX.utils.book_new();
+  const addSheet = (nome, linhas) => {
+    const ws = linhas.length ? XLSX.utils.json_to_sheet(linhas) : XLSX.utils.aoa_to_sheet([['Sem registros no período']]);
+    XLSX.utils.book_append_sheet(wb, ws, nome);
+  };
+  addSheet('Vendas', vendas);
+  addSheet('Compras', compras);
+  addSheet('Contas Pagas', contasPagas);
+  addSheet('Contas Recebidas', contasRecebidas);
+
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+}
+
 module.exports = {
-  estoqueAtual, vendasDetalhado, financeiro,
+  estoqueAtual, vendasDetalhado, financeiro, produtosParados, exportarContador,
   gerarCSV, gerarXLS,
 };
