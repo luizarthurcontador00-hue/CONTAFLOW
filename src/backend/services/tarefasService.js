@@ -29,8 +29,11 @@ function criar(dados) {
   const titulo = (dados.titulo || '').trim();
   if (!titulo) throw new AppError('Informe o titulo da tarefa.');
   const info = db.prepare(
-    'INSERT INTO tarefas (titulo, descricao, responsavel_id, prazo) VALUES (?, ?, ?, ?)'
-  ).run(titulo, dados.descricao || null, dados.responsavel_id ? Number(dados.responsavel_id) : null, dados.prazo || null);
+    'INSERT INTO tarefas (titulo, descricao, responsavel_id, prazo, conversa_whatsapp_id) VALUES (?, ?, ?, ?, ?)'
+  ).run(
+    titulo, dados.descricao || null, dados.responsavel_id ? Number(dados.responsavel_id) : null, dados.prazo || null,
+    dados.conversa_whatsapp_id ? Number(dados.conversa_whatsapp_id) : null
+  );
   return db.prepare('SELECT * FROM tarefas WHERE id = ?').get(info.lastInsertRowid);
 }
 

@@ -771,6 +771,40 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 19,
+    name: 'atendimento-bot-e-melhorias',
+    up(db) {
+      db.exec(`
+        -- Confirmacao de entrega/leitura das mensagens enviadas.
+        ALTER TABLE mensagens_whatsapp ADD COLUMN status TEXT NOT NULL DEFAULT 'recebida';
+        -- status: recebida | enviada | entregue | lida | erro
+
+        -- Se a conversa esta sendo respondida pelo bot ou ja foi passada pra humano.
+        ALTER TABLE conversas_whatsapp ADD COLUMN modo_atual TEXT NOT NULL DEFAULT 'humano';
+        -- modo_atual: bot | humano
+        ALTER TABLE conversas_whatsapp ADD COLUMN atendente_id INTEGER REFERENCES profissionais(id) ON DELETE SET NULL;
+
+        -- Evita duplicar mensagem recebida (mesmo wa_message_id) e agiliza a busca do ack.
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_mensagens_wa_msgid ON mensagens_whatsapp(wa_message_id)
+          WHERE wa_message_id IS NOT NULL;
+
+        -- Bot configuravel por regras (gatilho -> resposta), sem precisar programar.
+        CREATE TABLE IF NOT EXISTS bot_respostas_whatsapp (
+          id               INTEGER PRIMARY KEY AUTOINCREMENT,
+          gatilho_tipo     TEXT NOT NULL DEFAULT 'palavra_chave', -- opcao_menu | palavra_chave
+          gatilho          TEXT NOT NULL,   -- "1" (opcao) ou "boleto,segunda via" (palavras, separadas por virgula)
+          resposta         TEXT NOT NULL,
+          transfere_humano INTEGER NOT NULL DEFAULT 0,
+          ordem            INTEGER NOT NULL DEFAULT 0,
+          ativo            INTEGER NOT NULL DEFAULT 1
+        );
+
+        -- Vincula uma tarefa criada a partir de uma conversa (rastreabilidade, opcional).
+        ALTER TABLE tarefas ADD COLUMN conversa_whatsapp_id INTEGER REFERENCES conversas_whatsapp(id) ON DELETE SET NULL;
+      `);
+    },
+  },
 ];
 
 /**
