@@ -31,7 +31,8 @@ jobs:
       - name: Remover chrome-headless-shell (nao usado, reduz o instalador)
         # O whatsapp-web.js roda em modo headless completo (nao "shell"), entao
         # esse binario extra baixado pelo Puppeteer nao e necessario.
-        run: node -e "require('fs').rmSync('puppeteer-cache/chrome-headless-shell', { recursive: true, force: true })"
+        run: |
+          node -e "require('fs').rmSync('puppeteer-cache/chrome-headless-shell', { recursive: true, force: true })"
 
       - name: Gerar e publicar o instalador (.exe) no GitHub Releases
         # electron-builder reconstroi o better-sqlite3 para o Electron, empacota
