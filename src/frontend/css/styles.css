@@ -486,31 +486,30 @@ kbd { background: var(--fundo-tabela-cabecalho); color: var(--texto); border: 1p
   margin-right: 6px; vertical-align: middle;
 }
 
-/* ===================== Menu lateral agrupado (submenus) ===================== */
+/* ===================== Menu lateral agrupado (submenus em sanfona) ===================== */
 .nav-group { position: relative; }
 .nav-group__cabecalho { cursor: pointer; user-select: none; }
 .nav-group__cabecalho:focus-visible { outline: 2px solid var(--primaria); outline-offset: -2px; }
 .nav-group__cabecalho.ativo { background: var(--primaria); color: #fff; }
 .nav-group__seta {
   margin-left: auto; font-size: 13px; opacity: 0; flex-shrink: 0;
-  transition: opacity .12s ease .04s;
+  transition: opacity .12s ease .04s, transform .15s ease;
 }
 .sidebar:hover .nav-group__seta, .sidebar:focus-within .nav-group__seta { opacity: .8; }
+.nav-group.nav-group--aberto > .nav-group__cabecalho .nav-group__seta { transform: rotate(90deg); }
 
+/* Expande logo abaixo do titulo do grupo, dentro do proprio menu lateral. */
 .nav-submenu {
   display: none;
-  position: fixed;
-  min-width: 220px;
-  background: #1f2937;
-  border-radius: 10px;
-  padding: 6px;
-  box-shadow: 6px 0 24px rgba(0,0,0,.35);
-  z-index: 200;
+  flex-direction: column;
+  margin: 2px 0 4px 10px;
+  padding-left: 8px;
+  border-left: 2px solid rgba(255,255,255,.12);
 }
-.nav-group.nav-group--aberto > .nav-submenu { display: flex; flex-direction: column; }
-/* Dentro do submenu (flyout), o texto sempre aparece — nao depende do hover/foco do trilho. */
+.nav-group.nav-group--aberto > .nav-submenu { display: flex; }
+/* Dentro do submenu expandido, o texto sempre aparece — nao depende do hover/foco do trilho. */
 .nav-submenu .nav-item__texto { opacity: 1; }
-.nav-submenu .nav-item { padding: 9px 12px; }
+.nav-submenu .nav-item { padding: 8px 10px; font-size: 13.5px; }
 
 /* ===================== Agenda: calendário mensal ===================== */
 .cal-grade { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }

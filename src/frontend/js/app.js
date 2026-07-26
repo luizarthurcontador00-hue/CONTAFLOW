@@ -48,7 +48,8 @@
   const rotaRamo = { crm: 'agencia_viagem', viagens: 'agencia_viagem' };
 
   function rotaVisivel(nome) {
-    if (nome === 'ordens' && (perfil === 'servico' || perfil === 'ambos') && ramo === 'salao') return false;
+    if (nome === 'ordens' && (perfil === 'servico' || perfil === 'ambos') && (ramo === 'salao' || ramo === 'agencia_viagem')) return false;
+    if (nome === 'agenda' && (perfil === 'servico' || perfil === 'ambos') && ramo === 'agencia_viagem') return false;
     if (rotaRamo[nome] && ramo !== rotaRamo[nome]) return false;
     const p = rotaPerfil[nome];
     return !p || perfil === 'ambos' || perfil === p;
@@ -60,7 +61,7 @@
       a.style.display = mostra ? '' : 'none';
     });
     // Regras compostas (dependem tambem do ramo, nao so do perfil).
-    ['ordens', 'crm', 'viagens'].forEach((nome) => {
+    ['ordens', 'agenda', 'crm', 'viagens'].forEach((nome) => {
       const link = document.querySelector(`.nav-item[data-rota="${nome}"]`);
       if (link) link.style.display = rotaVisivel(nome) ? '' : 'none';
     });
@@ -94,60 +95,32 @@
     }
   }
 
-  // ----------------------- Submenus do menu lateral (flyout ao passar o mouse) -----------------------
+  // ----------------------- Submenus do menu lateral (sanfona: expande abaixo do titulo ao clicar) -----------------------
   function configurarSubmenus() {
     const grupos = Array.from(document.querySelectorAll('.nav-group'));
-    let timerFechar = null;
 
     function fecharTodos() {
       grupos.forEach((g) => g.classList.remove('nav-group--aberto'));
     }
 
-    function abrir(grupo) {
-      clearTimeout(timerFechar);
-      grupos.forEach((g) => g.classList.toggle('nav-group--aberto', g === grupo));
-      const cabecalho = grupo.querySelector('.nav-group__cabecalho');
-      const submenu = grupo.querySelector('.nav-submenu');
-      const rSidebar = document.querySelector('.sidebar').getBoundingClientRect();
-      const rCabecalho = cabecalho.getBoundingClientRect();
-      submenu.style.left = rSidebar.right + 'px';
-      // Mantem o submenu dentro da tela verticalmente.
-      const alturaEstimada = submenu.offsetHeight || (submenu.children.length * 40 + 12);
-      const topo = Math.max(6, Math.min(rCabecalho.top, window.innerHeight - alturaEstimada - 6));
-      submenu.style.top = topo + 'px';
-    }
-
-    function agendarFechamento() {
-      clearTimeout(timerFechar);
-      timerFechar = setTimeout(fecharTodos, 220);
+    function alternar(grupo) {
+      const jaAberto = grupo.classList.contains('nav-group--aberto');
+      fecharTodos();
+      if (!jaAberto) grupo.classList.add('nav-group--aberto');
     }
 
     grupos.forEach((grupo) => {
       const cabecalho = grupo.querySelector('.nav-group__cabecalho');
       const submenu = grupo.querySelector('.nav-submenu');
 
-      cabecalho.addEventListener('mouseenter', () => abrir(grupo));
-      submenu.addEventListener('mouseenter', () => clearTimeout(timerFechar));
-      cabecalho.addEventListener('mouseleave', agendarFechamento);
-      submenu.addEventListener('mouseleave', agendarFechamento);
-
-      cabecalho.addEventListener('click', () => {
-        if (grupo.classList.contains('nav-group--aberto')) fecharTodos();
-        else abrir(grupo);
-      });
+      cabecalho.addEventListener('click', () => alternar(grupo));
       cabecalho.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          if (grupo.classList.contains('nav-group--aberto')) fecharTodos(); else abrir(grupo);
+          alternar(grupo);
         } else if (e.key === 'Escape') {
           fecharTodos(); cabecalho.blur();
         }
-      });
-
-      // Teclado: manter aberto enquanto o foco estiver em qualquer item do grupo.
-      grupo.addEventListener('focusin', () => abrir(grupo));
-      grupo.addEventListener('focusout', (e) => {
-        if (!grupo.contains(e.relatedTarget)) agendarFechamento();
       });
 
       submenu.querySelectorAll('.nav-item').forEach((a) => a.addEventListener('click', fecharTodos));
