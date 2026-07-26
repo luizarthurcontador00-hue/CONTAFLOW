@@ -497,7 +497,7 @@ function listarReceber({ status, inicio, fim } = {}) {
 
 /**
  * Cria conta a receber, com parcelamento opcional.
- * dados = { descricao, valor, parcelas?, primeiro_vencimento?, venda_id? }
+ * dados = { descricao, valor, parcelas?, primeiro_vencimento?, venda_id?, cliente_id? }
  */
 function criarReceber(dados) {
   const db = getDb();
@@ -507,12 +507,14 @@ function criarReceber(dados) {
   if (!(valor > 0)) throw new AppError('Informe um valor maior que zero.');
   const parcelas = Math.max(1, Number(dados.parcelas || 1));
   const primeiro = dados.primeiro_vencimento || hoje();
+  const clienteId = dados.cliente_id ? Number(dados.cliente_id) : null;
 
   const valorParcela = arred(valor / parcelas);
   const ins = db.prepare(
-    `INSERT INTO contas_receber (venda_id, descricao, valor, parcela, total_parcelas, vencimento, status)
-     VALUES (?, ?, ?, ?, ?, ?, 'pendente')`
+    `INSERT INTO contas_receber (venda_id, cliente_id, descricao, valor, parcela, total_parcelas, vencimento, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pendente')`
   );
+  const ids = [];
   const tx = db.transaction(() => {
     let acumulado = 0;
     for (let i = 1; i <= parcelas; i++) {
@@ -521,11 +523,12 @@ function criarReceber(dados) {
       acumulado = arred(acumulado + v);
       const venc = somarMeses(primeiro, i - 1);
       const desc = parcelas > 1 ? `${descricao} (${i}/${parcelas})` : descricao;
-      ins.run(dados.venda_id || null, desc, v, i, parcelas, venc);
+      const info = ins.run(dados.venda_id || null, clienteId, desc, v, i, parcelas, venc);
+      ids.push(info.lastInsertRowid);
     }
   });
   tx();
-  return { criadas: parcelas };
+  return { criadas: parcelas, ids };
 }
 
 function baixarReceber(id, { data_recebimento, forma_recebimento, conta_financeira_id } = {}) {

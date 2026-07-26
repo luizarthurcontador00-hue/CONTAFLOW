@@ -22,6 +22,8 @@
     precificacao: { titulo: 'Precificação', pagina: () => window.PaginaPrecificacao },
     financeiro: { titulo: 'Financeiro', pagina: () => window.PaginaFinanceiro },
     comissoes: { titulo: 'Comissões', pagina: () => window.PaginaComissoes },
+    crm: { titulo: 'CRM', pagina: () => window.PaginaCRM },
+    viagens: { titulo: 'Calendário de Viagens', pagina: () => window.PaginaViagens },
     dashboard: { titulo: 'Dashboard', pagina: () => window.PaginaDashboard },
     relatorios: { titulo: 'Relatórios', pagina: () => window.PaginaRelatorios },
     configuracoes: { titulo: 'Configurações', pagina: () => window.PaginaConfiguracoes },
@@ -38,10 +40,13 @@
   // 'salao' | 'oficina' | 'geral'. Refina ainda mais o que aparece —
   // ex.: Ordens de Serviço/Pátio (foco oficina) não faz sentido num salão.
   let ramo = 'geral';
-  const rotaPerfil = { produtos: 'comercio', compras: 'comercio', fornecedores: 'comercio', servicos: 'servico', agenda: 'servico', comissoes: 'servico' };
+  const rotaPerfil = { produtos: 'comercio', compras: 'comercio', fornecedores: 'comercio', servicos: 'servico', agenda: 'servico', comissoes: 'servico', crm: 'servico', viagens: 'servico' };
+  // Rotas exclusivas de um ramo especifico (so aparecem alem do filtro de perfil).
+  const rotaRamo = { crm: 'agencia_viagem', viagens: 'agencia_viagem' };
 
   function rotaVisivel(nome) {
-    if (nome === 'ordens') return perfil === 'comercio' || ramo !== 'salao';
+    if (nome === 'ordens' && (perfil === 'servico' || perfil === 'ambos') && ramo === 'salao') return false;
+    if (rotaRamo[nome] && ramo !== rotaRamo[nome]) return false;
     const p = rotaPerfil[nome];
     return !p || perfil === 'ambos' || perfil === p;
   }
@@ -51,9 +56,11 @@
       const mostra = perfil === 'ambos' || perfil === a.dataset.perfil;
       a.style.display = mostra ? '' : 'none';
     });
-    // Regra composta: Ordens & Orçamentos (Pátio/OS) some para o ramo "salão".
-    const linkOrdens = document.querySelector('.nav-item[data-rota="ordens"]');
-    if (linkOrdens) linkOrdens.style.display = rotaVisivel('ordens') ? '' : 'none';
+    // Regras compostas (dependem tambem do ramo, nao so do perfil).
+    ['ordens', 'crm', 'viagens'].forEach((nome) => {
+      const link = document.querySelector(`.nav-item[data-rota="${nome}"]`);
+      if (link) link.style.display = rotaVisivel(nome) ? '' : 'none';
+    });
     // Esconde o grupo inteiro (cabeçalho) quando nenhum item dele estiver visível.
     document.querySelectorAll('.nav-group').forEach((grupo) => {
       const filhos = Array.from(grupo.querySelectorAll('.nav-submenu > .nav-item'));
@@ -189,7 +196,7 @@
     let cfg = {};
     try { cfg = await API.get('/api/config'); } catch (_) { cfg = {}; }
     perfil = ['comercio', 'servico', 'ambos'].includes(cfg.perfil_negocio) ? cfg.perfil_negocio : 'ambos';
-    ramo = ['salao', 'oficina', 'geral'].includes(cfg.ramo_servico) ? cfg.ramo_servico : 'geral';
+    ramo = ['salao', 'oficina', 'agencia_viagem', 'geral'].includes(cfg.ramo_servico) ? cfg.ramo_servico : 'geral';
     aplicarPerfil();
     aplicarAparencia(cfg);
     return cfg;
@@ -257,6 +264,7 @@
           <div id="ob-ramo" class="ob-perfil">
             <button type="button" class="ob-opcao ativa" data-r="salao"><span class="ob-opcao__ic">💇</span><strong>Salão / Barbearia / Estética</strong><span class="dica">Agenda e catálogo de serviços</span></button>
             <button type="button" class="ob-opcao" data-r="oficina"><span class="ob-opcao__ic">🔧</span><strong>Oficina / Assistência técnica</strong><span class="dica">Ordens de serviço, pátio e peças</span></button>
+            <button type="button" class="ob-opcao" data-r="agencia_viagem"><span class="ob-opcao__ic">✈️</span><strong>Agência de viagem</strong><span class="dica">CRM de leads e calendário de viagens</span></button>
             <button type="button" class="ob-opcao" data-r="geral"><span class="ob-opcao__ic">💼</span><strong>Outros serviços</strong><span class="dica">Consultoria, autônomo, geral</span></button>
           </div>
         </div>`;

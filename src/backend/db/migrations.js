@@ -663,6 +663,48 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 16,
+    name: 'crm-agencia-viagem',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS leads (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          nome           TEXT NOT NULL,
+          telefone       TEXT,
+          email          TEXT,
+          origem         TEXT,                  -- whatsapp | indicacao | site | outro (preparado p/ integracao futura)
+          status         TEXT NOT NULL DEFAULT 'contato', -- contato | proposta | pagamento | vendido | perdido
+          observacao     TEXT,
+          cliente_id     INTEGER REFERENCES clientes(id) ON DELETE SET NULL,
+          criado_em      TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+          atualizado_em  TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
+
+        CREATE TABLE IF NOT EXISTS vendas_viagem (
+          id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+          lead_id                INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+          cliente_id             INTEGER REFERENCES clientes(id) ON DELETE SET NULL,
+          descricao              TEXT NOT NULL,     -- ex.: "Pacote Cancun 7 noites"
+          operadora              TEXT,               -- fornecedor/operadora terceira
+          numero_reserva         TEXT,
+          valor_venda            REAL NOT NULL DEFAULT 0,
+          agente_id              INTEGER REFERENCES profissionais(id) ON DELETE SET NULL,
+          comissao_pct           REAL,
+          comissao_valor         REAL NOT NULL DEFAULT 0,
+          data_ida               TEXT,
+          data_volta             TEXT,
+          observacao             TEXT,
+          conta_receber_id       INTEGER REFERENCES contas_receber(id) ON DELETE SET NULL,
+          conta_pagar_comissao_id INTEGER REFERENCES contas_pagar(id) ON DELETE SET NULL,
+          criado_em              TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_vendas_viagem_lead ON vendas_viagem(lead_id);
+        CREATE INDEX IF NOT EXISTS idx_vendas_viagem_datas ON vendas_viagem(data_ida, data_volta);
+      `);
+    },
+  },
 ];
 
 /**

@@ -578,3 +578,16 @@ kbd { background: var(--fundo-tabela-cabecalho); color: var(--texto); border: 1p
 
 /* ===================== Comissões ===================== */
 .cm-cor { display: inline-block; width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+
+/* ===================== Calendário de Viagens (CRM) ===================== */
+.viagens-tabela { overflow-x: auto; }
+.viagens-linha { display: grid; align-items: center; gap: 2px; min-height: 40px; border-bottom: 1px solid var(--borda); }
+.viagens-linha--cab { min-height: 30px; border-bottom: 2px solid var(--borda); font-weight: 700; }
+.viagens-rotulo { padding: 4px 10px 4px 0; font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; position: sticky; left: 0; background: var(--fundo-card); }
+.viagens-dia { text-align: center; font-size: 11px; color: var(--texto-suave); }
+.viagens-barra {
+  height: 26px; border-radius: 6px; color: #fff; font-size: 12px; font-weight: 600;
+  display: flex; align-items: center; padding: 0 8px; overflow: hidden; white-space: nowrap;
+  text-overflow: ellipsis; cursor: pointer; opacity: .92; transition: opacity .1s, transform .1s;
+}
+.viagens-barra:hover { opacity: 1; transform: scaleY(1.08); }
