@@ -24,6 +24,8 @@
     comissoes: { titulo: 'Comissões', pagina: () => window.PaginaComissoes },
     crm: { titulo: 'CRM', pagina: () => window.PaginaCRM },
     viagens: { titulo: 'Calendário de Viagens', pagina: () => window.PaginaViagens },
+    lembretes: { titulo: 'Lembretes', pagina: () => window.PaginaLembretes },
+    tarefas: { titulo: 'Tarefas', pagina: () => window.PaginaTarefas },
     dashboard: { titulo: 'Dashboard', pagina: () => window.PaginaDashboard },
     relatorios: { titulo: 'Relatórios', pagina: () => window.PaginaRelatorios },
     configuracoes: { titulo: 'Configurações', pagina: () => window.PaginaConfiguracoes },
@@ -191,6 +193,24 @@
     }
   }
 
+  // ----------------------- Aviso de lembretes vencidos/de hoje -----------------------
+  async function atualizarAvisoLembretes() {
+    const badge = document.getElementById('aviso-lembretes');
+    if (!badge) return;
+    try {
+      const vencidos = await API.get('/api/lembretes/vencidos');
+      if (vencidos.length) {
+        badge.style.display = '';
+        badge.className = 'badge badge--alerta';
+        badge.textContent = `🔔 ${vencidos.length} lembrete(s)`;
+        badge.title = vencidos.map((l) => l.titulo).join(', ');
+      } else {
+        badge.style.display = 'none';
+      }
+    } catch (_) { badge.style.display = 'none'; }
+  }
+  window.__atualizarAvisoLembretes = atualizarAvisoLembretes;
+
   // ----------------------- Onboarding / perfil do negócio -----------------------
   async function carregarPerfil() {
     let cfg = {};
@@ -317,6 +337,8 @@
     if (!location.hash) location.hash = '#/inicio';
     configurarSubmenus();
     verificarConexao();
+    atualizarAvisoLembretes();
+    setInterval(atualizarAvisoLembretes, 5 * 60 * 1000);
     const cfg = await carregarPerfil();
     if (cfg.onboarding_ok !== '1') {
       await abrirOnboarding();

@@ -11,6 +11,7 @@
 window.PaginaCRM = (function () {
   let leads = [];
   let agentes = [];
+  let checkins = [];
   let mostrarPerdidos = false;
 
   const COLUNAS = [
@@ -39,7 +40,10 @@ window.PaginaCRM = (function () {
   }
 
   async function listar() {
-    leads = await API.get('/api/crm/leads').catch(() => []);
+    [leads, checkins] = await Promise.all([
+      API.get('/api/crm/leads').catch(() => []),
+      API.get('/api/crm/checkins').catch(() => []),
+    ]);
     renderTudo();
   }
 
@@ -57,7 +61,11 @@ window.PaginaCRM = (function () {
         <div class="patio-coluna__titulo">${col.titulo} <span class="badge badge--muted">${itens.length}</span></div>
         <div class="patio-coluna__cards">${itens.length ? itens.map((l) => cardLead(l, col)).join('') : '<div class="patio-vazio">Vazio</div>'}</div>
       </div>`;
-    }).join('');
+    }).join('') + `
+      <div class="patio-coluna">
+        <div class="patio-coluna__titulo">✈️ Check-in a fazer <span class="badge badge--muted">${checkins.length}</span></div>
+        <div class="patio-coluna__cards">${checkins.length ? checkins.map(cardCheckin).join('') : '<div class="patio-vazio">Nenhum check-in pendente.</div>'}</div>
+      </div>`;
 
     alvo.querySelectorAll('[data-ver]').forEach((c) => c.addEventListener('click', () => formLead(leads.find((l) => l.id === Number(c.dataset.ver)))));
     alvo.querySelectorAll('[data-avancar]').forEach((b) => b.addEventListener('click', async (e) => {
@@ -76,6 +84,22 @@ window.PaginaCRM = (function () {
       try { await API.put(`/api/crm/leads/${b.dataset.perdido}`, { status: 'perdido' }); await listar(); }
       catch (err) { UI.erro(err.message); }
     }));
+    alvo.querySelectorAll('[data-checkin]').forEach((b) => b.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try { await API.post(`/api/crm/vendas/${b.dataset.checkin}/checkin`, {}); UI.sucesso('Check-in marcado como feito.'); await listar(); }
+      catch (err) { UI.erro(err.message); }
+    }));
+  }
+
+  function cardCheckin(v) {
+    return `<div class="patio-card">
+      <div class="patio-card__num">✈️ ${v.data_ida || 'sem data'}</div>
+      <div class="patio-card__cliente">${UI.escapar(v.cliente_nome)}</div>
+      <div class="patio-card__veiculo">${UI.escapar(v.descricao)}</div>
+      <div class="patio-card__acao">
+        <button class="btn" data-checkin="${v.id}">✓ Check-in feito</button>
+      </div>
+    </div>`;
   }
 
   function cardLead(l, col) {

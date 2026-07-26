@@ -705,6 +705,38 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 17,
+    name: 'checkin-lembretes-tarefas',
+    up(db) {
+      db.exec(`
+        ALTER TABLE vendas_viagem ADD COLUMN checkin_feito INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE vendas_viagem ADD COLUMN checkin_feito_em TEXT;
+
+        CREATE TABLE IF NOT EXISTS lembretes (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          titulo         TEXT NOT NULL,
+          descricao      TEXT,
+          data_lembrete  TEXT NOT NULL,   -- YYYY-MM-DD
+          concluido      INTEGER NOT NULL DEFAULT 0,
+          criado_em      TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_lembretes_data ON lembretes(data_lembrete);
+
+        CREATE TABLE IF NOT EXISTS tarefas (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          titulo          TEXT NOT NULL,
+          descricao       TEXT,
+          responsavel_id  INTEGER REFERENCES profissionais(id) ON DELETE SET NULL,
+          status          TEXT NOT NULL DEFAULT 'pendente', -- pendente | andamento | concluida
+          prazo           TEXT,
+          criado_em       TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+          concluido_em    TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_tarefas_status ON tarefas(status);
+      `);
+    },
+  },
 ];
 
 /**

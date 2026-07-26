@@ -77,6 +77,8 @@ function createApp() {
   montarRota(app, '/api/comissoes', './routes/comissoes');
   montarRota(app, '/api/fiscal', './routes/fiscal');
   montarRota(app, '/api/crm', './routes/crm');
+  montarRota(app, '/api/lembretes', './routes/lembretes');
+  montarRota(app, '/api/tarefas', './routes/tarefas');
   montarRota(app, '/api/ordens', './routes/ordens');
   montarRota(app, '/api/agenda', './routes/agenda');
   montarRota(app, '/api/dashboard', './routes/dashboard');

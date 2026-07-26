@@ -173,6 +173,27 @@ function listarViagens({ inicio, fim } = {}) {
   `).all(f, ini);
 }
 
+/** Viagens vendidas com check-in ainda pendente (para a coluna do Kanban). */
+function listarCheckinsPendentes() {
+  const db = getDb();
+  return db.prepare(`
+    SELECT vv.*, l.nome AS cliente_nome, l.telefone AS cliente_telefone
+    FROM vendas_viagem vv JOIN leads l ON l.id = vv.lead_id
+    WHERE vv.checkin_feito = 0
+    ORDER BY (vv.data_ida IS NULL), date(vv.data_ida)
+  `).all();
+}
+
+function marcarCheckinFeito(vendaViagemId) {
+  const db = getDb();
+  const venda = db.prepare('SELECT * FROM vendas_viagem WHERE id = ?').get(vendaViagemId);
+  if (!venda) throw new AppError('Venda de viagem nao encontrada.', 404);
+  db.prepare("UPDATE vendas_viagem SET checkin_feito = 1, checkin_feito_em = datetime('now','localtime') WHERE id = ?")
+    .run(vendaViagemId);
+  return db.prepare('SELECT * FROM vendas_viagem WHERE id = ?').get(vendaViagemId);
+}
+
 module.exports = {
   listarLeads, obterLead, criarLead, atualizarLead, excluirLead, fecharVenda, listarViagens,
+  listarCheckinsPendentes, marcarCheckinFeito,
 };

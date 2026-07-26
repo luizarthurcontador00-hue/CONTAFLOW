@@ -40,6 +40,8 @@
             <a href="#/ordens" data-rota="ordens" class="nav-item" title="Ordens & Orçamentos"><span class="nav-item__icone">🛠️</span><span class="nav-item__texto">Ordens/Orçam.</span></a>
             <a href="#/crm" data-rota="crm" data-perfil="servico" class="nav-item" title="CRM"><span class="nav-item__icone">📇</span><span class="nav-item__texto">CRM</span></a>
             <a href="#/viagens" data-rota="viagens" data-perfil="servico" class="nav-item" title="Calendário de Viagens"><span class="nav-item__icone">✈️</span><span class="nav-item__texto">Viagens</span></a>
+            <a href="#/tarefas" data-rota="tarefas" class="nav-item" title="Tarefas"><span class="nav-item__icone">✅</span><span class="nav-item__texto">Tarefas</span></a>
+            <a href="#/lembretes" data-rota="lembretes" class="nav-item" title="Lembretes"><span class="nav-item__icone">🔔</span><span class="nav-item__texto">Lembretes</span></a>
             <a href="#/compras" data-rota="compras" data-perfil="comercio" class="nav-item" title="Compras"><span class="nav-item__icone">🧾</span><span class="nav-item__texto">Compras</span></a>
           </div>
         </div>
@@ -84,7 +86,10 @@
     <main class="content">
       <header class="topbar">
         <h1 id="titulo-pagina">Início</h1>
-        <div id="status-banco" class="badge badge--muted">conectando…</div>
+        <div class="flex gap-12" style="align-items:center">
+          <a href="#/lembretes" id="aviso-lembretes" class="badge badge--muted" style="display:none;cursor:pointer" title="Ver lembretes"></a>
+          <div id="status-banco" class="badge badge--muted">conectando…</div>
+        </div>
       </header>
       <section id="view" class="view"><!-- conteudo dinamico --></section>
     </main>
@@ -105,6 +110,8 @@
   <script src="js/pages/ordens.js"></script>
   <script src="js/pages/crm.js"></script>
   <script src="js/pages/viagens.js"></script>
+  <script src="js/pages/lembretes.js"></script>
+  <script src="js/pages/tarefas.js"></script>
   <script src="js/pages/lote.js"></script>
   <script src="js/pages/clientes.js"></script>
   <script src="js/pages/fornecedores.js"></script>

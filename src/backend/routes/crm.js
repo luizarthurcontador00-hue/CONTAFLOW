@@ -15,4 +15,7 @@ router.post('/leads/:id/fechar-venda', asyncHandler((req, res) => res.status(201
 
 router.get('/viagens', asyncHandler((req, res) => res.json(crm.listarViagens(req.query))));
 
+router.get('/checkins', asyncHandler((req, res) => res.json(crm.listarCheckinsPendentes())));
+router.post('/vendas/:id/checkin', asyncHandler((req, res) => res.json(crm.marcarCheckinFeito(req.params.id))));
+
 module.exports = router;
