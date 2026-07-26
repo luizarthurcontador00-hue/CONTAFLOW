@@ -3,6 +3,7 @@ data/
 dist/
 *.log
 .DS_Store
+puppeteer-cache/
 
 # Banco de dados local e artefatos
 *.db

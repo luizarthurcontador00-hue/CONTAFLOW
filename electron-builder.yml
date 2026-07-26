@@ -36,8 +36,15 @@ files:
   - "!**/*.map"
 
 # better-sqlite3 possui codigo nativo (.node): precisa ficar fora do asar.
+# puppeteer-cache/ tem o Chromium usado pelo whatsapp-web.js (atendimento);
+# node_modules/whatsapp-web.js e puppeteer tambem precisam ficar fora do asar
+# para conseguirem executar o binario do Chromium normalmente.
 asarUnpack:
   - "**/node_modules/better-sqlite3/**"
+  - "puppeteer-cache/**"
+  - "**/node_modules/whatsapp-web.js/**"
+  - "**/node_modules/puppeteer/**"
+  - "**/node_modules/puppeteer-core/**"
 
 win:
   target:

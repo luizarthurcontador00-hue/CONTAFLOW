@@ -40,11 +40,13 @@ const baseDir = resolveBaseDir();
 const uploadsDir = path.join(baseDir, 'uploads');
 const produtosImgDir = path.join(uploadsDir, 'produtos');
 const notasDir = path.join(uploadsDir, 'notas');
+const whatsappMidiaDir = path.join(uploadsDir, 'whatsapp');
+const whatsappAuthDir = path.join(baseDir, 'whatsapp-auth');
 const backupsDir = path.join(baseDir, 'backups');
 const dbPath = path.join(baseDir, 'vendas.db');
 
 function ensureDirs() {
-  [baseDir, uploadsDir, produtosImgDir, notasDir, backupsDir].forEach((dir) => {
+  [baseDir, uploadsDir, produtosImgDir, notasDir, whatsappMidiaDir, whatsappAuthDir, backupsDir].forEach((dir) => {
     fs.mkdirSync(dir, { recursive: true });
   });
 }
@@ -54,6 +56,8 @@ module.exports = {
   uploadsDir,
   produtosImgDir,
   notasDir,
+  whatsappMidiaDir,
+  whatsappAuthDir,
   backupsDir,
   dbPath,
   ensureDirs,

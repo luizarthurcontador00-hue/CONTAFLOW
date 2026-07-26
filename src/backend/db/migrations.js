@@ -737,6 +737,40 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 18,
+    name: 'atendimento-whatsapp',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS conversas_whatsapp (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          wa_chat_id      TEXT NOT NULL UNIQUE,   -- id do chat no WhatsApp (ex.: 5511999999999@c.us)
+          nome_contato    TEXT,
+          telefone        TEXT,
+          status          TEXT NOT NULL DEFAULT 'contato', -- contato | aguardando | atendimento
+          nao_lidas       INTEGER NOT NULL DEFAULT 0,
+          lead_id         INTEGER REFERENCES leads(id) ON DELETE SET NULL,
+          cliente_id      INTEGER REFERENCES clientes(id) ON DELETE SET NULL,
+          ultima_mensagem_em TEXT,
+          criado_em       TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_conversas_wa_status ON conversas_whatsapp(status);
+
+        CREATE TABLE IF NOT EXISTS mensagens_whatsapp (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          conversa_id   INTEGER NOT NULL REFERENCES conversas_whatsapp(id) ON DELETE CASCADE,
+          wa_message_id TEXT,
+          direcao       TEXT NOT NULL,   -- recebida | enviada
+          tipo          TEXT NOT NULL DEFAULT 'texto', -- texto | imagem | video | audio | documento | sticker
+          texto         TEXT,
+          arquivo       TEXT,            -- nome do arquivo em uploads/whatsapp
+          arquivo_nome_original TEXT,
+          criado_em     TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_mensagens_wa_conversa ON mensagens_whatsapp(conversa_id);
+      `);
+    },
+  },
 ];
 
 /**

@@ -26,6 +26,7 @@
     viagens: { titulo: 'Calendário de Viagens', pagina: () => window.PaginaViagens },
     lembretes: { titulo: 'Lembretes', pagina: () => window.PaginaLembretes },
     tarefas: { titulo: 'Tarefas', pagina: () => window.PaginaTarefas },
+    atendimento: { titulo: 'Atendimento', pagina: () => window.PaginaAtendimento },
     dashboard: { titulo: 'Dashboard', pagina: () => window.PaginaDashboard },
     relatorios: { titulo: 'Relatórios', pagina: () => window.PaginaRelatorios },
     configuracoes: { titulo: 'Configurações', pagina: () => window.PaginaConfiguracoes },
