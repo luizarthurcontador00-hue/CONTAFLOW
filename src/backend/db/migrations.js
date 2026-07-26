@@ -608,6 +608,30 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 14,
+    name: 'assinaturas-mensalidades',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS assinaturas (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          cliente_id     INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+          descricao      TEXT NOT NULL,
+          valor          REAL NOT NULL DEFAULT 0,
+          dia_vencimento INTEGER NOT NULL,     -- 1 a 31 (ajustado ao ultimo dia do mes quando necessario)
+          data_inicio    TEXT NOT NULL DEFAULT (date('now','localtime')),
+          data_fim       TEXT,                 -- null = por tempo indeterminado
+          observacao     TEXT,
+          ativa          INTEGER NOT NULL DEFAULT 1,
+          criado_em      TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_assinaturas_cliente ON assinaturas(cliente_id);
+
+        ALTER TABLE contas_receber ADD COLUMN assinatura_id INTEGER REFERENCES assinaturas(id) ON DELETE SET NULL;
+        CREATE INDEX IF NOT EXISTS idx_creceber_assinatura ON contas_receber(assinatura_id);
+      `);
+    },
+  },
 ];
 
 /**

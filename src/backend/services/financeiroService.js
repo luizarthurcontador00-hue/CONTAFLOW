@@ -367,6 +367,117 @@ function gerarContasFixasPendentes() {
   return { geradas };
 }
 
+// ==================== Assinaturas (mensalidades recorrentes) ====================
+
+function listarAssinaturas({ cliente_id } = {}) {
+  const db = getDb();
+  const where = [];
+  const params = {};
+  if (cliente_id) { where.push('a.cliente_id = @cliente_id'); params.cliente_id = cliente_id; }
+  return db.prepare(`
+    SELECT a.*, c.nome AS cliente_nome
+    FROM assinaturas a JOIN clientes c ON c.id = a.cliente_id
+    ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+    ORDER BY (a.ativa = 0), c.nome
+  `).all(params);
+}
+
+function validarAssinatura(dados) {
+  const descricao = (dados.descricao || '').trim();
+  if (!descricao) throw new AppError('Informe a descricao da assinatura.');
+  if (!dados.cliente_id) throw new AppError('Selecione o cliente.');
+  if (!(Number(dados.valor) > 0)) throw new AppError('Informe um valor maior que zero.');
+  const dia = Number(dados.dia_vencimento);
+  if (!Number.isInteger(dia) || dia < 1 || dia > 31) {
+    throw new AppError('Informe um dia de vencimento entre 1 e 31.');
+  }
+  if (dados.data_fim && dados.data_inicio && dados.data_fim < dados.data_inicio) {
+    throw new AppError('A data de encerramento nao pode ser anterior ao inicio.');
+  }
+  return {
+    descricao, cliente_id: Number(dados.cliente_id), valor: Number(dados.valor), dia_vencimento: dia,
+    data_inicio: dados.data_inicio || hoje(),
+    data_fim: dados.data_fim || null,
+    observacao: (dados.observacao || '').trim() || null,
+  };
+}
+
+function criarAssinatura(dados) {
+  const db = getDb();
+  const d = validarAssinatura(dados);
+  const cliente = db.prepare('SELECT id FROM clientes WHERE id = ?').get(d.cliente_id);
+  if (!cliente) throw new AppError('Cliente nao encontrado.', 404);
+  const info = db.prepare(
+    'INSERT INTO assinaturas (cliente_id, descricao, valor, dia_vencimento, data_inicio, data_fim, observacao) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(d.cliente_id, d.descricao, d.valor, d.dia_vencimento, d.data_inicio, d.data_fim, d.observacao);
+  return db.prepare(
+    'SELECT a.*, c.nome AS cliente_nome FROM assinaturas a JOIN clientes c ON c.id = a.cliente_id WHERE a.id = ?'
+  ).get(info.lastInsertRowid);
+}
+
+function atualizarAssinatura(id, dados) {
+  const db = getDb();
+  const atual = db.prepare('SELECT * FROM assinaturas WHERE id = ?').get(id);
+  if (!atual) throw new AppError('Assinatura nao encontrada.', 404);
+  const d = validarAssinatura({ ...atual, ...dados });
+  const ativa = dados.ativa !== undefined ? (dados.ativa ? 1 : 0) : atual.ativa;
+  db.prepare(
+    'UPDATE assinaturas SET cliente_id=?, descricao=?, valor=?, dia_vencimento=?, data_inicio=?, data_fim=?, observacao=?, ativa=? WHERE id=?'
+  ).run(d.cliente_id, d.descricao, d.valor, d.dia_vencimento, d.data_inicio, d.data_fim, d.observacao, ativa, id);
+  return db.prepare(
+    'SELECT a.*, c.nome AS cliente_nome FROM assinaturas a JOIN clientes c ON c.id = a.cliente_id WHERE a.id = ?'
+  ).get(id);
+}
+
+function excluirAssinatura(id) {
+  // Nao apaga as contas a receber ja geradas (historico), so o modelo.
+  getDb().prepare('DELETE FROM assinaturas WHERE id = ?').run(id);
+  return { ok: true };
+}
+
+/**
+ * Gera as contas a receber do mes corrente para cada assinatura ativa (dentro
+ * da vigencia) que ainda nao tenha uma gerada neste mes. Idempotente: pode
+ * ser chamada varias vezes (na inicializacao do app e ao abrir a tela) sem
+ * duplicar, no mesmo espirito de gerarContasFixasPendentes().
+ */
+function gerarAssinaturasPendentes() {
+  const db = getDb();
+  const ativas = db.prepare(`
+    SELECT * FROM assinaturas
+    WHERE ativa = 1
+      AND date(data_inicio) <= date('now','localtime')
+      AND (data_fim IS NULL OR date(data_fim) >= date('now','localtime'))
+  `).all();
+  if (!ativas.length) return { geradas: 0 };
+
+  const agora = new Date();
+  const ano = agora.getFullYear();
+  const mes = agora.getMonth() + 1;
+  const aaMm = `${ano}-${String(mes).padStart(2, '0')}`;
+  const ultimoDia = ultimoDiaDoMes(ano, mes);
+
+  let geradas = 0;
+  const tx = db.transaction(() => {
+    const jaTem = db.prepare(
+      "SELECT 1 FROM contas_receber WHERE assinatura_id = ? AND strftime('%Y-%m', vencimento) = ?"
+    );
+    const inserir = db.prepare(
+      `INSERT INTO contas_receber (cliente_id, assinatura_id, descricao, valor, vencimento, status)
+       VALUES (?, ?, ?, ?, ?, 'pendente')`
+    );
+    for (const a of ativas) {
+      if (jaTem.get(a.id, aaMm)) continue;
+      const dia = Math.min(Number(a.dia_vencimento), ultimoDia);
+      const vencimento = `${aaMm}-${String(dia).padStart(2, '0')}`;
+      inserir.run(a.cliente_id, a.id, a.descricao, a.valor, vencimento);
+      geradas++;
+    }
+  });
+  tx();
+  return { geradas };
+}
+
 // ========================== Contas a receber ==========================
 
 function listarReceber({ status, inicio, fim } = {}) {
@@ -601,6 +712,7 @@ module.exports = {
   listarReceber, criarReceber, baixarReceber, reabrirReceber, excluirReceber,
   alertas, fluxoCaixa,
   listarContasFixas, criarContaFixa, atualizarContaFixa, excluirContaFixa, gerarContasFixasPendentes,
+  listarAssinaturas, criarAssinatura, atualizarAssinatura, excluirAssinatura, gerarAssinaturasPendentes,
   // contas financeiras (saldos)
   listarContasFinanceiras, criarContaFinanceira, atualizarContaFinanceira,
   ajustarSaldoConta, excluirContaFinanceira, extratoConta,

@@ -20,6 +20,13 @@ router.put('/contas-fixas/:id', asyncHandler((req, res) => res.json(fin.atualiza
 router.delete('/contas-fixas/:id', asyncHandler((req, res) => res.json(fin.excluirContaFixa(req.params.id))));
 router.post('/contas-fixas/gerar-pendentes', asyncHandler((req, res) => res.json(fin.gerarContasFixasPendentes())));
 
+// ------------------- Assinaturas (mensalidades recorrentes) ----------
+router.get('/assinaturas', asyncHandler((req, res) => res.json(fin.listarAssinaturas(req.query))));
+router.post('/assinaturas', asyncHandler((req, res) => res.status(201).json(fin.criarAssinatura(req.body || {}))));
+router.put('/assinaturas/:id', asyncHandler((req, res) => res.json(fin.atualizarAssinatura(req.params.id, req.body || {}))));
+router.delete('/assinaturas/:id', asyncHandler((req, res) => res.json(fin.excluirAssinatura(req.params.id))));
+router.post('/assinaturas/gerar-pendentes', asyncHandler((req, res) => res.json(fin.gerarAssinaturasPendentes())));
+
 // ------------------------- Contas a receber -------------------------
 router.get('/contas-receber', asyncHandler((req, res) => res.json(fin.listarReceber(req.query))));
 router.post('/contas-receber', asyncHandler((req, res) => res.status(201).json(fin.criarReceber(req.body || {}))));

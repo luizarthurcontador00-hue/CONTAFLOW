@@ -8,6 +8,7 @@
  */
 window.PaginaFinanceiro = (function () {
   let fornecedores = [];
+  let clientes = [];
   let contasFin = [];
   let categoriasDespesa = [];
   let abaAtual = 'pagar';
@@ -37,8 +38,9 @@ window.PaginaFinanceiro = (function () {
   }
 
   async function render(container) {
-    [fornecedores, categoriasDespesa] = await Promise.all([
+    [fornecedores, clientes, categoriasDespesa] = await Promise.all([
       API.get('/api/fornecedores').catch(() => []),
+      API.get('/api/clientes').catch(() => []),
       API.get('/api/financeiro/categorias-despesa').catch(() => []),
     ]);
     container.innerHTML = `
@@ -47,6 +49,7 @@ window.PaginaFinanceiro = (function () {
         <div class="tab ativo" data-aba="pagar">A Pagar</div>
         <div class="tab" data-aba="fixas">Contas Fixas</div>
         <div class="tab" data-aba="receber">A Receber</div>
+        <div class="tab" data-aba="assinaturas">Mensalidades</div>
         <div class="tab" data-aba="fluxo">Fluxo de Caixa</div>
         <div class="tab" data-aba="dre">DRE</div>
       </div>
@@ -58,7 +61,10 @@ window.PaginaFinanceiro = (function () {
       trocarAba();
     }));
 
-    await API.post('/api/financeiro/contas-fixas/gerar-pendentes', {}).catch(() => {});
+    await Promise.all([
+      API.post('/api/financeiro/contas-fixas/gerar-pendentes', {}).catch(() => {}),
+      API.post('/api/financeiro/assinaturas/gerar-pendentes', {}).catch(() => {}),
+    ]);
     carregarAlertas();
     trocarAba();
   }
@@ -79,6 +85,7 @@ window.PaginaFinanceiro = (function () {
     if (abaAtual === 'pagar') renderPagar();
     else if (abaAtual === 'fixas') renderContasFixas();
     else if (abaAtual === 'receber') renderReceber();
+    else if (abaAtual === 'assinaturas') renderAssinaturas();
     else if (abaAtual === 'dre') renderDRE();
     else renderFluxo();
   }
@@ -267,6 +274,104 @@ window.PaginaFinanceiro = (function () {
     });
   }
 
+  // -------------------------- Mensalidades ----------------------------
+  async function renderAssinaturas() {
+    const alvo = document.getElementById('fin-conteudo');
+    alvo.innerHTML = `
+      <p class="dica mb-16">Cadastre mensalidades de clientes (academia, escola, plano de serviço…). Todo mês, a cobrança é lançada automaticamente em "A Receber", no dia de vencimento escolhido.</p>
+      <div class="barra-ferramentas"><div class="cresce"></div><button class="btn" id="as-nova">+ Nova mensalidade</button></div>
+      <div class="card"><div id="as-lista">Carregando…</div></div>`;
+    alvo.querySelector('#as-nova').addEventListener('click', () => formAssinatura());
+    await listarAssinaturas();
+  }
+
+  async function listarAssinaturas() {
+    const alvo = document.getElementById('as-lista');
+    let assinaturas;
+    try { assinaturas = await API.get('/api/financeiro/assinaturas'); }
+    catch (e) { alvo.innerHTML = UI.escapar(e.message); return; }
+    if (!assinaturas.length) { alvo.innerHTML = '<p class="muted">Nenhuma mensalidade cadastrada.</p>'; return; }
+    const hoje = new Date().toISOString().slice(0, 10);
+    alvo.innerHTML = `<table class="tabela">
+      <thead><tr><th>Cliente</th><th>Descrição</th><th>Dia venc.</th><th>Valor</th><th>Vigência</th><th>Status</th><th></th></tr></thead>
+      <tbody>${assinaturas.map((a) => {
+        const encerrada = a.data_fim && a.data_fim < hoje;
+        return `<tr style="${a.ativa && !encerrada ? '' : 'opacity:.55'}">
+        <td>${UI.escapar(a.cliente_nome)}</td>
+        <td>${UI.escapar(a.descricao)}</td>
+        <td>Dia ${a.dia_vencimento}</td>
+        <td>${UI.moeda(a.valor)}</td>
+        <td>${a.data_inicio || '—'} até ${a.data_fim || 'indeterminado'}</td>
+        <td>${encerrada ? '<span class="badge badge--muted">Encerrada</span>' : (a.ativa ? '<span class="badge badge--ok">Ativa</span>' : '<span class="badge badge--muted">Pausada</span>')}</td>
+        <td style="text-align:right;white-space:nowrap">
+          <button class="btn btn--secundario" data-as-pausar="${a.id}" data-ativa="${a.ativa}">${a.ativa ? 'Pausar' : 'Reativar'}</button>
+          <button class="btn btn--secundario" data-as-editar="${a.id}">Editar</button>
+          <button class="btn btn--secundario" data-as-excluir="${a.id}">✕</button>
+        </td>
+      </tr>`;
+      }).join('')}</tbody></table>`;
+
+    alvo.querySelectorAll('[data-as-editar]').forEach((b) => b.addEventListener('click', () => {
+      const a = assinaturas.find((x) => x.id === Number(b.dataset.asEditar));
+      formAssinatura(a);
+    }));
+    alvo.querySelectorAll('[data-as-pausar]').forEach((b) => b.addEventListener('click', async () => {
+      const ativa = b.dataset.ativa === '1';
+      try {
+        await API.put(`/api/financeiro/assinaturas/${b.dataset.asPausar}`, { ativa: !ativa });
+        UI.sucesso(ativa ? 'Mensalidade pausada.' : 'Mensalidade reativada.');
+        await listarAssinaturas();
+      } catch (e) { UI.erro(e.message); }
+    }));
+    alvo.querySelectorAll('[data-as-excluir]').forEach((b) => b.addEventListener('click', async () => {
+      const ok = await UI.confirmar('Excluir esta mensalidade? As cobranças já lançadas em meses anteriores não serão apagadas.', { titulo: 'Excluir mensalidade', textoConfirmar: 'Excluir' });
+      if (!ok) return;
+      try { await API.del(`/api/financeiro/assinaturas/${b.dataset.asExcluir}`); UI.sucesso('Mensalidade excluída.'); await listarAssinaturas(); }
+      catch (e) { UI.erro(e.message); }
+    }));
+  }
+
+  function formAssinatura(a) {
+    const ehEdicao = !!a;
+    Modal.abrir({
+      titulo: ehEdicao ? 'Editar mensalidade' : 'Nova mensalidade', tamanho: 'modal--pequeno',
+      corpoHTML: `
+        <div class="campo"><label>Cliente *</label><select id="as-cliente" ${ehEdicao ? 'disabled' : ''}>
+          <option value="">— selecione —</option>${clientes.map((c) => `<option value="${c.id}" ${a && String(a.cliente_id) === String(c.id) ? 'selected' : ''}>${UI.escapar(c.nome)}</option>`).join('')}
+        </select></div>
+        <div class="campo mt-16"><label>Descrição *</label><input id="as-desc" value="${UI.escapar(a ? a.descricao : '')}" placeholder="Ex.: Mensalidade academia, Plano manutenção" /></div>
+        <div class="form-grid mt-16">
+          <div class="campo"><label>Valor (R$) *</label><input id="as-valor" type="number" step="0.01" min="0" value="${a ? a.valor : ''}" /></div>
+          <div class="campo"><label>Dia do vencimento *</label><input id="as-dia" type="number" min="1" max="31" value="${a ? a.dia_vencimento : ''}" /></div>
+        </div>
+        <div class="form-grid mt-16">
+          <div class="campo"><label>Início</label><input id="as-inicio" type="date" value="${a ? a.data_inicio : new Date().toISOString().slice(0, 10)}" /></div>
+          <div class="campo"><label>Encerramento <span class="dica">(opcional)</span></label><input id="as-fim" type="date" value="${a && a.data_fim ? a.data_fim : ''}" /></div>
+        </div>
+        <div class="campo mt-16"><label>Observação</label><input id="as-obs" value="${UI.escapar(a && a.observacao ? a.observacao : '')}" /></div>
+        <div class="dica mt-16">Todo mês, no dia informado (ajustado se o mês não tiver esse dia), uma conta a receber é criada automaticamente para o cliente, dentro do período de vigência.</div>`,
+      textoConfirmar: 'Salvar',
+      aoConfirmar: async (el) => {
+        const dados = {
+          cliente_id: el.querySelector('#as-cliente').value || null,
+          descricao: el.querySelector('#as-desc').value,
+          valor: el.querySelector('#as-valor').value,
+          dia_vencimento: el.querySelector('#as-dia').value,
+          data_inicio: el.querySelector('#as-inicio').value || null,
+          data_fim: el.querySelector('#as-fim').value || null,
+          observacao: el.querySelector('#as-obs').value,
+        };
+        try {
+          if (ehEdicao) await API.put(`/api/financeiro/assinaturas/${a.id}`, dados);
+          else await API.post('/api/financeiro/assinaturas', dados);
+          UI.sucesso(ehEdicao ? 'Mensalidade atualizada.' : 'Mensalidade cadastrada.');
+          await API.post('/api/financeiro/assinaturas/gerar-pendentes', {}).catch(() => {});
+          await listarAssinaturas();
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
   // ---------------------------- A Receber ----------------------------
   async function renderReceber() {
     const alvo = document.getElementById('fin-conteudo');
@@ -324,7 +429,7 @@ window.PaginaFinanceiro = (function () {
         const quitada = c.status === 'pago' || c.status === 'recebido';
         const ehVista = c.tipo === 'venda_vista';
         return `<tr>
-          <td>${UI.escapar(c.descricao)}${tipo === 'pagar' && c.conta_fixa_id ? ' <span class="badge badge--muted" title="Gerada automaticamente de uma conta fixa">🔁 fixa</span>' : ''}${tipo === 'pagar' && c.total_parcelas > 1 ? ` <span class="badge badge--muted">${c.parcela}/${c.total_parcelas}</span>` : ''}${tipo === 'pagar' && c.categoria_nome ? `<div class="dica">🏷️ ${UI.escapar(c.categoria_nome)}</div>` : ''}</td>
+          <td>${UI.escapar(c.descricao)}${tipo === 'pagar' && c.conta_fixa_id ? ' <span class="badge badge--muted" title="Gerada automaticamente de uma conta fixa">🔁 fixa</span>' : ''}${tipo === 'receber' && c.assinatura_id ? ' <span class="badge badge--muted" title="Gerada automaticamente de uma mensalidade">🔁 mensalidade</span>' : ''}${tipo === 'pagar' && c.total_parcelas > 1 ? ` <span class="badge badge--muted">${c.parcela}/${c.total_parcelas}</span>` : ''}${tipo === 'pagar' && c.categoria_nome ? `<div class="dica">🏷️ ${UI.escapar(c.categoria_nome)}</div>` : ''}</td>
           ${tipo === 'pagar' ? `<td>${UI.escapar(c.fornecedor_nome || '—')}</td>` : ''}
           <td>${c.vencimento || '—'}</td>
           <td>${UI.moeda(c.valor)}</td>
