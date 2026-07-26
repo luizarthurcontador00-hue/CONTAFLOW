@@ -10,14 +10,17 @@ window.PaginaRelatorios = (function () {
   async function render(container) {
     const hoje = new Date().toISOString().slice(0, 10);
     const mesIni = hoje.slice(0, 8) + '01';
+    // "Estoque atual" e "Produtos parados" so fazem sentido para quem vende produtos.
+    const temProdutos = window.__perfilNegocio !== 'servico';
+    if (!temProdutos && (relatorio === 'estoque' || relatorio === 'parados')) relatorio = 'vendas';
     container.innerHTML = `
       <div class="barra-ferramentas">
         <div class="campo"><label class="dica">Relatório</label>
           <select id="r-tipo">
-            <option value="estoque">Estoque atual</option>
-            <option value="vendas">Vendas detalhado</option>
-            <option value="financeiro">Financeiro</option>
-            <option value="parados">Produtos parados</option>
+            ${temProdutos ? `<option value="estoque" ${relatorio === 'estoque' ? 'selected' : ''}>Estoque atual</option>` : ''}
+            <option value="vendas" ${relatorio === 'vendas' ? 'selected' : ''}>Vendas detalhado</option>
+            <option value="financeiro" ${relatorio === 'financeiro' ? 'selected' : ''}>Financeiro</option>
+            ${temProdutos ? `<option value="parados" ${relatorio === 'parados' ? 'selected' : ''}>Produtos parados</option>` : ''}
           </select></div>
         <div class="campo" id="r-periodo"><label class="dica">De</label><input type="date" id="r-inicio" value="${mesIni}"></div>
         <div class="campo" id="r-periodo2"><label class="dica">Até</label><input type="date" id="r-fim" value="${hoje}"></div>

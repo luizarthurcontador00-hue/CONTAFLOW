@@ -43,7 +43,10 @@
   // 'salao' | 'oficina' | 'geral'. Refina ainda mais o que aparece —
   // ex.: Ordens de Serviço/Pátio (foco oficina) não faz sentido num salão.
   let ramo = 'geral';
-  const rotaPerfil = { produtos: 'comercio', compras: 'comercio', fornecedores: 'comercio', servicos: 'servico', agenda: 'servico', comissoes: 'servico', crm: 'servico', viagens: 'servico' };
+  const rotaPerfil = {
+    produtos: 'comercio', compras: 'comercio', fornecedores: 'comercio', precificacao: 'comercio',
+    servicos: 'servico', agenda: 'servico', ordens: 'servico', comissoes: 'servico', crm: 'servico', viagens: 'servico',
+  };
   // Rotas exclusivas de um ramo especifico (so aparecem alem do filtro de perfil).
   const rotaRamo = { crm: 'agencia_viagem', viagens: 'agencia_viagem' };
 
@@ -191,6 +194,8 @@
     try { cfg = await API.get('/api/config'); } catch (_) { cfg = {}; }
     perfil = ['comercio', 'servico', 'ambos'].includes(cfg.perfil_negocio) ? cfg.perfil_negocio : 'ambos';
     ramo = ['salao', 'oficina', 'agencia_viagem', 'geral'].includes(cfg.ramo_servico) ? cfg.ramo_servico : 'geral';
+    window.__perfilNegocio = perfil;
+    window.__ramoServico = ramo;
     aplicarPerfil();
     aplicarAparencia(cfg);
     return cfg;

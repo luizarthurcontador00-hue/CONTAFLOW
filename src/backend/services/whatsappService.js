@@ -381,8 +381,43 @@ async function tratarMensagemRecebida(msg) {
 
 function listarConversas({ status: filtroStatus } = {}) {
   const db = getDb();
-  const where = filtroStatus ? 'WHERE status = @status' : '';
-  return db.prepare(`SELECT * FROM conversas_whatsapp ${where} ORDER BY (ultima_mensagem_em IS NULL), datetime(ultima_mensagem_em) DESC`).all({ status: filtroStatus });
+  const where = filtroStatus ? 'WHERE c.status = @status' : '';
+  return db.prepare(`
+    SELECT c.*,
+      (SELECT tipo FROM mensagens_whatsapp m WHERE m.conversa_id = c.id ORDER BY m.id DESC LIMIT 1) AS ultima_mensagem_tipo,
+      (SELECT texto FROM mensagens_whatsapp m WHERE m.conversa_id = c.id ORDER BY m.id DESC LIMIT 1) AS ultima_mensagem_texto
+    FROM conversas_whatsapp c
+    ${where}
+    ORDER BY (c.ultima_mensagem_em IS NULL), datetime(c.ultima_mensagem_em) DESC
+  `).all({ status: filtroStatus });
+}
+
+/** Inicia uma conversa nova (a equipe fala primeiro com um numero que ainda nao escreveu). */
+async function iniciarConversa(telefone, texto) {
+  if (!client || estado !== 'conectado') throw new AppError('WhatsApp não está conectado. Conecte em Atendimento antes de iniciar uma conversa.');
+  const numeroLimpo = String(telefone || '').replace(/\D/g, '');
+  if (!numeroLimpo) throw new AppError('Informe um telefone válido.');
+  const texto2 = (texto || '').trim();
+  if (!texto2) throw new AppError('Mensagem vazia.');
+
+  let numeroId;
+  try { numeroId = await client.getNumberId(numeroLimpo); } catch (e) {
+    throw new AppError('Não foi possível validar esse número no WhatsApp: ' + descreverErro(e));
+  }
+  if (!numeroId) throw new AppError('Esse número não está registrado no WhatsApp.');
+  const chatId = numeroId._serialized;
+
+  const db = getDb();
+  let conversa = db.prepare('SELECT * FROM conversas_whatsapp WHERE wa_chat_id = ?').get(chatId);
+  if (!conversa) {
+    const info = db.prepare(`
+      INSERT INTO conversas_whatsapp (wa_chat_id, nome_contato, telefone, status, modo_atual)
+      VALUES (?, ?, ?, 'atendimento', 'humano')
+    `).run(chatId, numeroLimpo, numeroLimpo);
+    conversa = db.prepare('SELECT * FROM conversas_whatsapp WHERE id = ?').get(info.lastInsertRowid);
+  }
+
+  return enviarTexto(conversa.id, texto2);
 }
 
 function obterConversa(id) {
@@ -446,7 +481,7 @@ function _definirClienteParaTeste(fakeClient, fakeEstado) {
 
 module.exports = {
   iniciar, desconectar, status,
-  listarConversas, obterConversa, atualizarStatusConversa, atribuirAtendente, marcarLida, enviarTexto,
+  listarConversas, obterConversa, atualizarStatusConversa, atribuirAtendente, marcarLida, enviarTexto, iniciarConversa,
   tratarMensagemRecebida,
   obterConfigBot, salvarConfigBot, listarRegrasBot, criarRegraBot, atualizarRegraBot, excluirRegraBot,
   _definirClienteParaTeste,

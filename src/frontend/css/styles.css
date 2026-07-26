@@ -511,6 +511,34 @@ kbd { background: var(--fundo-tabela-cabecalho); color: var(--texto); border: 1p
 .nav-submenu .nav-item__texto { opacity: 1; }
 .nav-submenu .nav-item { padding: 8px 10px; font-size: 13.5px; }
 
+/* ===================== Atendimento: lista de conversas (estilo inbox) ===================== */
+.wa-abas { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.wa-aba {
+  padding: 8px 14px; border-radius: 999px; border: 1px solid var(--borda);
+  background: var(--fundo-card); cursor: pointer; font-size: 13.5px;
+  display: flex; align-items: center; gap: 6px; color: var(--texto);
+}
+.wa-aba.ativa { background: var(--texto); color: var(--fundo-card); border-color: var(--texto); }
+.wa-aba__contador { background: rgba(127,127,127,.25); border-radius: 999px; padding: 1px 7px; font-size: 12px; }
+
+.wa-lista { display: flex; flex-direction: column; gap: 2px; max-height: 62vh; overflow-y: auto; }
+.wa-item { display: flex; gap: 10px; padding: 10px 8px; border-radius: 8px; cursor: pointer; align-items: center; }
+.wa-item:hover { background: var(--fundo-hover); }
+.wa-avatar {
+  width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center;
+  justify-content: center; color: #fff; font-weight: 700; font-size: 14px; flex-shrink: 0;
+}
+.wa-item__corpo { flex: 1; min-width: 0; }
+.wa-item__topo { display: flex; justify-content: space-between; gap: 8px; }
+.wa-item__nome { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-item__hora { font-size: 11.5px; color: var(--texto-suave); flex-shrink: 0; }
+.wa-item__baixo { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 2px; }
+.wa-item__preview { font-size: 13px; color: var(--texto-suave); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-badge {
+  background: var(--sucesso); color: #fff; border-radius: 999px; min-width: 20px; height: 20px;
+  padding: 0 6px; font-size: 11.5px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+
 /* ===================== Agenda: calendário mensal ===================== */
 .cal-grade { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
 .cal-cabecalho {

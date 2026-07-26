@@ -2,24 +2,26 @@
 
 /**
  * Atendimento via WhatsApp Web: conexao por QR Code, caixa de entrada em
- * 3 colunas (Contato / Aguardando / Em atendimento), conversa com suporte
- * a texto, imagem, video, audio, documento e figurinha, bot configuravel
- * de primeiro atendimento, atribuicao de atendente e criacao de tarefa a
- * partir da conversa. Disponivel para qualquer tipo de negocio (nao
- * depende de perfil/ramo).
+ * lista (com abas Novos / Pendentes / Em atendimento, busca e "Nova
+ * conversa"), conversa com suporte a texto, imagem, video, audio,
+ * documento e figurinha, bot configuravel de primeiro atendimento,
+ * atribuicao de atendente e criacao de tarefa a partir da conversa.
+ * Disponivel para qualquer tipo de negocio (nao depende de perfil/ramo).
  */
 window.PaginaAtendimento = (function () {
   let statusAtual = { estado: 'desconectado', qr: null };
   let conversas = [];
   let responsaveis = [];
+  let abaAtiva = 'aguardando';
+  let termoBusca = '';
   let pollStatus = null;
   let pollConversas = null;
   let pollThread = null;
   let conversaAbertaId = null;
 
-  const COLUNAS = [
-    { status: 'contato', titulo: '🆕 Entrou em contato' },
-    { status: 'aguardando', titulo: '⏳ Aguardando atendimento' },
+  const ABAS = [
+    { status: 'contato', titulo: '🆕 Novos' },
+    { status: 'aguardando', titulo: '⏳ Pendentes' },
     { status: 'atendimento', titulo: '💬 Em atendimento' },
   ];
   const ROTULO_ESTADO = {
@@ -35,9 +37,16 @@ window.PaginaAtendimento = (function () {
         <button class="btn btn--secundario" id="wa-bot-config">🤖 Configurar bot</button>
       </div>
       <div class="card mb-16" id="wa-conexao"></div>
-      <div class="patio-kanban" id="wa-kanban"></div>`;
+      <div class="wa-abas" id="wa-abas"></div>
+      <div class="flex gap-12 mb-16">
+        <input id="wa-busca" class="cresce" placeholder="🔎 Buscar conversas…" />
+        <button class="btn" id="wa-nova">+ Nova conversa</button>
+      </div>
+      <div class="wa-lista" id="wa-lista"></div>`;
 
     container.querySelector('#wa-bot-config').addEventListener('click', () => abrirConfigBot());
+    container.querySelector('#wa-nova').addEventListener('click', () => abrirNovaConversa());
+    container.querySelector('#wa-busca').addEventListener('input', (e) => { termoBusca = e.target.value; renderLista(); });
 
     await atualizarStatus();
     await listar();
@@ -100,37 +109,114 @@ window.PaginaAtendimento = (function () {
   }
 
   async function listar() {
-    const alvo = document.getElementById('wa-kanban');
+    const alvo = document.getElementById('wa-lista');
     if (!alvo) { pararPolling(); return; }
     try { conversas = await API.get('/api/whatsapp/conversas'); }
     catch (e) { alvo.innerHTML = UI.escapar(e.message); return; }
-    renderKanban();
+    renderAbas();
+    renderLista();
   }
 
-  function renderKanban() {
-    const alvo = document.getElementById('wa-kanban');
+  function renderAbas() {
+    const alvo = document.getElementById('wa-abas');
     if (!alvo) return;
-    alvo.innerHTML = COLUNAS.map((col) => {
-      const itens = conversas.filter((c) => c.status === col.status);
-      return `<div class="patio-coluna">
-        <div class="patio-coluna__titulo">${col.titulo} <span class="badge badge--muted">${itens.length}</span></div>
-        <div class="patio-coluna__cards">${itens.length ? itens.map(cardConversa).join('') : '<div class="patio-vazio">Vazio</div>'}</div>
-      </div>`;
+    alvo.innerHTML = ABAS.map((a) => {
+      const qtd = conversas.filter((c) => c.status === a.status).length;
+      return `<button type="button" class="wa-aba ${abaAtiva === a.status ? 'ativa' : ''}" data-aba="${a.status}">${a.titulo} <span class="wa-aba__contador">${qtd}</span></button>`;
     }).join('');
-    alvo.querySelectorAll('[data-abrir]').forEach((c) => c.addEventListener('click', () => abrirConversa(Number(c.dataset.abrir))));
+    alvo.querySelectorAll('[data-aba]').forEach((b) => b.addEventListener('click', () => {
+      abaAtiva = b.dataset.aba;
+      renderAbas();
+      renderLista();
+    }));
   }
 
   const ICONE_TIPO = { texto: '', imagem: '📷 ', video: '🎥 ', audio: '🎤 ', documento: '📄 ', sticker: '🩹 ' };
+  const ROTULO_TIPO = { imagem: 'Foto', video: 'Vídeo', audio: 'Áudio', documento: 'Documento', sticker: 'Figurinha' };
 
-  function cardConversa(c) {
-    const resp = responsaveis.find((r) => r.id === c.atendente_id);
-    return `<div class="patio-card" data-abrir="${c.id}">
-      <div class="patio-card__num">${c.telefone || ''}${c.nao_lidas > 0 ? ` <span class="badge badge--erro">${c.nao_lidas} nova(s)</span>` : ''}</div>
-      <div class="patio-card__cliente">${UI.escapar(c.nome_contato || c.telefone || '—')}</div>
-      <div class="patio-card__veiculo">${c.ultima_mensagem_em ? UI.dataHora(c.ultima_mensagem_em) : ''}</div>
-      ${c.modo_atual === 'bot' ? '<div class="dica">🤖 bot respondendo</div>' : ''}
-      ${resp ? `<div class="patio-card__resp"><span class="cm-cor" style="background:${resp.cor || '#999'}"></span> ${UI.escapar(resp.nome)}</div>` : ''}
+  function renderLista() {
+    const alvo = document.getElementById('wa-lista');
+    if (!alvo) return;
+    const termo = termoBusca.trim().toLowerCase();
+    const itens = conversas
+      .filter((c) => c.status === abaAtiva)
+      .filter((c) => !termo || (c.nome_contato || '').toLowerCase().includes(termo) || (c.telefone || '').includes(termo));
+    alvo.innerHTML = itens.length ? itens.map(cardConversaItem).join('') : '<p class="dica" style="padding:12px">Nenhuma conversa aqui.</p>';
+    alvo.querySelectorAll('[data-abrir]').forEach((el) => el.addEventListener('click', () => abrirConversa(Number(el.dataset.abrir))));
+  }
+
+  function iniciaisContato(nome, telefone) {
+    const base = (nome || telefone || '?').trim();
+    const partes = base.split(/\s+/).filter(Boolean);
+    if (partes.length >= 2) return (partes[0][0] + partes[1][0]).toUpperCase();
+    return base.slice(0, 2).toUpperCase();
+  }
+
+  function corAvatar(chave) {
+    const paleta = (window.Graficos && Graficos.CORES) || ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#db2777', '#65a30d'];
+    let hash = 0;
+    const s = String(chave || '');
+    for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+    return paleta[hash % paleta.length];
+  }
+
+  function tempoRelativo(iso) {
+    if (!iso) return '';
+    const d = new Date(String(iso).replace(' ', 'T'));
+    if (isNaN(d.getTime())) return '';
+    const agora = new Date();
+    const diffMin = Math.floor((agora - d) / 60000);
+    if (diffMin < 1) return 'agora';
+    if (diffMin < 60) return `${diffMin}min`;
+    const meiaNoite = (dt) => new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+    const diffDias = Math.round((meiaNoite(agora) - meiaNoite(d)) / 86400000);
+    if (diffDias === 0) return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    if (diffDias === 1) return 'ontem';
+    if (diffDias < 7) return `${diffDias}d`;
+    return d.toLocaleDateString('pt-BR');
+  }
+
+  function previewMensagem(c) {
+    if (!c.ultima_mensagem_tipo) return 'Sem mensagens ainda.';
+    if (c.ultima_mensagem_texto) return `${ICONE_TIPO[c.ultima_mensagem_tipo] || ''}${c.ultima_mensagem_texto}`;
+    return `${ICONE_TIPO[c.ultima_mensagem_tipo] || ''}[${ROTULO_TIPO[c.ultima_mensagem_tipo] || c.ultima_mensagem_tipo}]`;
+  }
+
+  function cardConversaItem(c) {
+    return `<div class="wa-item" data-abrir="${c.id}">
+      <div class="wa-avatar" style="background:${corAvatar(c.wa_chat_id || c.telefone)}">${UI.escapar(iniciaisContato(c.nome_contato, c.telefone))}</div>
+      <div class="wa-item__corpo">
+        <div class="wa-item__topo">
+          <span class="wa-item__nome">${UI.escapar(c.nome_contato || c.telefone || '—')}</span>
+          <span class="wa-item__hora">${tempoRelativo(c.ultima_mensagem_em)}</span>
+        </div>
+        <div class="wa-item__baixo">
+          <span class="wa-item__preview">${UI.escapar(previewMensagem(c))}${c.modo_atual === 'bot' ? ' · 🤖 bot' : ''}</span>
+          ${c.nao_lidas > 0 ? `<span class="wa-badge">${c.nao_lidas}</span>` : ''}
+        </div>
+      </div>
     </div>`;
+  }
+
+  function abrirNovaConversa() {
+    Modal.abrir({
+      titulo: 'Nova conversa', tamanho: 'modal--pequeno',
+      corpoHTML: `
+        <div class="campo"><label>Telefone (com DDD) *</label><input id="nc-telefone" placeholder="Ex.: 11999999999" /></div>
+        <div class="campo mt-16"><label>Mensagem *</label><textarea id="nc-texto" placeholder="Olá! …"></textarea></div>
+        <p class="dica mt-16">O número precisa estar cadastrado no WhatsApp. A conversa começa direto em "Em atendimento".</p>`,
+      textoConfirmar: 'Enviar',
+      aoConfirmar: async (el) => {
+        const telefone = el.querySelector('#nc-telefone').value;
+        const texto = el.querySelector('#nc-texto').value;
+        let conversa;
+        try { conversa = await API.post('/api/whatsapp/conversas', { telefone, texto }); }
+        catch (e) { UI.erro(e.message); return false; }
+        UI.sucesso('Mensagem enviada.');
+        await listar();
+        abrirConversa(conversa.id);
+      },
+    });
   }
 
   async function abrirConversa(id) {
@@ -144,7 +230,7 @@ window.PaginaAtendimento = (function () {
       titulo: `💬 ${conversa.nome_contato || conversa.telefone}`, tamanho: 'modal--grande',
       corpoHTML: `
         <div class="flex gap-12 mb-16" style="flex-wrap:wrap">
-          ${COLUNAS.map((col) => `<button class="btn ${conversa.status === col.status ? '' : 'btn--secundario'}" data-mover="${col.status}" ${conversa.status === col.status ? 'disabled' : ''}>${col.titulo}</button>`).join('')}
+          ${ABAS.map((col) => `<button class="btn ${conversa.status === col.status ? '' : 'btn--secundario'}" data-mover="${col.status}" ${conversa.status === col.status ? 'disabled' : ''}>${col.titulo}</button>`).join('')}
         </div>
         <div class="flex gap-12 mb-16" style="flex-wrap:wrap;align-items:center">
           <div class="campo" style="min-width:220px;margin:0">

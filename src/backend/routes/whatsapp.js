@@ -11,6 +11,7 @@ router.post('/conectar', asyncHandler(async (req, res) => res.json(await svc.ini
 router.post('/desconectar', asyncHandler(async (req, res) => res.json(await svc.desconectar())));
 
 router.get('/conversas', asyncHandler((req, res) => res.json(svc.listarConversas(req.query))));
+router.post('/conversas', asyncHandler(async (req, res) => res.status(201).json(await svc.iniciarConversa(req.body.telefone, req.body.texto))));
 router.get('/conversas/:id', asyncHandler((req, res) => res.json(svc.obterConversa(req.params.id))));
 router.put('/conversas/:id/status', asyncHandler((req, res) => res.json(svc.atualizarStatusConversa(req.params.id, req.body.status))));
 router.put('/conversas/:id/atendente', asyncHandler((req, res) => res.json(svc.atribuirAtendente(req.params.id, req.body.atendente_id))));
