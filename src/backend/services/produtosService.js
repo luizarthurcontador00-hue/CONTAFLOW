@@ -171,6 +171,10 @@ function normalizar(dados) {
     duracao_min: dados.duracao_min != null && dados.duracao_min !== '' ? Number(dados.duracao_min) : null,
     grupo_variacao: dados.grupo_variacao ? String(dados.grupo_variacao).trim() || null : null,
     variacao: dados.variacao ? String(dados.variacao).trim() || null : null,
+    ncm: dados.ncm ? String(dados.ncm).replace(/\D/g, '') || null : null,
+    cfop: dados.cfop ? String(dados.cfop).replace(/\D/g, '') || null : null,
+    cst_csosn: dados.cst_csosn ? String(dados.cst_csosn).trim() || null : null,
+    origem_mercadoria: dados.origem_mercadoria != null && dados.origem_mercadoria !== '' ? Number(dados.origem_mercadoria) : 0,
   };
 }
 
@@ -188,11 +192,13 @@ function criar(dados) {
         `INSERT INTO produtos
           (nome, descricao, codigo_barras, categoria_id, fornecedor_id, unidade,
            custo, markup, preco_venda, estoque_atual, estoque_minimo, foto_path,
-           eh_kit, eh_servico, duracao_min, grupo_variacao, variacao)
+           eh_kit, eh_servico, duracao_min, grupo_variacao, variacao,
+           ncm, cfop, cst_csosn, origem_mercadoria)
          VALUES
           (@nome, @descricao, @codigo_barras, @categoria_id, @fornecedor_id, @unidade,
            @custo, @markup, @preco_venda, 0, @estoque_minimo, @foto_path,
-           @eh_kit, @eh_servico, @duracao_min, @grupo_variacao, @variacao)`
+           @eh_kit, @eh_servico, @duracao_min, @grupo_variacao, @variacao,
+           @ncm, @cfop, @cst_csosn, @origem_mercadoria)`
       )
       .run({ ...d, foto_path: dados.foto_path || null });
 
@@ -239,6 +245,7 @@ function atualizar(id, dados) {
        estoque_minimo=@estoque_minimo, foto_path=@foto_path,
        eh_kit=@eh_kit, eh_servico=@eh_servico, duracao_min=@duracao_min,
        grupo_variacao=@grupo_variacao, variacao=@variacao,
+       ncm=@ncm, cfop=@cfop, cst_csosn=@cst_csosn, origem_mercadoria=@origem_mercadoria,
        atualizado_em=datetime('now','localtime')
      WHERE id=@id`
   ).run({ ...d, foto_path, id });

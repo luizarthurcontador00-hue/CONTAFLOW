@@ -51,6 +51,38 @@ window.PaginaConfiguracoes = (function () {
       </div>
 
       <div class="card mt-16" style="max-width:640px">
+        <div class="flex flex--between" style="align-items:center">
+          <h3 style="margin:0">🧾 Módulo Fiscal</h3>
+          <span id="fis-status" class="badge badge--muted">verificando…</span>
+        </div>
+        <p class="dica">Emissão de NFC-e/NF-e/NFS-e via um gateway externo (hoje, Focus NFe). O sistema não guarda seu certificado digital — isso fica no painel do próprio gateway. Aqui você só conecta com o token de acesso.</p>
+        <form id="form-fiscal" class="form-grid">
+          <div class="campo"><label>Regime tributário</label>
+            <select name="fiscal_regime_tributario">
+              <option value="">— selecione —</option>
+              <option value="simples_nacional" ${cfg.fiscal_regime_tributario === 'simples_nacional' ? 'selected' : ''}>Simples Nacional</option>
+              <option value="lucro_presumido" ${cfg.fiscal_regime_tributario === 'lucro_presumido' ? 'selected' : ''}>Lucro Presumido</option>
+              <option value="lucro_real" ${cfg.fiscal_regime_tributario === 'lucro_real' ? 'selected' : ''}>Lucro Real</option>
+              <option value="mei" ${cfg.fiscal_regime_tributario === 'mei' ? 'selected' : ''}>MEI</option>
+            </select></div>
+          <div class="campo"><label>Ambiente</label>
+            <select name="fiscal_ambiente">
+              <option value="homologacao" ${(cfg.fiscal_ambiente || 'homologacao') === 'homologacao' ? 'selected' : ''}>Homologação (testes, não vale fiscalmente)</option>
+              <option value="producao" ${cfg.fiscal_ambiente === 'producao' ? 'selected' : ''}>Produção (notas reais)</option>
+            </select></div>
+          <div class="campo"><label>Inscrição estadual</label><input name="fiscal_inscricao_estadual" value="${UI.escapar(cfg.fiscal_inscricao_estadual || '')}" placeholder="Necessária para NFC-e/NF-e" /></div>
+          <div class="campo"><label>Inscrição municipal</label><input name="fiscal_inscricao_municipal" value="${UI.escapar(cfg.fiscal_inscricao_municipal || '')}" placeholder="Necessária para NFS-e" /></div>
+          <div class="campo col-2"><label>Gateway de emissão</label>
+            <select name="fiscal_gateway">
+              <option value="focusnfe" ${(cfg.fiscal_gateway || 'focusnfe') === 'focusnfe' ? 'selected' : ''}>Focus NFe</option>
+            </select>
+            <span class="dica">Por enquanto o sistema só integra com o Focus NFe (focusnfe.com.br). Crie uma conta lá, cadastre o CNPJ e envie o certificado digital pelo painel deles.</span></div>
+          <div class="campo col-2"><label>Token de acesso (Focus NFe)</label><input name="fiscal_token" type="password" value="${UI.escapar(cfg.fiscal_token || '')}" placeholder="Copie do painel do Focus NFe" /></div>
+          <div class="campo col-2"><button class="btn" type="submit">Salvar módulo fiscal</button></div>
+        </form>
+      </div>
+
+      <div class="card mt-16" style="max-width:640px">
         <h3 style="margin-top:0">🎨 Aparência</h3>
         <p class="dica">Deixe o sistema com a cara da sua loja: logo, cor e tamanho da fonte.</p>
         <form id="form-aparencia" class="form-grid">
@@ -94,6 +126,27 @@ window.PaginaConfiguracoes = (function () {
         if (window.__recarregarPerfil) await window.__recarregarPerfil();
       } catch (e) { UI.erro(e.message); }
     });
+
+    // --------------------------- Módulo Fiscal ---------------------------
+    container.querySelector('#form-fiscal').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const body = Object.fromEntries(new FormData(ev.target).entries());
+      try {
+        await API.put('/api/config', body);
+        UI.sucesso('Módulo fiscal salvo.');
+        atualizarStatusFiscal();
+      } catch (e) { UI.erro(e.message); }
+    });
+    async function atualizarStatusFiscal() {
+      const badge = container.querySelector('#fis-status');
+      if (!badge) return;
+      try {
+        const r = await API.get('/api/fiscal/status');
+        badge.textContent = r.configurado ? '✅ Configurado' : '⚠️ Não configurado';
+        badge.className = 'badge ' + (r.configurado ? 'badge--ok' : 'badge--muted');
+      } catch (e) { badge.textContent = '—'; }
+    }
+    atualizarStatusFiscal();
 
     // ------------------------------ Aparência ------------------------------
     let logoNovo = null; // dataURL do logo escolhido nesta sessão

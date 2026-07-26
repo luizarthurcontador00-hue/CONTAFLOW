@@ -223,6 +223,32 @@ window.PaginaProdutos = (function () {
           <label>Descrição</label>
           <textarea name="descricao">${UI.escapar(p.descricao || '')}</textarea>
         </div>
+        <div class="campo col-2" style="border-top:1px solid var(--borda);padding-top:16px">
+          <label style="font-weight:600">🧾 Dados fiscais <span class="dica">(para emissão de NF-e/NFC-e — opcional até configurar o módulo fiscal)</span></label>
+        </div>
+        <div class="campo">
+          <label>NCM</label>
+          <input name="ncm" value="${UI.escapar(p.ncm || '')}" placeholder="Ex.: 61091000" maxlength="8" />
+        </div>
+        <div class="campo">
+          <label>CFOP</label>
+          <input name="cfop" value="${UI.escapar(p.cfop || '')}" placeholder="Ex.: 5102" maxlength="4" />
+        </div>
+        <div class="campo">
+          <label>CST/CSOSN</label>
+          <input name="cst_csosn" value="${UI.escapar(p.cst_csosn || '')}" placeholder="Ex.: 102 (consulte seu contador)" />
+        </div>
+        <div class="campo">
+          <label>Origem da mercadoria</label>
+          <select name="origem_mercadoria">
+            ${[
+              [0, '0 — Nacional'], [1, '1 — Estrangeira, importação direta'], [2, '2 — Estrangeira, mercado interno'],
+              [3, '3 — Nacional, conteúdo importado > 40%'], [4, '4 — Nacional, produção conforme PPB'],
+              [5, '5 — Nacional, conteúdo importado ≤ 40%'], [6, '6 — Estrangeira, importação direta, sem similar nacional'],
+              [7, '7 — Estrangeira, mercado interno, sem similar nacional'], [8, '8 — Nacional, conteúdo importado > 70%'],
+            ].map(([v, t]) => `<option value="${v}" ${Number(p.origem_mercadoria || 0) === v ? 'selected' : ''}>${t}</option>`).join('')}
+          </select>
+        </div>
         <div class="campo col-2">
           <label class="flex gap-12" style="align-items:center">
             <input type="checkbox" id="fp-eh-kit" ${p.eh_kit ? 'checked' : ''}>

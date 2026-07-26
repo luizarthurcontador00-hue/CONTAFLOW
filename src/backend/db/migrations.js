@@ -632,6 +632,37 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 15,
+    name: 'modulo-fiscal',
+    up(db) {
+      db.exec(`
+        ALTER TABLE produtos ADD COLUMN ncm TEXT;
+        ALTER TABLE produtos ADD COLUMN cfop TEXT;
+        ALTER TABLE produtos ADD COLUMN cst_csosn TEXT;
+        ALTER TABLE produtos ADD COLUMN origem_mercadoria INTEGER NOT NULL DEFAULT 0;
+
+        CREATE TABLE IF NOT EXISTS notas_fiscais (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          venda_id       INTEGER NOT NULL REFERENCES vendas(id) ON DELETE CASCADE,
+          tipo           TEXT NOT NULL DEFAULT 'nfce',   -- nfce | nfe
+          ambiente       TEXT NOT NULL DEFAULT 'homologacao',
+          referencia     TEXT NOT NULL,                  -- ref enviada ao gateway (unica)
+          status         TEXT NOT NULL DEFAULT 'processando', -- processando | autorizada | erro | cancelada
+          numero         TEXT,
+          serie          TEXT,
+          chave_acesso   TEXT,
+          protocolo      TEXT,
+          danfe_url      TEXT,
+          xml_url        TEXT,
+          mensagem_erro  TEXT,
+          criado_em      TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+          atualizado_em  TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_notas_fiscais_venda ON notas_fiscais(venda_id);
+      `);
+    },
+  },
 ];
 
 /**

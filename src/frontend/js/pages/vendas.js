@@ -82,8 +82,14 @@ window.PaginaVendas = (function () {
   }
 
   async function verVenda(id) {
-    let v;
-    try { v = await API.get('/api/vendas/' + id); } catch (e) { UI.erro(e.message); return; }
+    let v, notas;
+    try {
+      [v, notas] = await Promise.all([
+        API.get('/api/vendas/' + id),
+        API.get('/api/fiscal/vendas/' + id + '/notas').catch(() => []),
+      ]);
+    } catch (e) { UI.erro(e.message); return; }
+    const notaAtual = notas.find((n) => n.status === 'autorizada' || n.status === 'processando') || notas[0];
     const corpo = `
       <div class="flex flex--between mb-16">
         <div><strong>Venda #${v.id}</strong><div class="dica">${UI.dataHora(v.data)}</div></div>
@@ -101,7 +107,9 @@ window.PaginaVendas = (function () {
       <div class="flex flex--between"><strong>Total</strong><strong>${UI.moeda(v.valor_total)}</strong></div>
       <h3 class="mt-16">Pagamentos</h3>
       ${v.pagamentos.map((p) => `<div class="flex flex--between"><span class="chip-forma">${FORMAS[p.forma_pagamento] || p.forma_pagamento}</span><span>${UI.moeda(p.valor)}</span></div>`).join('')}
-      ${v.observacao ? `<p class="muted mt-16">${UI.escapar(v.observacao)}</p>` : ''}`;
+      ${v.observacao ? `<p class="muted mt-16">${UI.escapar(v.observacao)}</p>` : ''}
+      ${v.status === 'concluida' ? `<h3 class="mt-16">🧾 Nota fiscal</h3>
+      <div id="vd-fiscal">${situacaoFiscalHTML(notaAtual)}</div>` : ''}`;
 
     Modal.abrir({
       titulo: 'Detalhes da venda', tamanho: 'modal--grande', corpoHTML: corpo, mostrarConfirmar: false,
@@ -118,7 +126,47 @@ window.PaginaVendas = (function () {
           });
           foot.insertBefore(btn, foot.firstChild);
         }
+        ligarAcoesFiscais(el, v.id);
       },
+    });
+  }
+
+  function situacaoFiscalHTML(nota) {
+    if (!nota) return '<div class="flex flex--between" style="align-items:center"><span class="dica">Nenhuma nota emitida para esta venda.</span><button class="btn btn--secundario" id="vd-emitir">Emitir NFC-e</button></div>';
+    if (nota.status === 'processando') return `<div class="flex flex--between" style="align-items:center"><span class="badge badge--alerta">Processando…</span><button class="btn btn--secundario" id="vd-consultar" data-nota="${nota.id}">Atualizar status</button></div>`;
+    if (nota.status === 'autorizada') return `<div class="flex flex--between" style="align-items:center">
+      <span class="badge badge--ok">✅ Autorizada${nota.numero ? ' — nº ' + UI.escapar(nota.numero) : ''}</span>
+      ${nota.danfe_url ? `<a class="btn btn--secundario" href="${UI.escapar(nota.danfe_url)}" target="_blank" rel="noopener">Ver DANFE</a>` : ''}
+    </div>`;
+    return `<div>
+      <span class="badge badge--erro">Erro na emissão</span>
+      ${nota.mensagem_erro ? `<p class="dica mt-16">${UI.escapar(nota.mensagem_erro)}</p>` : ''}
+      <button class="btn btn--secundario mt-16" id="vd-emitir">Tentar novamente</button>
+    </div>`;
+  }
+
+  function ligarAcoesFiscais(el, vendaId) {
+    const btnEmitir = el.querySelector('#vd-emitir');
+    if (btnEmitir) btnEmitir.addEventListener('click', async () => {
+      btnEmitir.disabled = true; btnEmitir.textContent = 'Emitindo…';
+      try {
+        await API.post(`/api/fiscal/vendas/${vendaId}/emitir-nfce`, {});
+        UI.sucesso('Nota fiscal enviada para processamento.');
+      } catch (e) {
+        UI.erro(e.message);
+      } finally {
+        const notasAtual = await API.get(`/api/fiscal/vendas/${vendaId}/notas`).catch(() => []);
+        el.querySelector('#vd-fiscal').innerHTML = situacaoFiscalHTML(notasAtual[0]);
+        ligarAcoesFiscais(el, vendaId);
+      }
+    });
+    const btnConsultar = el.querySelector('#vd-consultar');
+    if (btnConsultar) btnConsultar.addEventListener('click', async () => {
+      try {
+        const nota = await API.post(`/api/fiscal/notas/${btnConsultar.dataset.nota}/consultar`, {});
+        el.querySelector('#vd-fiscal').innerHTML = situacaoFiscalHTML(nota);
+        ligarAcoesFiscais(el, vendaId);
+      } catch (e) { UI.erro(e.message); }
     });
   }
 

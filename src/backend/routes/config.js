@@ -7,7 +7,13 @@ const { asyncHandler } = require('../utils/errors');
 const router = express.Router();
 
 // Chaves de configuracao editaveis pela tela de Configuracoes.
-const CHAVES_LOJA = ['nome_loja', 'loja_endereco', 'loja_telefone', 'loja_cnpj', 'loja_rodape_cupom', 'markup_padrao', 'gerar_codigo_auto', 'perfil_negocio', 'ramo_servico', 'onboarding_ok', 'loja_logo', 'cor_primaria', 'fonte_escala'];
+const CHAVES_LOJA = [
+  'nome_loja', 'loja_endereco', 'loja_telefone', 'loja_cnpj', 'loja_rodape_cupom', 'markup_padrao',
+  'gerar_codigo_auto', 'perfil_negocio', 'ramo_servico', 'onboarding_ok', 'loja_logo', 'cor_primaria', 'fonte_escala',
+  // Modulo fiscal (emissao de NF-e/NFC-e/NFS-e via gateway externo)
+  'fiscal_regime_tributario', 'fiscal_inscricao_estadual', 'fiscal_inscricao_municipal',
+  'fiscal_gateway', 'fiscal_ambiente', 'fiscal_token',
+];
 
 function lerConfig() {
   const db = getDb();
