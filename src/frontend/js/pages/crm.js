@@ -155,7 +155,7 @@ window.PaginaCRM = (function () {
             <option value="outro" ${lead && lead.origem === 'outro' ? 'selected' : ''}>Outro</option>
           </select></div>
         <div class="campo mt-16"><label>Observação</label><textarea id="ld-obs">${UI.escapar(lead && lead.observacao ? lead.observacao : '')}</textarea></div>
-        ${ehEdicao && lead.venda ? `<div class="dica mt-16">🧾 Venda fechada: ${UI.escapar(lead.venda.descricao)} — ${UI.moeda(lead.venda.valor_venda)}</div>` : ''}`,
+        ${ehEdicao && lead.venda ? `<div class="dica mt-16">🧾 Venda fechada: ${UI.escapar(lead.venda.descricao)} — pacote ${UI.moeda(lead.venda.valor_venda)} · comissão da agência ${UI.moeda(lead.venda.comissao_valor)}</div>` : ''}`,
       textoConfirmar: 'Salvar',
       aoConfirmar: async (el) => {
         const dados = {
@@ -184,35 +184,50 @@ window.PaginaCRM = (function () {
           <div class="campo"><label>Operadora/fornecedor</label><input id="fv-operadora" /></div>
           <div class="campo"><label>Nº da reserva</label><input id="fv-reserva" /></div>
         </div>
-        <div class="form-grid mt-16">
-          <div class="campo"><label>Valor da venda (R$) *</label><input id="fv-valor" type="number" step="0.01" min="0" /></div>
+        <div class="campo mt-16"><label>Valor da venda (R$) <span class="dica">informativo — quem vende o pacote é a operadora, esse valor não é receita da agência</span></label>
+          <input id="fv-valor" type="number" step="0.01" min="0" /></div>
+
+        <div class="form-grid mt-16" style="border-top:1px solid var(--borda);padding-top:16px">
+          <div class="campo"><label>Comissão da agência (%) *</label><input id="fv-comissao-pct" type="number" step="0.01" min="0" /></div>
           <div class="campo"><label>Parcelas (a receber)</label><input id="fv-parcelas" type="number" min="1" value="1" /></div>
         </div>
+        <div class="dica mt-16" id="fv-comissao-preview">Comissão da agência (a receber): R$ 0,00</div>
         <div class="campo mt-16"><label>1º vencimento</label><input id="fv-venc" type="date" value="${new Date().toISOString().slice(0, 10)}" /></div>
+
         <div class="form-grid mt-16" style="border-top:1px solid var(--borda);padding-top:16px">
-          <div class="campo"><label>Agente <span class="dica">(para comissão)</span></label>
-            <select id="fv-agente"><option value="">— sem agente —</option>${agentes.map((a) => `<option value="${a.id}" data-pct="${a.comissao_pct}">${UI.escapar(a.nome)} (${a.comissao_pct}%)</option>`).join('')}</select></div>
-          <div class="campo"><label>Comissão (%)</label><input id="fv-comissao-pct" type="number" step="0.01" min="0" /></div>
+          <div class="campo"><label>Funcionário responsável</label>
+            <select id="fv-agente"><option value="">— sem funcionário —</option>${agentes.map((a) => `<option value="${a.id}" data-pct="${a.comissao_pct}">${UI.escapar(a.nome)} (${a.comissao_pct}%)</option>`).join('')}</select></div>
+          <div class="campo"><label>Comissão do funcionário (%) <span class="dica">sobre a comissão da agência</span></label><input id="fv-comissao-func-pct" type="number" step="0.01" min="0" /></div>
         </div>
-        <div class="dica mt-16" id="fv-comissao-preview">Comissão: R$ 0,00</div>
+        <div class="dica mt-16" id="fv-comissao-func-preview">Comissão do funcionário (a pagar): R$ 0,00</div>
+
         <div class="form-grid mt-16" style="border-top:1px solid var(--borda);padding-top:16px">
           <div class="campo"><label>Data de ida</label><input id="fv-ida" type="date" /></div>
           <div class="campo"><label>Data de volta</label><input id="fv-volta" type="date" /></div>
         </div>
         <div class="campo mt-16"><label>Observação</label><textarea id="fv-obs"></textarea></div>
-        <div class="dica mt-16">Isso vai gerar automaticamente a conta a receber (Financeiro), a comissão do agente (Contas a Pagar) e aparecer no Calendário de Viagens.</div>`,
+        <div class="dica mt-16">Isso gera automaticamente a conta a receber da comissão da agência (Financeiro), a comissão do funcionário (Contas a Pagar, se houver) e aparece no Calendário de Viagens.</div>`,
       textoConfirmar: 'Fechar venda',
       aoAbrir: (el) => {
-        const atualizarPreview = () => {
+        const comissaoAgencia = () => {
           const valor = Number(el.querySelector('#fv-valor').value || 0);
           const pct = Number(el.querySelector('#fv-comissao-pct').value || 0);
-          el.querySelector('#fv-comissao-preview').textContent = `Comissão: ${UI.moeda(valor * pct / 100)}`;
+          return valor * pct / 100;
         };
-        el.querySelector('#fv-valor').addEventListener('input', atualizarPreview);
-        el.querySelector('#fv-comissao-pct').addEventListener('input', atualizarPreview);
+        const atualizarPreviewAgencia = () => {
+          el.querySelector('#fv-comissao-preview').textContent = `Comissão da agência (a receber): ${UI.moeda(comissaoAgencia())}`;
+          atualizarPreviewFuncionario();
+        };
+        const atualizarPreviewFuncionario = () => {
+          const pctFunc = Number(el.querySelector('#fv-comissao-func-pct').value || 0);
+          el.querySelector('#fv-comissao-func-preview').textContent = `Comissão do funcionário (a pagar): ${UI.moeda(comissaoAgencia() * pctFunc / 100)}`;
+        };
+        el.querySelector('#fv-valor').addEventListener('input', atualizarPreviewAgencia);
+        el.querySelector('#fv-comissao-pct').addEventListener('input', atualizarPreviewAgencia);
+        el.querySelector('#fv-comissao-func-pct').addEventListener('input', atualizarPreviewFuncionario);
         el.querySelector('#fv-agente').addEventListener('change', (e) => {
           const opt = e.target.selectedOptions[0];
-          if (opt && opt.dataset.pct) { el.querySelector('#fv-comissao-pct').value = opt.dataset.pct; atualizarPreview(); }
+          if (opt && opt.dataset.pct) { el.querySelector('#fv-comissao-func-pct').value = opt.dataset.pct; atualizarPreviewFuncionario(); }
         });
       },
       aoConfirmar: async (el) => {
@@ -225,13 +240,14 @@ window.PaginaCRM = (function () {
           primeiro_vencimento: el.querySelector('#fv-venc').value || null,
           agente_id: el.querySelector('#fv-agente').value || null,
           comissao_pct: el.querySelector('#fv-comissao-pct').value || null,
+          comissao_funcionario_pct: el.querySelector('#fv-comissao-func-pct').value || null,
           data_ida: el.querySelector('#fv-ida').value || null,
           data_volta: el.querySelector('#fv-volta').value || null,
           observacao: el.querySelector('#fv-obs').value,
         };
         try {
           await API.post(`/api/crm/leads/${lead.id}/fechar-venda`, dados);
-          UI.sucesso('Venda fechada! Conta a receber e comissão geradas.');
+          UI.sucesso('Venda fechada! Comissão da agência e do funcionário geradas.');
           await listar();
         } catch (e) { UI.erro(e.message); return false; }
       },

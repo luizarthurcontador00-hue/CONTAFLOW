@@ -99,6 +99,44 @@ router.get('/parados', asyncHandler((req, res) => {
   enviar(res, { formato: req.query.formato, titulo: 'Produtos Parados', colunas, linhas, json: dados });
 }));
 
+// --------------------------- CRM (agencia de viagem) ---------------------------
+router.get('/crm', asyncHandler((req, res) => {
+  const dados = rel.funilCRM(req.query);
+  const colunas = [
+    { chave: 'lead_nome', titulo: 'Cliente' },
+    { chave: 'descricao', titulo: 'Descrição' },
+    { chave: 'agente_nome', titulo: 'Funcionário' },
+    { chave: 'valor_venda', titulo: 'Valor da venda' },
+    { chave: 'comissao_valor', titulo: 'Comissão agência' },
+    { chave: 'comissao_funcionario_valor', titulo: 'Comissão funcionário' },
+  ];
+  const linhas = dados.vendas.map((v) => ({
+    ...v, valor_venda: money(v.valor_venda), comissao_valor: money(v.comissao_valor),
+    comissao_funcionario_valor: money(v.comissao_funcionario_valor || 0),
+  }));
+  enviar(res, { formato: req.query.formato, titulo: 'Funil do CRM', colunas, linhas, json: dados });
+}));
+
+// ------------------------------- Viagens -------------------------------
+router.get('/viagens', asyncHandler((req, res) => {
+  const dados = rel.viagensRelatorio(req.query);
+  const colunas = [
+    { chave: 'cliente_nome', titulo: 'Cliente' },
+    { chave: 'descricao', titulo: 'Destino/pacote' },
+    { chave: 'data_ida', titulo: 'Ida' },
+    { chave: 'data_volta', titulo: 'Volta' },
+    { chave: 'agente_nome', titulo: 'Funcionário' },
+    { chave: 'valor_venda', titulo: 'Valor da venda' },
+    { chave: 'comissao_valor', titulo: 'Comissão agência' },
+    { chave: 'comissao_funcionario_valor', titulo: 'Comissão funcionário' },
+  ];
+  const linhas = dados.itens.map((v) => ({
+    ...v, valor_venda: money(v.valor_venda), comissao_valor: money(v.comissao_valor),
+    comissao_funcionario_valor: money(v.comissao_funcionario_valor || 0),
+  }));
+  enviar(res, { formato: req.query.formato, titulo: 'Relatorio de Viagens', colunas, linhas, json: dados });
+}));
+
 // ------------------------- Exportar para o contador -------------------------
 router.get('/contador', asyncHandler((req, res) => {
   const buffer = rel.exportarContador(req.query);

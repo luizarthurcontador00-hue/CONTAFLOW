@@ -887,6 +887,22 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 22,
+    name: 'crm-comissao-agencia-e-funcionario',
+    up(db) {
+      db.exec(`
+        -- A partir daqui, comissao_pct/comissao_valor passam a significar a
+        -- comissao que a AGENCIA recebe da operadora (a receita de verdade do
+        -- negocio) — valor_venda e so informativo (dinheiro que e da operadora,
+        -- nao da agencia). Esta coluna guarda a fatia dessa comissao que vai
+        -- para o funcionario que fechou a venda (agente_id).
+        ALTER TABLE vendas_viagem ADD COLUMN comissao_funcionario_pct REAL;
+        ALTER TABLE vendas_viagem ADD COLUMN comissao_funcionario_valor REAL NOT NULL DEFAULT 0;
+        ALTER TABLE vendas_viagem ADD COLUMN conta_pagar_funcionario_id INTEGER REFERENCES contas_pagar(id) ON DELETE SET NULL;
+      `);
+    },
+  },
 ];
 
 /**

@@ -108,6 +108,77 @@ function produtosParados({ dias } = {}) {
   };
 }
 
+/**
+ * Funil do CRM (agencia de viagem): quantidade de leads por etapa e as
+ * vendas fechadas no periodo, com a comissao da agencia (receita de
+ * verdade — o valor_venda e so informativo) e a comissao repassada ao
+ * funcionario que fechou.
+ */
+function funilCRM({ inicio, fim } = {}) {
+  const db = getDb();
+  const ini = inicio || '0000-01-01';
+  const f = fim || '9999-12-31';
+
+  const porEtapaLinhas = db.prepare(`
+    SELECT status, COUNT(*) AS qtd FROM leads
+    WHERE date(criado_em) BETWEEN date(?) AND date(?)
+    GROUP BY status
+  `).all(ini, f);
+  const porStatus = { contato: 0, proposta: 0, pagamento: 0, vendido: 0, perdido: 0 };
+  porEtapaLinhas.forEach((l) => { porStatus[l.status] = l.qtd; });
+  const totalLeads = Object.values(porStatus).reduce((s, n) => s + n, 0);
+
+  const vendas = db.prepare(`
+    SELECT v.*, l.nome AS lead_nome, p.nome AS agente_nome
+    FROM vendas_viagem v
+    JOIN leads l ON l.id = v.lead_id
+    LEFT JOIN profissionais p ON p.id = v.agente_id
+    WHERE date(v.criado_em) BETWEEN date(?) AND date(?)
+    ORDER BY v.criado_em DESC
+  `).all(ini, f);
+
+  const totalComissaoAgencia = vendas.reduce((s, v) => s + Number(v.comissao_valor), 0);
+  const totalComissaoFuncionario = vendas.reduce((s, v) => s + Number(v.comissao_funcionario_valor || 0), 0);
+
+  return {
+    porStatus, totalLeads, vendas,
+    totais: {
+      vendas: vendas.length,
+      taxa_conversao: totalLeads ? arred((porStatus.vendido / totalLeads) * 100) : 0,
+      valor_venda_bruto: arred(vendas.reduce((s, v) => s + Number(v.valor_venda), 0)),
+      comissao_agencia: arred(totalComissaoAgencia),
+      comissao_funcionario: arred(totalComissaoFuncionario),
+      lucro_liquido: arred(totalComissaoAgencia - totalComissaoFuncionario),
+    },
+  };
+}
+
+/** Viagens com data de ida no periodo — usa a mesma comissao da agencia/funcionario do CRM. */
+function viagensRelatorio({ inicio, fim } = {}) {
+  const db = getDb();
+  const ini = inicio || '0000-01-01';
+  const f = fim || '9999-12-31';
+  const itens = db.prepare(`
+    SELECT v.*, l.nome AS cliente_nome, l.telefone, p.nome AS agente_nome
+    FROM vendas_viagem v
+    JOIN leads l ON l.id = v.lead_id
+    LEFT JOIN profissionais p ON p.id = v.agente_id
+    WHERE v.data_ida IS NOT NULL AND date(v.data_ida) BETWEEN date(?) AND date(?)
+    ORDER BY date(v.data_ida)
+  `).all(ini, f);
+
+  return {
+    itens,
+    totais: {
+      viagens: itens.length,
+      checkins_feitos: itens.filter((i) => i.checkin_feito).length,
+      valor_venda_bruto: arred(itens.reduce((s, i) => s + Number(i.valor_venda), 0)),
+      comissao_agencia: arred(itens.reduce((s, i) => s + Number(i.comissao_valor), 0)),
+      comissao_funcionario: arred(itens.reduce((s, i) => s + Number(i.comissao_funcionario_valor || 0), 0)),
+    },
+  };
+}
+
 // ------------------------- Exportacao -------------------------
 
 function escaparCSV(v) {
@@ -188,5 +259,6 @@ function exportarContador({ inicio, fim } = {}) {
 
 module.exports = {
   estoqueAtual, vendasDetalhado, financeiro, produtosParados, exportarContador,
+  funilCRM, viagensRelatorio,
   gerarCSV, gerarXLS,
 };

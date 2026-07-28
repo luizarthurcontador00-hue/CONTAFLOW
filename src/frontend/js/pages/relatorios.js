@@ -12,7 +12,9 @@ window.PaginaRelatorios = (function () {
     const mesIni = hoje.slice(0, 8) + '01';
     // "Estoque atual" e "Produtos parados" so fazem sentido para quem vende produtos.
     const temProdutos = window.__perfilNegocio !== 'servico';
+    const temCRM = window.__ramoServico === 'agencia_viagem';
     if (!temProdutos && (relatorio === 'estoque' || relatorio === 'parados')) relatorio = 'vendas';
+    if (!temCRM && (relatorio === 'crm' || relatorio === 'viagens')) relatorio = 'vendas';
     container.innerHTML = `
       <div class="barra-ferramentas">
         <div class="campo"><label class="dica">Relatório</label>
@@ -21,6 +23,8 @@ window.PaginaRelatorios = (function () {
             <option value="vendas" ${relatorio === 'vendas' ? 'selected' : ''}>Vendas detalhado</option>
             <option value="financeiro" ${relatorio === 'financeiro' ? 'selected' : ''}>Financeiro</option>
             ${temProdutos ? `<option value="parados" ${relatorio === 'parados' ? 'selected' : ''}>Produtos parados</option>` : ''}
+            ${temCRM ? `<option value="crm" ${relatorio === 'crm' ? 'selected' : ''}>Funil do CRM</option>` : ''}
+            ${temCRM ? `<option value="viagens" ${relatorio === 'viagens' ? 'selected' : ''}>Viagens</option>` : ''}
           </select></div>
         <div class="campo" id="r-periodo"><label class="dica">De</label><input type="date" id="r-inicio" value="${mesIni}"></div>
         <div class="campo" id="r-periodo2"><label class="dica">Até</label><input type="date" id="r-fim" value="${hoje}"></div>
@@ -92,6 +96,8 @@ window.PaginaRelatorios = (function () {
     if (relatorio === 'estoque') alvo.innerHTML = tabelaEstoque(dados);
     else if (relatorio === 'vendas') alvo.innerHTML = tabelaVendas(dados);
     else if (relatorio === 'parados') alvo.innerHTML = tabelaParados(dados);
+    else if (relatorio === 'crm') alvo.innerHTML = tabelaCRM(dados);
+    else if (relatorio === 'viagens') alvo.innerHTML = tabelaViagens(dados);
     else alvo.innerHTML = tabelaFinanceiro(dados);
   }
 
@@ -151,6 +157,45 @@ window.PaginaRelatorios = (function () {
       <h3 class="mt-16">Contas a receber</h3>
       <table class="tabela"><thead><tr><th>Descrição</th><th>Venc.</th><th>Valor</th><th>Status</th></tr></thead>
       <tbody>${d.receber.map((c) => `<tr><td>${UI.escapar(c.descricao)}</td><td>${c.vencimento || '—'}</td><td>${UI.moeda(c.valor)}</td><td>${c.status}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Nenhuma</td></tr>'}</tbody></table></div>`;
+  }
+
+  function tabelaCRM(d) {
+    const rotulos = { contato: 'Contato', proposta: 'Proposta', pagamento: 'Pagamento', vendido: 'Vendido', perdido: 'Perdido' };
+    return `
+      <div class="flex gap-12 mb-16" style="flex-wrap:wrap">
+        ${mini('Leads no período', d.totalLeads)} ${mini('Vendas fechadas', d.totais.vendas)}
+        ${mini('Taxa de conversão', d.totais.taxa_conversao + '%')}
+        ${mini('Comissão da agência', UI.moeda(d.totais.comissao_agencia))}
+        ${mini('Comissão dos funcionários', UI.moeda(d.totais.comissao_funcionario))}
+        ${mini('Lucro líquido', UI.moeda(d.totais.lucro_liquido))}
+      </div>
+      <div id="print-area"><h2 class="print-titulo">Funil do CRM</h2>
+      <h3>Leads por etapa</h3>
+      <table class="tabela"><thead><tr>${Object.keys(rotulos).map((k) => `<th>${rotulos[k]}</th>`).join('')}</tr></thead>
+      <tbody><tr>${Object.keys(rotulos).map((k) => `<td>${d.porStatus[k] || 0}</td>`).join('')}</tr></tbody></table>
+      <h3 class="mt-16">Vendas fechadas no período</h3>
+      <p class="dica" style="margin-top:0">Valor da venda é informativo (o pacote é da operadora) — a receita de verdade da agência é a comissão.</p>
+      <table class="tabela"><thead><tr><th>Cliente</th><th>Descrição</th><th>Funcionário</th><th>Valor da venda</th><th>Comissão agência</th><th>Comissão funcionário</th></tr></thead>
+      <tbody>${d.vendas.length ? d.vendas.map((v) => `<tr>
+        <td>${UI.escapar(v.lead_nome)}</td><td>${UI.escapar(v.descricao)}</td><td>${UI.escapar(v.agente_nome || '—')}</td>
+        <td>${UI.moeda(v.valor_venda)}</td><td>${UI.moeda(v.comissao_valor)}</td><td>${UI.moeda(v.comissao_funcionario_valor || 0)}</td>
+      </tr>`).join('') : '<tr><td colspan="6" class="muted">Nenhuma venda fechada nesse período.</td></tr>'}</tbody></table></div>`;
+  }
+
+  function tabelaViagens(d) {
+    return `
+      <div class="flex gap-12 mb-16" style="flex-wrap:wrap">
+        ${mini('Viagens no período', d.totais.viagens)} ${mini('Check-ins feitos', d.totais.checkins_feitos)}
+        ${mini('Comissão da agência', UI.moeda(d.totais.comissao_agencia))}
+        ${mini('Comissão dos funcionários', UI.moeda(d.totais.comissao_funcionario))}
+      </div>
+      <div id="print-area"><h2 class="print-titulo">Relatório de Viagens</h2>
+      <table class="tabela"><thead><tr><th>Cliente</th><th>Destino/pacote</th><th>Ida</th><th>Volta</th><th>Funcionário</th><th>Valor venda</th><th>Comissão agência</th><th>Comissão funcionário</th><th>Check-in</th></tr></thead>
+      <tbody>${d.itens.length ? d.itens.map((v) => `<tr>
+        <td>${UI.escapar(v.cliente_nome)}</td><td>${UI.escapar(v.descricao)}</td><td>${v.data_ida || '—'}</td><td>${v.data_volta || '—'}</td>
+        <td>${UI.escapar(v.agente_nome || '—')}</td><td>${UI.moeda(v.valor_venda)}</td><td>${UI.moeda(v.comissao_valor)}</td>
+        <td>${UI.moeda(v.comissao_funcionario_valor || 0)}</td><td>${v.checkin_feito ? '✅' : '—'}</td>
+      </tr>`).join('') : '<tr><td colspan="9" class="muted">Nenhuma viagem nesse período.</td></tr>'}</tbody></table></div>`;
   }
 
   function mini(label, valor) {

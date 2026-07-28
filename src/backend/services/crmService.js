@@ -86,6 +86,14 @@ function excluirLead(id) {
  * conta a receber (parcelada opcionalmente) e a comissao do agente (conta a
  * pagar), vincula/cria o cliente, e marca o lead como 'vendido'.
  */
+/**
+ * Fecha a venda de uma viagem. Importante: quem vende o pacote de verdade e a
+ * operadora — o valor_venda e so informativo (nao entra como receita da
+ * agencia). A receita de verdade da agencia e a comissao que a operadora
+ * repassa por ter vendido (comissao_pct/comissao_valor), e isso e o que vira
+ * conta a receber. Se um funcionario (agente_id) fechou a venda, uma fatia
+ * dessa comissao (comissao_funcionario_pct/valor) vira conta a pagar pra ele.
+ */
 function fecharVenda(leadId, dados) {
   const db = getDb();
   // eslint-disable-next-line global-require
@@ -107,6 +115,10 @@ function fecharVenda(leadId, dados) {
 
   const comissaoPct = dados.comissao_pct != null && dados.comissao_pct !== '' ? Number(dados.comissao_pct) : null;
   const comissaoValor = comissaoPct != null ? arred(valorVenda * comissaoPct / 100) : arred(Number(dados.comissao_valor || 0));
+  if (!(comissaoValor > 0)) throw new AppError('Informe a comissão da agência (é o que a operadora repassa pela venda).');
+
+  const comissaoFuncPct = dados.comissao_funcionario_pct != null && dados.comissao_funcionario_pct !== '' ? Number(dados.comissao_funcionario_pct) : null;
+  const comissaoFuncValor = comissaoFuncPct != null ? arred(comissaoValor * comissaoFuncPct / 100) : arred(Number(dados.comissao_funcionario_valor || 0));
 
   const tx = db.transaction(() => {
     let clienteId = lead.cliente_id;
@@ -117,34 +129,36 @@ function fecharVenda(leadId, dados) {
 
     const parcelas = Math.max(1, Number(dados.parcelas || 1));
     const receber = financeiroService.criarReceber({
-      descricao, valor: valorVenda, parcelas, cliente_id: clienteId,
+      descricao: `Comissão — ${descricao}${dados.operadora ? ` (${dados.operadora})` : ''}`,
+      valor: comissaoValor, parcelas,
       primeiro_vencimento: dados.primeiro_vencimento || null,
     });
     const contaReceberId = receber && receber.ids && receber.ids.length ? receber.ids[0] : null;
 
-    let contaPagarComissaoId = null;
-    if (comissaoValor > 0) {
+    let contaPagarFuncionarioId = null;
+    if (dados.agente_id && comissaoFuncValor > 0) {
       const categoria = db.prepare("SELECT id FROM categorias_despesa WHERE nome = 'Salários e encargos'").get();
       const pagar = financeiroService.criarPagar({
-        descricao: `Comissão — ${descricao} (${lead.nome})`,
-        valor: comissaoValor,
+        descricao: `Comissão de venda — ${descricao} (${lead.nome})`,
+        valor: comissaoFuncValor,
         primeiro_vencimento: dados.data_ida || null,
         categoria_despesa_id: categoria ? categoria.id : null,
       });
-      contaPagarComissaoId = pagar && pagar.id ? pagar.id : null;
+      contaPagarFuncionarioId = pagar && pagar.id ? pagar.id : null;
     }
 
     const info = db.prepare(`
       INSERT INTO vendas_viagem
         (lead_id, cliente_id, descricao, operadora, numero_reserva, valor_venda,
-         agente_id, comissao_pct, comissao_valor, data_ida, data_volta, observacao,
-         conta_receber_id, conta_pagar_comissao_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         agente_id, comissao_pct, comissao_valor, comissao_funcionario_pct, comissao_funcionario_valor,
+         data_ida, data_volta, observacao, conta_receber_id, conta_pagar_funcionario_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       leadId, clienteId, descricao, dados.operadora || null, dados.numero_reserva || null, valorVenda,
       dados.agente_id ? Number(dados.agente_id) : null, comissaoPct, comissaoValor,
+      comissaoFuncPct, comissaoFuncValor,
       dados.data_ida || null, dados.data_volta || null, dados.observacao || null,
-      contaReceberId, contaPagarComissaoId
+      contaReceberId, contaPagarFuncionarioId
     );
 
     db.prepare("UPDATE leads SET status='vendido', cliente_id=?, atualizado_em=datetime('now','localtime') WHERE id=?")
