@@ -140,15 +140,17 @@ window.PaginaAtendimento = (function () {
     if (agendaDisponivel()) servicosAgenda = await API.get('/api/produtos?eh_servico=1').catch(() => []);
 
     container.innerHTML = `
-      <div class="wa-faixa" id="wa-faixa"></div>
-      <div class="wa-duas-colunas">
-        <div class="wa-coluna-inbox">
-          <div class="wa-abas" id="wa-abas"></div>
-          <div class="wa-busca"><input id="wa-busca" placeholder="Buscar conversas" /></div>
-          <button class="btn" id="wa-nova">+ Nova conversa</button>
-          <div class="wa-lista" id="wa-lista"></div>
+      <div class="wa-pagina">
+        <div class="wa-faixa" id="wa-faixa"></div>
+        <div class="wa-duas-colunas">
+          <div class="wa-coluna-inbox">
+            <div class="wa-abas" id="wa-abas"></div>
+            <div class="wa-busca"><input id="wa-busca" placeholder="Buscar conversas" /></div>
+            <button class="btn" id="wa-nova">+ Nova conversa</button>
+            <div class="wa-lista" id="wa-lista"></div>
+          </div>
+          <div class="wa-coluna-chat" id="wa-coluna-chat"></div>
         </div>
-        <div class="wa-coluna-chat" id="wa-coluna-chat"></div>
       </div>`;
 
     conversaAbertaId = null;

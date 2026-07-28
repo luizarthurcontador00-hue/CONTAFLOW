@@ -512,9 +512,10 @@ kbd { background: var(--fundo-tabela-cabecalho); color: var(--texto); border: 1p
 .nav-submenu .nav-item { padding: 8px 10px; font-size: 13.5px; }
 
 /* ===================== Atendimento: inbox + conversa lado a lado ===================== */
+.wa-pagina { display: flex; flex-direction: column; height: 100%; }
 .wa-faixa {
   display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 16px; flex-shrink: 0;
 }
 .wa-faixa select { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--borda); background: var(--fundo-input); color: var(--texto); }
 .wa-pill {
@@ -525,7 +526,7 @@ kbd { background: var(--fundo-tabela-cabecalho); color: var(--texto); border: 1p
 .wa-pill--espera { background: #fef3c7; color: #92400e; border-color: transparent; }
 .wa-pill--erro { background: #fee2e2; color: #991b1b; border-color: transparent; }
 
-.wa-duas-colunas { display: flex; gap: 16px; height: calc(100vh - 240px); min-height: 420px; }
+.wa-duas-colunas { display: flex; gap: 16px; flex: 1; min-height: 420px; }
 .wa-coluna-inbox {
   width: 340px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px;
   background: var(--fundo-card); border: 1px solid var(--borda); border-radius: 12px; padding: 14px; min-height: 0;
