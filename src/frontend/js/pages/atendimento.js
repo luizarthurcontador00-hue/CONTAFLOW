@@ -16,6 +16,7 @@ window.PaginaAtendimento = (function () {
   let contatos = [];
   let respostasRapidas = [];
   let responsaveis = [];
+  let servicosAgenda = [];
 
   let abaAtiva = 'pendentes'; // contatos | pendentes | em_atendimento
   let termoBusca = '';
@@ -114,6 +115,13 @@ window.PaginaAtendimento = (function () {
     return tel || '—';
   }
 
+  /** Salão/oficina/serviço geral tem Agenda; agência de viagem usa CRM + Calendário de Viagens em vez disso. */
+  function agendaDisponivel() {
+    const perfil = window.__perfilNegocio;
+    const ramo = window.__ramoServico;
+    return (perfil === 'servico' || perfil === 'ambos') && ramo !== 'agencia_viagem';
+  }
+
   function pararPolling() {
     if (pollStatus) clearInterval(pollStatus);
     if (pollLista) clearInterval(pollLista);
@@ -125,6 +133,7 @@ window.PaginaAtendimento = (function () {
   async function render(container) {
     responsaveis = await API.get('/api/agenda/profissionais').catch(() => []);
     respostasRapidas = await API.get('/api/whatsapp/respostas-rapidas').catch(() => []);
+    if (agendaDisponivel()) servicosAgenda = await API.get('/api/produtos?eh_servico=1').catch(() => []);
 
     container.innerHTML = `
       <div class="wa-faixa" id="wa-faixa"></div>
@@ -187,6 +196,7 @@ window.PaginaAtendimento = (function () {
           ${responsaveis.map((r) => `<option value="${r.id}" ${atual === r.id ? 'selected' : ''}>${UI.escapar(r.nome)}</option>`).join('')}
         </select>
         <span class="wa-pill ${classePill}" id="wa-pill-conexao">${ROTULO_ESTADO[statusAtual.estado] || statusAtual.estado}</span>
+        <button class="btn btn--secundario" id="wa-agendar-gerenciar">⏰ Agendar</button>
         <button class="btn btn--secundario" id="wa-atalhos-gerenciar">⚡ Respostas rápidas</button>
         <button class="btn btn--secundario" id="wa-bot-config">🤖 Bot</button>
       </div>`;
@@ -196,6 +206,7 @@ window.PaginaAtendimento = (function () {
       renderFaixa();
     });
     alvo.querySelector('#wa-pill-conexao').addEventListener('click', abrirConexaoModal);
+    alvo.querySelector('#wa-agendar-gerenciar').addEventListener('click', () => abrirGerenciarAgendamentos());
     alvo.querySelector('#wa-atalhos-gerenciar').addEventListener('click', abrirGerenciarAtalhos);
     alvo.querySelector('#wa-bot-config').addEventListener('click', abrirConfigBot);
   }
@@ -397,6 +408,8 @@ window.PaginaAtendimento = (function () {
         <div class="flex gap-8" style="flex-wrap:wrap">
           <button class="btn btn--secundario" id="wa-toggle-bot">${conversaAberta.modo_atual === 'bot' ? '🤖 Desativar robô' : '🤖 Ativar robô'}</button>
           <button class="btn btn--secundario" id="wa-iniciar-atendimento">Iniciar Atendimento</button>
+          ${agendaDisponivel() ? '<button class="btn btn--secundario" id="wa-agendar-horario">📅 Agendar horário</button>' : ''}
+          <button class="btn btn--secundario" id="wa-agendar-mensagem">⏰ Agendar mensagem</button>
           <button class="btn" id="wa-finalizar-atendimento">Finalizar Atendimento</button>
         </div>
       </div>
@@ -434,6 +447,12 @@ window.PaginaAtendimento = (function () {
     });
 
     document.getElementById('wa-finalizar-atendimento').addEventListener('click', abrirFinalizarAtendimento);
+    const btnAgendar = document.getElementById('wa-agendar-horario');
+    if (btnAgendar) btnAgendar.addEventListener('click', abrirAgendarHorario);
+    document.getElementById('wa-agendar-mensagem').addEventListener('click', () => {
+      if (!conversaAberta.contato_id) { UI.erro('Contato não encontrado.'); return; }
+      formAgendamento('unica', { id: conversaAberta.contato_id, nome: conversaAberta.nome_contato, telefone: conversaAberta.telefone });
+    });
 
     const inp = document.getElementById('wa-resposta');
     const enviar = async () => {
@@ -557,6 +576,45 @@ window.PaginaAtendimento = (function () {
           conversaAberta = null;
           renderChatColuna();
           await carregarLista();
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
+  function abrirAgendarHorario() {
+    const conversa = conversaAberta;
+    const hoje = new Date().toISOString().slice(0, 10);
+    Modal.abrir({
+      titulo: '📅 Agendar horário', tamanho: 'modal--grande',
+      corpoHTML: `
+        <div class="form-grid">
+          <div class="campo"><label>Data *</label><input id="ah-data" type="date" value="${hoje}" /></div>
+          <div class="campo"><label>Hora início *</label><input id="ah-hora" type="time" value="09:00" /></div>
+          <div class="campo"><label>Profissional</label><select id="ah-prof">
+            <option value="">—</option>${responsaveis.map((p) => `<option value="${p.id}">${UI.escapar(p.nome)}</option>`).join('')}
+          </select></div>
+          <div class="campo"><label>Serviço</label><select id="ah-serv">
+            <option value="">— selecione —</option>${servicosAgenda.map((s) => `<option value="${s.id}">${UI.escapar(s.nome)}</option>`).join('')}
+          </select></div>
+          <div class="campo col-2"><label>Nome do cliente</label><input id="ah-nome" value="${UI.escapar(conversa.nome_contato || '')}" /></div>
+          <div class="campo col-2"><label>Telefone</label><input id="ah-tel" value="${UI.escapar(conversa.telefone || '')}" /></div>
+          <div class="campo col-2"><label>Observações</label><textarea id="ah-obs"></textarea></div>
+        </div>`,
+      textoConfirmar: 'Agendar',
+      aoConfirmar: async (el) => {
+        const dados = {
+          data: el.querySelector('#ah-data').value,
+          hora_inicio: el.querySelector('#ah-hora').value,
+          profissional_id: el.querySelector('#ah-prof').value || null,
+          produto_id: el.querySelector('#ah-serv').value || null,
+          cliente_nome: el.querySelector('#ah-nome').value,
+          telefone: el.querySelector('#ah-tel').value,
+          observacao: el.querySelector('#ah-obs').value,
+        };
+        if (!dados.data || !dados.hora_inicio) { UI.erro('Informe data e hora.'); return false; }
+        try {
+          await API.post('/api/agenda', dados);
+          UI.sucesso('Agendamento criado na Agenda.');
         } catch (e) { UI.erro(e.message); return false; }
       },
     });
@@ -848,6 +906,172 @@ window.PaginaAtendimento = (function () {
           if (ehEdicao) Object.assign(atalho, salvo);
           else respostasRapidas.push(salvo);
           renderListaAtalhosGerenciar(elPai);
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
+  // ------------------------------- Mensagens agendadas -------------------------------
+
+  async function abrirGerenciarAgendamentos() {
+    let agendadas, recorrentes;
+    try {
+      [agendadas, recorrentes] = await Promise.all([
+        API.get('/api/whatsapp/mensagens-agendadas'),
+        API.get('/api/whatsapp/mensagens-recorrentes'),
+      ]);
+    } catch (e) { UI.erro(e.message); return; }
+
+    const fechar = Modal.abrir({
+      titulo: '⏰ Mensagens agendadas', tamanho: 'modal--grande', mostrarConfirmar: false,
+      corpoHTML: `
+        <div class="flex flex--between" style="align-items:center">
+          <strong>Envio único</strong>
+          <button class="btn btn--secundario" id="ma-nova-unica" type="button">+ Nova</button>
+        </div>
+        <div id="ma-lista-unicas" class="mt-16 mb-16"></div>
+        <hr class="mb-16" />
+        <div class="flex flex--between" style="align-items:center">
+          <strong>Todo mês</strong>
+          <button class="btn btn--secundario" id="ma-nova-recorrente" type="button">+ Nova</button>
+        </div>
+        <div id="ma-lista-recorrentes" class="mt-16"></div>`,
+      aoAbrir: (el) => {
+        renderListaAgendadas(el, agendadas);
+        renderListaRecorrentes(el, recorrentes);
+        el.querySelector('#ma-nova-unica').addEventListener('click', () => {
+          fechar();
+          formAgendamento('unica', null, () => abrirGerenciarAgendamentos());
+        });
+        el.querySelector('#ma-nova-recorrente').addEventListener('click', () => {
+          fechar();
+          formAgendamento('recorrente', null, () => abrirGerenciarAgendamentos());
+        });
+      },
+    });
+
+    function renderListaAgendadas(el, itens) {
+      const alvo = el.querySelector('#ma-lista-unicas');
+      if (!alvo) return;
+      const ROTULO_STATUS = { agendada: '', enviada: 'badge--ok', erro: 'badge--erro', cancelada: 'badge--muted' };
+      alvo.innerHTML = itens.length ? itens.map((m) => `
+        <div class="flex flex--between" style="align-items:center;border:1px solid var(--borda);border-radius:8px;padding:8px 12px;margin-bottom:8px;${m.status !== 'agendada' ? 'opacity:.6' : ''}">
+          <div>
+            <strong>${UI.escapar(m.nome || m.telefone)}</strong> — ${UI.dataHora(m.agendado_para)}
+            <span class="badge ${ROTULO_STATUS[m.status] || ''}">${m.status}</span>
+            <div class="dica">${UI.escapar(m.texto)}</div>
+          </div>
+          ${m.status === 'agendada' ? `<button class="btn btn--perigo" type="button" data-cancelar="${m.id}">Cancelar</button>` : ''}
+        </div>`).join('') : '<p class="dica">Nenhuma mensagem agendada.</p>';
+      alvo.querySelectorAll('[data-cancelar]').forEach((b) => b.addEventListener('click', async () => {
+        try {
+          await API.post(`/api/whatsapp/mensagens-agendadas/${b.dataset.cancelar}/cancelar`, {});
+          const item = itens.find((m) => m.id === Number(b.dataset.cancelar));
+          if (item) item.status = 'cancelada';
+          renderListaAgendadas(el, itens);
+        } catch (e) { UI.erro(e.message); }
+      }));
+    }
+
+    function renderListaRecorrentes(el, itens) {
+      const alvo = el.querySelector('#ma-lista-recorrentes');
+      if (!alvo) return;
+      alvo.innerHTML = itens.length ? itens.map((r) => `
+        <div class="flex flex--between" style="align-items:center;border:1px solid var(--borda);border-radius:8px;padding:8px 12px;margin-bottom:8px;${r.ativo ? '' : 'opacity:.55'}">
+          <div>
+            <strong>${UI.escapar(r.nome || r.telefone)}</strong> — todo dia ${r.dia_mes} às ${r.hora}
+            <div class="dica">${UI.escapar(r.texto)}</div>
+          </div>
+          <button class="btn btn--perigo" type="button" data-excluir-rec="${r.id}">Excluir</button>
+        </div>`).join('') : '<p class="dica">Nenhuma mensagem recorrente.</p>';
+      alvo.querySelectorAll('[data-excluir-rec]').forEach((b) => b.addEventListener('click', async () => {
+        const ok = await UI.confirmar('Excluir esta mensagem recorrente?', { titulo: 'Excluir', textoConfirmar: 'Excluir' });
+        if (!ok) return;
+        try {
+          await API.del(`/api/whatsapp/mensagens-recorrentes/${b.dataset.excluirRec}`);
+          const idx = itens.findIndex((r) => r.id === Number(b.dataset.excluirRec));
+          if (idx >= 0) itens.splice(idx, 1);
+          renderListaRecorrentes(el, itens);
+        } catch (e) { UI.erro(e.message); }
+      }));
+    }
+  }
+
+  /**
+   * Agenda uma mensagem (unica ou recorrente) para um contato. Se contatoPreset
+   * for informado (ex.: chamado de dentro de uma conversa aberta), o contato
+   * fica travado; senao, mostra um campo de busca.
+   */
+  function formAgendamento(tipo, contatoPreset, aoSalvar) {
+    let contatoEscolhido = contatoPreset || null;
+    Modal.abrir({
+      titulo: tipo === 'unica' ? '⏰ Agendar mensagem (uma vez)' : '⏰ Agendar mensagem (todo mês)', tamanho: 'modal--pequeno',
+      corpoHTML: `
+        <div class="campo">
+          <label>Contato *</label>
+          ${contatoPreset
+            ? `<input value="${UI.escapar(contatoPreset.nome || contatoPreset.telefone || '')}" disabled />`
+            : `<input id="ag-contato-busca" placeholder="Buscar contato…" autocomplete="off" /><div id="ag-contato-resultados"></div>`}
+        </div>
+        ${tipo === 'unica'
+          ? `<div class="form-grid mt-16">
+              <div class="campo"><label>Data *</label><input id="ag-data" type="date" /></div>
+              <div class="campo"><label>Hora *</label><input id="ag-hora" type="time" value="09:00" /></div>
+            </div>`
+          : `<div class="form-grid mt-16">
+              <div class="campo"><label>Dia do mês *</label><input id="ag-dia-mes" type="number" min="1" max="31" value="1" /></div>
+              <div class="campo"><label>Hora *</label><input id="ag-hora" type="time" value="09:00" /></div>
+            </div>`}
+        <div class="campo mt-16"><label>Mensagem *</label><textarea id="ag-texto"></textarea></div>`,
+      textoConfirmar: 'Agendar',
+      aoAbrir: (el) => {
+        if (contatoPreset) return;
+        const busca = el.querySelector('#ag-contato-busca');
+        const resultados = el.querySelector('#ag-contato-resultados');
+        let timer = null;
+        busca.addEventListener('input', () => {
+          contatoEscolhido = null;
+          clearTimeout(timer);
+          const v = busca.value.trim();
+          resultados.innerHTML = '';
+          if (!v) return;
+          timer = setTimeout(async () => {
+            try {
+              const r = await API.get(`/api/whatsapp/contatos?busca=${encodeURIComponent(v)}`);
+              const lista = r.slice(0, 6);
+              resultados.innerHTML = lista.length
+                ? lista.map((c) => `<div class="wa-nc-resultado" data-id="${c.id}">
+                    <div class="wa-avatar" style="background:${corAvatar(c.wa_chat_id)}">${UI.escapar(iniciaisContato(c.nome, c.telefone))}</div>
+                    <span>${UI.escapar(c.nome || c.telefone)}</span></div>`).join('')
+                : '<p class="dica">Nenhum contato encontrado.</p>';
+              resultados.querySelectorAll('.wa-nc-resultado').forEach((item) => item.addEventListener('click', () => {
+                const c = lista.find((x) => x.id === Number(item.dataset.id));
+                contatoEscolhido = c;
+                busca.value = c.nome || c.telefone;
+                resultados.innerHTML = '';
+              }));
+            } catch (_) { /* ignora falha de busca */ }
+          }, 250);
+        });
+      },
+      aoConfirmar: async (el) => {
+        const texto = el.querySelector('#ag-texto').value;
+        const contatoId = contatoPreset ? contatoPreset.id : (contatoEscolhido && contatoEscolhido.id);
+        if (!contatoId) { UI.erro('Escolha um contato.'); return false; }
+        if (!texto.trim()) { UI.erro('Escreva a mensagem.'); return false; }
+        try {
+          if (tipo === 'unica') {
+            const data = el.querySelector('#ag-data').value;
+            const hora = el.querySelector('#ag-hora').value;
+            if (!data || !hora) { UI.erro('Informe data e hora.'); return false; }
+            await API.post('/api/whatsapp/mensagens-agendadas', { contato_id: contatoId, texto, agendado_para: `${data} ${hora}:00` });
+          } else {
+            const diaMes = el.querySelector('#ag-dia-mes').value;
+            const hora = el.querySelector('#ag-hora').value;
+            await API.post('/api/whatsapp/mensagens-recorrentes', { contato_id: contatoId, texto, dia_mes: diaMes, hora });
+          }
+          UI.sucesso('Mensagem agendada.');
+          if (aoSalvar) aoSalvar();
         } catch (e) { UI.erro(e.message); return false; }
       },
     });

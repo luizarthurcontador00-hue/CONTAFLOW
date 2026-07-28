@@ -54,4 +54,14 @@ router.post('/respostas-rapidas', asyncHandler((req, res) => res.status(201).jso
 router.put('/respostas-rapidas/:id', asyncHandler((req, res) => res.json(svc.atualizarRespostaRapida(req.params.id, req.body || {}))));
 router.delete('/respostas-rapidas/:id', asyncHandler((req, res) => res.json(svc.excluirRespostaRapida(req.params.id))));
 
+// ------------------------------- Mensagens agendadas -------------------------------
+router.get('/mensagens-agendadas', asyncHandler((req, res) => res.json(svc.listarAgendadas())));
+router.post('/mensagens-agendadas', asyncHandler((req, res) => res.status(201).json(svc.criarAgendada(req.body || {}))));
+router.post('/mensagens-agendadas/:id/cancelar', asyncHandler((req, res) => res.json(svc.cancelarAgendada(req.params.id))));
+
+router.get('/mensagens-recorrentes', asyncHandler((req, res) => res.json(svc.listarRecorrentes())));
+router.post('/mensagens-recorrentes', asyncHandler((req, res) => res.status(201).json(svc.criarRecorrente(req.body || {}))));
+router.put('/mensagens-recorrentes/:id', asyncHandler((req, res) => res.json(svc.atualizarRecorrente(req.params.id, req.body || {}))));
+router.delete('/mensagens-recorrentes/:id', asyncHandler((req, res) => res.json(svc.excluirRecorrente(req.params.id))));
+
 module.exports = router;

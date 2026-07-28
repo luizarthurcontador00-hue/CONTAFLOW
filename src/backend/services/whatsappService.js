@@ -711,11 +711,150 @@ function excluirRespostaRapida(id) {
   return { ok: true };
 }
 
+// ============================== Mensagens agendadas ==============================
+
+function listarAgendadas() {
+  return getDb().prepare(`
+    SELECT a.*, c.nome, c.telefone, c.wa_chat_id
+    FROM mensagens_agendadas_whatsapp a JOIN contatos_whatsapp c ON c.id = a.contato_id
+    ORDER BY (a.status = 'agendada') DESC, datetime(a.agendado_para) DESC
+  `).all();
+}
+
+function criarAgendada({ contato_id, texto, agendado_para }) {
+  const db = getDb();
+  if (!contato_id) throw new AppError('Selecione um contato.');
+  const textoLimpo = (texto || '').trim();
+  if (!textoLimpo) throw new AppError('Informe a mensagem.');
+  if (!agendado_para) throw new AppError('Informe a data e a hora do envio.');
+  const info = db.prepare(
+    'INSERT INTO mensagens_agendadas_whatsapp (contato_id, texto, agendado_para) VALUES (?, ?, ?)'
+  ).run(Number(contato_id), textoLimpo, agendado_para);
+  return db.prepare('SELECT * FROM mensagens_agendadas_whatsapp WHERE id = ?').get(info.lastInsertRowid);
+}
+
+function cancelarAgendada(id) {
+  const db = getDb();
+  const info = db.prepare("UPDATE mensagens_agendadas_whatsapp SET status = 'cancelada' WHERE id = ? AND status = 'agendada'").run(id);
+  if (!info.changes) throw new AppError('Mensagem agendada não encontrada ou já processada.', 404);
+  return { ok: true };
+}
+
+function listarRecorrentes() {
+  return getDb().prepare(`
+    SELECT r.*, c.nome, c.telefone, c.wa_chat_id
+    FROM mensagens_recorrentes_whatsapp r JOIN contatos_whatsapp c ON c.id = r.contato_id
+    ORDER BY r.dia_mes, r.hora
+  `).all();
+}
+
+function criarRecorrente({ contato_id, texto, dia_mes, hora }) {
+  const db = getDb();
+  if (!contato_id) throw new AppError('Selecione um contato.');
+  const textoLimpo = (texto || '').trim();
+  if (!textoLimpo) throw new AppError('Informe a mensagem.');
+  const dia = Number(dia_mes);
+  if (!dia || dia < 1 || dia > 31) throw new AppError('Informe um dia do mês válido (1 a 31).');
+  const info = db.prepare(
+    'INSERT INTO mensagens_recorrentes_whatsapp (contato_id, texto, dia_mes, hora) VALUES (?, ?, ?, ?)'
+  ).run(Number(contato_id), textoLimpo, dia, hora || '09:00');
+  return db.prepare('SELECT * FROM mensagens_recorrentes_whatsapp WHERE id = ?').get(info.lastInsertRowid);
+}
+
+function atualizarRecorrente(id, dados) {
+  const db = getDb();
+  const atual = db.prepare('SELECT * FROM mensagens_recorrentes_whatsapp WHERE id = ?').get(id);
+  if (!atual) throw new AppError('Mensagem recorrente não encontrada.', 404);
+  db.prepare('UPDATE mensagens_recorrentes_whatsapp SET texto=?, dia_mes=?, hora=?, ativo=? WHERE id=?').run(
+    dados.texto !== undefined ? (dados.texto || '').trim() : atual.texto,
+    dados.dia_mes !== undefined ? Number(dados.dia_mes) : atual.dia_mes,
+    dados.hora !== undefined ? dados.hora : atual.hora,
+    dados.ativo !== undefined ? (dados.ativo ? 1 : 0) : atual.ativo,
+    id
+  );
+  return db.prepare('SELECT * FROM mensagens_recorrentes_whatsapp WHERE id = ?').get(id);
+}
+
+function excluirRecorrente(id) {
+  getDb().prepare('DELETE FROM mensagens_recorrentes_whatsapp WHERE id = ?').run(id);
+  return { ok: true };
+}
+
+/** Reaproveita/reabre a conversa do contato e manda a mensagem agendada por ela. */
+async function enviarMensagemAgendada(contatoRow, texto) {
+  const db = getDb();
+  let conversa = db.prepare('SELECT * FROM conversas_whatsapp WHERE wa_chat_id = ?').get(contatoRow.wa_chat_id);
+  if (!conversa) {
+    const info = db.prepare(`
+      INSERT INTO conversas_whatsapp (wa_chat_id, nome_contato, telefone, status, modo_atual, contato_id)
+      VALUES (?, ?, ?, 'atendimento', 'humano', ?)
+    `).run(contatoRow.wa_chat_id, contatoRow.nome, contatoRow.telefone, contatoRow.contato_id || contatoRow.id);
+    conversa = db.prepare('SELECT * FROM conversas_whatsapp WHERE id = ?').get(info.lastInsertRowid);
+  } else if (conversa.status === 'resolvida') {
+    db.prepare(`
+      UPDATE conversas_whatsapp SET status='atendimento', modo_atual='humano', comentario_resolucao=NULL, resolvida_em=NULL
+      WHERE id=?
+    `).run(conversa.id);
+  }
+  await enviarTexto(conversa.id, texto);
+}
+
+/** Roda a cada minuto: dispara mensagens unicas vencidas e recorrentes do dia. */
+async function processarAgendadasDevidas() {
+  if (!client || estado !== 'conectado') return;
+  const db = getDb();
+  const agora = new Date().toISOString().slice(0, 19).replace('T', ' ');
+
+  const devidas = db.prepare(`
+    SELECT a.*, c.wa_chat_id, c.nome, c.telefone FROM mensagens_agendadas_whatsapp a
+    JOIN contatos_whatsapp c ON c.id = a.contato_id
+    WHERE a.status = 'agendada' AND a.agendado_para <= ?
+  `).all(agora);
+  for (const m of devidas) {
+    try {
+      await enviarMensagemAgendada({ ...m, contato_id: m.contato_id }, m.texto);
+      db.prepare("UPDATE mensagens_agendadas_whatsapp SET status='enviada', enviado_em=datetime('now','localtime') WHERE id=?").run(m.id);
+    } catch (e) {
+      db.prepare("UPDATE mensagens_agendadas_whatsapp SET status='erro', erro=? WHERE id=?").run(descreverErro(e), m.id);
+    }
+  }
+
+  const hoje = new Date();
+  const diaHoje = hoje.getDate();
+  const horaHoje = String(hoje.getHours()).padStart(2, '0') + ':' + String(hoje.getMinutes()).padStart(2, '0');
+  const dataHojeStr = hoje.toISOString().slice(0, 10);
+  const recorrentes = db.prepare(`
+    SELECT r.*, c.wa_chat_id, c.nome, c.telefone FROM mensagens_recorrentes_whatsapp r
+    JOIN contatos_whatsapp c ON c.id = r.contato_id
+    WHERE r.ativo = 1 AND r.dia_mes = ? AND r.hora <= ? AND (r.ultima_execucao IS NULL OR r.ultima_execucao != ?)
+  `).all(diaHoje, horaHoje, dataHojeStr);
+  for (const r of recorrentes) {
+    try {
+      await enviarMensagemAgendada({ ...r, contato_id: r.contato_id }, r.texto);
+      db.prepare('UPDATE mensagens_recorrentes_whatsapp SET ultima_execucao = ? WHERE id = ?').run(dataHojeStr, r.id);
+    } catch (e) {
+      console.error('[whatsapp] erro ao enviar mensagem recorrente:', descreverErro(e));
+    }
+  }
+}
+
+let timerAgendador = null;
+/** Liga o relogio do agendador (uma vez, no boot do backend). Nao envia nada se o WhatsApp estiver desconectado. */
+function iniciarAgendador() {
+  if (timerAgendador) return;
+  timerAgendador = setInterval(() => {
+    processarAgendadasDevidas().catch((e) => console.error('[whatsapp] erro no agendador de mensagens:', descreverErro(e)));
+  }, 60000);
+  if (timerAgendador.unref) timerAgendador.unref(); // nao mantem o processo vivo so por causa desse timer
+}
+
 // ------------------------- apenas para testes automatizados -------------------------
 function _definirClienteParaTeste(fakeClient, fakeEstado) {
   client = fakeClient;
   estado = fakeEstado || 'conectado';
 }
+
+iniciarAgendador();
 
 module.exports = {
   iniciar, desconectar, status,
@@ -725,5 +864,7 @@ module.exports = {
   tratarMensagemRecebida,
   obterConfigBot, salvarConfigBot, listarRegrasBot, criarRegraBot, atualizarRegraBot, excluirRegraBot,
   listarRespostasRapidas, criarRespostaRapida, atualizarRespostaRapida, excluirRespostaRapida,
-  _definirClienteParaTeste,
+  listarAgendadas, criarAgendada, cancelarAgendada,
+  listarRecorrentes, criarRecorrente, atualizarRecorrente, excluirRecorrente,
+  _definirClienteParaTeste, _processarAgendadasAgora: processarAgendadasDevidas,
 };

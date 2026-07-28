@@ -855,6 +855,38 @@ const migrations = [
       }
     },
   },
+  {
+    version: 21,
+    name: 'atendimento-mensagens-agendadas',
+    up(db) {
+      db.exec(`
+        -- Envio unico, numa data/hora futura.
+        CREATE TABLE IF NOT EXISTS mensagens_agendadas_whatsapp (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          contato_id    INTEGER NOT NULL REFERENCES contatos_whatsapp(id) ON DELETE CASCADE,
+          texto         TEXT NOT NULL,
+          agendado_para TEXT NOT NULL,  -- 'YYYY-MM-DD HH:MM:SS'
+          status        TEXT NOT NULL DEFAULT 'agendada', -- agendada | enviada | erro | cancelada
+          erro          TEXT,
+          criado_em     TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+          enviado_em    TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_msg_agendadas_status_data ON mensagens_agendadas_whatsapp(status, agendado_para);
+
+        -- Repete todo mes, num dia/hora fixo (ex.: lembrete de mensalidade).
+        CREATE TABLE IF NOT EXISTS mensagens_recorrentes_whatsapp (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          contato_id      INTEGER NOT NULL REFERENCES contatos_whatsapp(id) ON DELETE CASCADE,
+          texto           TEXT NOT NULL,
+          dia_mes         INTEGER NOT NULL CHECK (dia_mes BETWEEN 1 AND 31),
+          hora            TEXT NOT NULL DEFAULT '09:00',
+          ativo           INTEGER NOT NULL DEFAULT 1,
+          ultima_execucao TEXT, -- 'YYYY-MM-DD' do ultimo envio, evita repetir no mesmo dia
+          criado_em       TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+      `);
+    },
+  },
 ];
 
 /**
