@@ -157,34 +157,68 @@ window.PaginaFinanceiro = (function () {
     alvo.innerHTML = tabelaContas(contas, 'pagar') +
       `<div class="flex flex--between mt-16" style="font-size:14px"><span class="muted">${contas.length} conta(s)</span>
         <span>Pendente: <strong style="color:var(--perigo)">${UI.moeda(pend)}</strong> · Total: <strong>${UI.moeda(total)}</strong></span></div>`;
-    ligarAcoes(alvo, 'pagar');
+    ligarAcoes(alvo, 'pagar', contas);
   }
 
-  function formPagar() {
+  function formPagar(cp) {
+    const ehEdicao = !!cp;
     Modal.abrir({
-      titulo: 'Nova conta a pagar', tamanho: 'modal--pequeno',
+      titulo: ehEdicao ? 'Editar conta a pagar' : 'Nova conta a pagar', tamanho: 'modal--pequeno',
       corpoHTML: `
-        <div class="campo"><label>Descrição *</label><input id="cp-desc" /></div>
+        <div class="campo"><label>Descrição *</label><input id="cp-desc" value="${UI.escapar(cp ? cp.descricao : '')}" /></div>
         <div class="form-grid mt-16">
-          <div class="campo"><label>Fornecedor</label><select id="cp-forn"><option value="">—</option>${fornecedores.map((f) => `<option value="${f.id}">${UI.escapar(f.nome)}</option>`).join('')}</select></div>
-          <div class="campo"><label>Categoria (DRE)</label><select id="cp-cat"><option value="">— sem categoria —</option>${categoriasDespesa.map((c) => `<option value="${c.id}">${UI.escapar(c.nome)}${c.considera_dre ? '' : ' (fora do DRE)'}</option>`).join('')}</select></div>
+          <div class="campo"><label>Fornecedor</label><select id="cp-forn"><option value="">—</option>${fornecedores.map((f) => `<option value="${f.id}" ${cp && String(cp.fornecedor_id) === String(f.id) ? 'selected' : ''}>${UI.escapar(f.nome)}</option>`).join('')}</select></div>
+          <div class="campo"><label>Categoria (DRE)</label><select id="cp-cat"><option value="">— sem categoria —</option>${categoriasDespesa.map((c) => `<option value="${c.id}" ${cp && String(cp.categoria_despesa_id) === String(c.id) ? 'selected' : ''}>${UI.escapar(c.nome)}${c.considera_dre ? '' : ' (fora do DRE)'}</option>`).join('')}</select></div>
         </div>
-        <div class="campo mt-16"><label>Valor total (R$) *</label><input id="cp-valor" type="number" step="0.01" min="0" /></div>
+        ${!ehEdicao ? `
+        <div class="campo mt-16"><label>Como vai informar o valor?</label>
+          <div class="flex gap-12" style="align-items:center;flex-wrap:wrap">
+            <label class="flex gap-12" style="align-items:center"><input type="radio" name="cp-modo" value="unico" checked> Valor único (divide pelas parcelas)</label>
+            <label class="flex gap-12" style="align-items:center"><input type="radio" name="cp-modo" value="parcela"> Valor de cada parcela</label>
+          </div>
+        </div>` : ''}
+        <div class="campo mt-16"><label id="cp-valor-label">${ehEdicao ? 'Valor (R$) *' : 'Valor total (R$) *'}</label><input id="cp-valor" type="number" step="0.01" min="0" value="${cp ? cp.valor : ''}" /></div>
+        ${!ehEdicao ? `
         <div class="form-grid mt-16">
           <div class="campo"><label>Parcelas</label><input id="cp-parc" type="number" min="1" value="1" /></div>
-          <div class="campo"><label>1º vencimento</label><input id="cp-venc" type="date" value="${new Date().toISOString().slice(0, 10)}" /></div>
-        </div>
-        <div class="dica mt-16">A categoria organiza a conta no DRE. Com mais de uma parcela, o valor é dividido e cada parcela vence a cada mês (uma conta por parcela).</div>`,
+          <div class="campo" id="cp-parcini-wrap" style="display:none"><label>Começa na parcela nº</label><input id="cp-parcini" type="number" min="1" value="1" /></div>
+        </div>` : ''}
+        <div class="campo mt-16"><label>${ehEdicao ? 'Vencimento' : '1º vencimento'}</label><input id="cp-venc" type="date" value="${cp ? (cp.vencimento || '') : new Date().toISOString().slice(0, 10)}" /></div>
+        <div class="dica mt-16">${ehEdicao ? 'Editando apenas este lançamento.' : 'A categoria organiza a conta no DRE. Com mais de uma parcela, cada parcela vence a cada mês (uma conta por parcela).'}</div>`,
       textoConfirmar: 'Salvar',
+      aoAbrir: (el) => {
+        if (ehEdicao) return;
+        const parc = el.querySelector('#cp-parc');
+        const parciniWrap = el.querySelector('#cp-parcini-wrap');
+        const label = el.querySelector('#cp-valor-label');
+        parc.addEventListener('input', () => {
+          parciniWrap.style.display = Number(parc.value) > 1 ? '' : 'none';
+        });
+        el.querySelectorAll('input[name="cp-modo"]').forEach((r) => r.addEventListener('change', () => {
+          const modo = el.querySelector('input[name="cp-modo"]:checked').value;
+          label.textContent = modo === 'parcela' ? 'Valor de cada parcela (R$) *' : 'Valor total (R$) *';
+        }));
+      },
       aoConfirmar: async (el) => {
         try {
-          const r = await API.post('/api/financeiro/contas-pagar', {
-            descricao: el.querySelector('#cp-desc').value, fornecedor_id: el.querySelector('#cp-forn').value || null,
-            categoria_despesa_id: el.querySelector('#cp-cat').value || null,
-            valor: el.querySelector('#cp-valor').value, parcelas: el.querySelector('#cp-parc').value,
-            primeiro_vencimento: el.querySelector('#cp-venc').value || null,
-          });
-          UI.sucesso(r && r.criadas ? `${r.criadas} parcela(s) criada(s).` : 'Conta criada.');
+          if (ehEdicao) {
+            await API.put(`/api/financeiro/contas-pagar/${cp.id}`, {
+              descricao: el.querySelector('#cp-desc').value, fornecedor_id: el.querySelector('#cp-forn').value || null,
+              categoria_despesa_id: el.querySelector('#cp-cat').value || null,
+              valor: el.querySelector('#cp-valor').value, vencimento: el.querySelector('#cp-venc').value || null,
+            });
+            UI.sucesso('Conta atualizada.');
+          } else {
+            const modo = el.querySelector('input[name="cp-modo"]:checked').value;
+            const r = await API.post('/api/financeiro/contas-pagar', {
+              descricao: el.querySelector('#cp-desc').value, fornecedor_id: el.querySelector('#cp-forn').value || null,
+              categoria_despesa_id: el.querySelector('#cp-cat').value || null,
+              valor: el.querySelector('#cp-valor').value, valor_modo: modo,
+              parcelas: el.querySelector('#cp-parc').value, parcela_inicial: el.querySelector('#cp-parcini').value,
+              primeiro_vencimento: el.querySelector('#cp-venc').value || null,
+            });
+            UI.sucesso(r && r.criadas ? `${r.criadas} parcela(s) criada(s).` : 'Conta criada.');
+          }
           await listarPagar(); carregarAlertas();
         } catch (e) { UI.erro(e.message); return false; }
       },
@@ -394,28 +428,63 @@ window.PaginaFinanceiro = (function () {
     alvo.innerHTML = tabelaContas(contas, 'receber') +
       `<div class="flex flex--between mt-16" style="font-size:14px"><span class="muted">${contas.length} conta(s)</span>
         <span>A receber: <strong style="color:var(--alerta,#b45309)">${UI.moeda(pend)}</strong> · Recebido: <strong style="color:var(--sucesso)">${UI.moeda(receb)}</strong></span></div>`;
-    ligarAcoes(alvo, 'receber');
+    ligarAcoes(alvo, 'receber', contas);
   }
 
-  function formReceber() {
+  function formReceber(cr) {
+    const ehEdicao = !!cr;
     Modal.abrir({
-      titulo: 'Nova conta a receber', tamanho: 'modal--pequeno',
+      titulo: ehEdicao ? 'Editar conta a receber' : 'Nova conta a receber', tamanho: 'modal--pequeno',
       corpoHTML: `
-        <div class="campo"><label>Descrição *</label><input id="cr-desc" /></div>
-        <div class="campo mt-16"><label>Valor total (R$) *</label><input id="cr-valor" type="number" step="0.01" min="0" /></div>
+        <div class="campo"><label>Descrição *</label><input id="cr-desc" value="${UI.escapar(cr ? cr.descricao : '')}" /></div>
+        ${!ehEdicao ? `
+        <div class="campo mt-16"><label>Como vai informar o valor?</label>
+          <div class="flex gap-12" style="align-items:center;flex-wrap:wrap">
+            <label class="flex gap-12" style="align-items:center"><input type="radio" name="cr-modo" value="unico" checked> Valor único (divide pelas parcelas)</label>
+            <label class="flex gap-12" style="align-items:center"><input type="radio" name="cr-modo" value="parcela"> Valor de cada parcela</label>
+          </div>
+        </div>` : ''}
+        <div class="campo mt-16"><label id="cr-valor-label">${ehEdicao ? 'Valor (R$) *' : 'Valor total (R$) *'}</label><input id="cr-valor" type="number" step="0.01" min="0" value="${cr ? cr.valor : ''}" /></div>
+        ${!ehEdicao ? `
         <div class="form-grid mt-16">
           <div class="campo"><label>Parcelas</label><input id="cr-parc" type="number" min="1" value="1" /></div>
-          <div class="campo"><label>1º vencimento</label><input id="cr-venc" type="date" value="${new Date().toISOString().slice(0, 10)}" /></div>
-        </div>
-        <div class="dica mt-16">Parcelas mensais são geradas automaticamente.</div>`,
+          <div class="campo" id="cr-parcini-wrap" style="display:none"><label>Começa na parcela nº</label><input id="cr-parcini" type="number" min="1" value="1" /></div>
+        </div>` : ''}
+        <div class="campo mt-16"><label>${ehEdicao ? 'Vencimento' : '1º vencimento'}</label><input id="cr-venc" type="date" value="${cr ? (cr.vencimento || '') : new Date().toISOString().slice(0, 10)}" /></div>
+        <div class="dica mt-16">${ehEdicao ? 'Editando apenas este lançamento.' : 'Parcelas mensais são geradas automaticamente.'}</div>`,
       textoConfirmar: 'Salvar',
+      aoAbrir: (el) => {
+        if (ehEdicao) return;
+        const parc = el.querySelector('#cr-parc');
+        const parciniWrap = el.querySelector('#cr-parcini-wrap');
+        const label = el.querySelector('#cr-valor-label');
+        parc.addEventListener('input', () => {
+          parciniWrap.style.display = Number(parc.value) > 1 ? '' : 'none';
+        });
+        el.querySelectorAll('input[name="cr-modo"]').forEach((r) => r.addEventListener('change', () => {
+          const modo = el.querySelector('input[name="cr-modo"]:checked').value;
+          label.textContent = modo === 'parcela' ? 'Valor de cada parcela (R$) *' : 'Valor total (R$) *';
+        }));
+      },
       aoConfirmar: async (el) => {
         try {
-          const r = await API.post('/api/financeiro/contas-receber', {
-            descricao: el.querySelector('#cr-desc').value, valor: el.querySelector('#cr-valor').value,
-            parcelas: el.querySelector('#cr-parc').value, primeiro_vencimento: el.querySelector('#cr-venc').value || null,
-          });
-          UI.sucesso(`${r.criadas} parcela(s) criada(s).`); await listarReceber(); carregarAlertas();
+          if (ehEdicao) {
+            await API.put(`/api/financeiro/contas-receber/${cr.id}`, {
+              descricao: el.querySelector('#cr-desc').value,
+              valor: el.querySelector('#cr-valor').value, vencimento: el.querySelector('#cr-venc').value || null,
+            });
+            UI.sucesso('Conta atualizada.');
+          } else {
+            const modo = el.querySelector('input[name="cr-modo"]:checked').value;
+            const r = await API.post('/api/financeiro/contas-receber', {
+              descricao: el.querySelector('#cr-desc').value,
+              valor: el.querySelector('#cr-valor').value, valor_modo: modo,
+              parcelas: el.querySelector('#cr-parc').value, parcela_inicial: el.querySelector('#cr-parcini').value,
+              primeiro_vencimento: el.querySelector('#cr-venc').value || null,
+            });
+            UI.sucesso(`${r.criadas} parcela(s) criada(s).`);
+          }
+          await listarReceber(); carregarAlertas();
         } catch (e) { UI.erro(e.message); return false; }
       },
     });
@@ -437,18 +506,24 @@ window.PaginaFinanceiro = (function () {
           <td style="text-align:right;white-space:nowrap">
             ${!quitada && c.status !== 'cancelada' ? `<button class="btn" data-baixar="${c.id}">${tipo === 'pagar' ? 'Pagar' : 'Receber'}</button>` : ''}
             ${quitada && !ehVista ? `<button class="btn btn--secundario" data-reabrir="${c.id}">Reabrir</button>` : ''}
+            ${ehVista ? '' : `<button class="btn btn--secundario" data-editar="${c.id}">Editar</button>`}
             ${ehVista ? '' : `<button class="btn btn--secundario" data-excluir="${c.id}">✕</button>`}
           </td>
         </tr>`;
       }).join('')}</tbody></table>`;
   }
 
-  function ligarAcoes(alvo, tipo) {
+  function ligarAcoes(alvo, tipo, contas) {
     const base = '/api/financeiro/contas-' + tipo;
     const recarregar = tipo === 'pagar' ? listarPagar : listarReceber;
+    const formulario = tipo === 'pagar' ? formPagar : formReceber;
     alvo.querySelectorAll('[data-baixar]').forEach((b) => b.addEventListener('click', () => baixar(tipo, b.dataset.baixar)));
     alvo.querySelectorAll('[data-reabrir]').forEach((b) => b.addEventListener('click', async () => {
       try { await API.post(`${base}/${b.dataset.reabrir}/reabrir`, {}); await recarregar(); carregarAlertas(); } catch (e) { UI.erro(e.message); }
+    }));
+    alvo.querySelectorAll('[data-editar]').forEach((b) => b.addEventListener('click', () => {
+      const c = contas.find((x) => x.id === Number(b.dataset.editar));
+      if (c) formulario(c);
     }));
     alvo.querySelectorAll('[data-excluir]').forEach((b) => b.addEventListener('click', async () => {
       const ok = await UI.confirmar('Excluir esta conta?', { titulo: 'Excluir conta', textoConfirmar: 'Excluir' });

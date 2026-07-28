@@ -204,39 +204,79 @@ function excluirCategoriaDespesa(id) {
 /**
  * Cria conta a pagar, com parcelamento opcional.
  * dados = { descricao, fornecedor_id?, valor, vencimento?/primeiro_vencimento?,
- *           parcelas?, forma_pagamento? }
- * Com parcelas > 1, o valor informado e o TOTAL e cada parcela vence a cada mes.
+ *           parcelas?, parcela_inicial?, valor_modo?, forma_pagamento? }
+ * valor_modo = 'parcela': o valor informado e o de CADA parcela (nao e dividido).
+ * valor_modo default ('unico'): o valor informado e o TOTAL, dividido pelas parcelas.
+ * parcela_inicial permite comecar o lancamento a partir de uma parcela do meio
+ * (ex.: parcela 3 de 5, quando as anteriores ja foram pagas/lancadas em outro lugar).
+ * Cada parcela vence a cada mes a partir do vencimento informado.
  */
 function criarPagar(dados) {
   const db = getDb();
   const descricao = (dados.descricao || '').trim();
   if (!descricao) throw new AppError('Informe a descricao da conta.');
-  const valor = Number(dados.valor);
-  if (!(valor > 0)) throw new AppError('Informe um valor maior que zero.');
-  const parcelas = Math.max(1, Number(dados.parcelas || 1));
+  const valorInformado = Number(dados.valor);
+  if (!(valorInformado > 0)) throw new AppError('Informe um valor maior que zero.');
+  const totalParcelas = Math.max(1, Number(dados.parcelas || 1));
+  const parcelaInicial = Math.min(totalParcelas, Math.max(1, Number(dados.parcela_inicial || 1)));
   const primeiro = dados.primeiro_vencimento || dados.vencimento || null;
+  const porParcela = dados.valor_modo === 'parcela';
 
   const categoria = dados.categoria_despesa_id ? Number(dados.categoria_despesa_id) : null;
-  const valorParcela = arred(valor / parcelas);
+  const valores = [];
+  if (porParcela) {
+    for (let i = 1; i <= totalParcelas; i++) valores.push(arred(valorInformado));
+  } else {
+    const valorParcela = arred(valorInformado / totalParcelas);
+    let acumulado = 0;
+    for (let i = 1; i <= totalParcelas; i++) {
+      const v = i === totalParcelas ? arred(valorInformado - acumulado) : valorParcela;
+      acumulado = arred(acumulado + v);
+      valores.push(v);
+    }
+  }
+
   const ins = db.prepare(
     `INSERT INTO contas_pagar (fornecedor_id, descricao, valor, vencimento, status, forma_pagamento, parcela, total_parcelas, categoria_despesa_id)
      VALUES (?, ?, ?, ?, 'pendente', ?, ?, ?, ?)`
   );
   const tx = db.transaction(() => {
-    let acumulado = 0;
     const ids = [];
-    for (let i = 1; i <= parcelas; i++) {
-      const v = i === parcelas ? arred(valor - acumulado) : valorParcela;
-      acumulado = arred(acumulado + v);
-      const venc = primeiro ? somarMeses(primeiro, i - 1) : null;
-      const desc = parcelas > 1 ? `${descricao} (${i}/${parcelas})` : descricao;
-      ids.push(ins.run(dados.fornecedor_id || null, desc, v, venc, dados.forma_pagamento || null, i, parcelas, categoria).lastInsertRowid);
+    for (let i = parcelaInicial; i <= totalParcelas; i++) {
+      const venc = primeiro ? somarMeses(primeiro, i - parcelaInicial) : null;
+      const desc = totalParcelas > 1 ? `${descricao} (${i}/${totalParcelas})` : descricao;
+      ids.push(ins.run(dados.fornecedor_id || null, desc, valores[i - 1], venc, dados.forma_pagamento || null, i, totalParcelas, categoria).lastInsertRowid);
     }
     return ids;
   });
   const ids = tx();
-  if (parcelas > 1) return { criadas: parcelas };
+  if (ids.length > 1) return { criadas: ids.length };
   return db.prepare('SELECT * FROM contas_pagar WHERE id = ?').get(ids[0]);
+}
+
+/** Edita uma conta a pagar ja lancada (uma parcela/lancamento por vez). */
+function atualizarPagar(id, dados) {
+  const db = getDb();
+  const atual = db.prepare('SELECT * FROM contas_pagar WHERE id = ?').get(id);
+  if (!atual) throw new AppError('Conta nao encontrada.', 404);
+  const descricao = dados.descricao !== undefined ? (dados.descricao || '').trim() : atual.descricao;
+  if (!descricao) throw new AppError('Informe a descricao da conta.');
+  const valor = dados.valor !== undefined && dados.valor !== '' ? Number(dados.valor) : atual.valor;
+  if (!(valor > 0)) throw new AppError('Informe um valor maior que zero.');
+  const vencimento = dados.vencimento !== undefined ? (dados.vencimento || null) : atual.vencimento;
+  const fornecedorId = dados.fornecedor_id !== undefined ? (dados.fornecedor_id || null) : atual.fornecedor_id;
+  const categoria = dados.categoria_despesa_id !== undefined ? (dados.categoria_despesa_id || null) : atual.categoria_despesa_id;
+  const formaPagamento = dados.forma_pagamento !== undefined ? (dados.forma_pagamento || null) : atual.forma_pagamento;
+  const valorArred = arred(valor);
+  const tx = db.transaction(() => {
+    db.prepare('UPDATE contas_pagar SET descricao=?, valor=?, vencimento=?, fornecedor_id=?, categoria_despesa_id=?, forma_pagamento=? WHERE id=?')
+      .run(descricao, valorArred, vencimento, fornecedorId, categoria, formaPagamento, id);
+    if (atual.status === 'pago' && valorArred !== Number(atual.valor)) {
+      db.prepare("UPDATE contas_financeiras_mov SET valor=? WHERE origem='pagamento' AND referencia_id=?").run(valorArred, id);
+    }
+  });
+  tx();
+  return db.prepare('SELECT * FROM contas_pagar WHERE id = ?').get(id);
 }
 
 function baixarPagar(id, { data_pagamento, forma_pagamento, conta_financeira_id } = {}) {
@@ -497,38 +537,77 @@ function listarReceber({ status, inicio, fim } = {}) {
 
 /**
  * Cria conta a receber, com parcelamento opcional.
- * dados = { descricao, valor, parcelas?, primeiro_vencimento?, venda_id?, cliente_id? }
+ * dados = { descricao, valor, parcelas?, parcela_inicial?, valor_modo?,
+ *           primeiro_vencimento?, venda_id?, cliente_id? }
+ * valor_modo = 'parcela': o valor informado e o de CADA parcela (nao e dividido).
+ * valor_modo default ('unico'): o valor informado e o TOTAL, dividido pelas parcelas.
+ * parcela_inicial permite comecar o lancamento a partir de uma parcela do meio.
  */
 function criarReceber(dados) {
   const db = getDb();
   const descricao = (dados.descricao || '').trim();
   if (!descricao) throw new AppError('Informe a descricao.');
-  const valor = Number(dados.valor);
-  if (!(valor > 0)) throw new AppError('Informe um valor maior que zero.');
-  const parcelas = Math.max(1, Number(dados.parcelas || 1));
+  const valorInformado = Number(dados.valor);
+  if (!(valorInformado > 0)) throw new AppError('Informe um valor maior que zero.');
+  const totalParcelas = Math.max(1, Number(dados.parcelas || 1));
+  const parcelaInicial = Math.min(totalParcelas, Math.max(1, Number(dados.parcela_inicial || 1)));
   const primeiro = dados.primeiro_vencimento || hoje();
   const clienteId = dados.cliente_id ? Number(dados.cliente_id) : null;
+  const porParcela = dados.valor_modo === 'parcela';
 
-  const valorParcela = arred(valor / parcelas);
+  const valores = [];
+  if (porParcela) {
+    for (let i = 1; i <= totalParcelas; i++) valores.push(arred(valorInformado));
+  } else {
+    const valorParcela = arred(valorInformado / totalParcelas);
+    let acumulado = 0;
+    for (let i = 1; i <= totalParcelas; i++) {
+      // Ultima parcela ajusta a diferenca de arredondamento.
+      const v = i === totalParcelas ? arred(valorInformado - acumulado) : valorParcela;
+      acumulado = arred(acumulado + v);
+      valores.push(v);
+    }
+  }
+
   const ins = db.prepare(
     `INSERT INTO contas_receber (venda_id, cliente_id, descricao, valor, parcela, total_parcelas, vencimento, status)
      VALUES (?, ?, ?, ?, ?, ?, ?, 'pendente')`
   );
   const ids = [];
   const tx = db.transaction(() => {
-    let acumulado = 0;
-    for (let i = 1; i <= parcelas; i++) {
-      // Ultima parcela ajusta a diferenca de arredondamento.
-      const v = i === parcelas ? arred(valor - acumulado) : valorParcela;
-      acumulado = arred(acumulado + v);
-      const venc = somarMeses(primeiro, i - 1);
-      const desc = parcelas > 1 ? `${descricao} (${i}/${parcelas})` : descricao;
-      const info = ins.run(dados.venda_id || null, clienteId, desc, v, i, parcelas, venc);
+    for (let i = parcelaInicial; i <= totalParcelas; i++) {
+      const venc = somarMeses(primeiro, i - parcelaInicial);
+      const desc = totalParcelas > 1 ? `${descricao} (${i}/${totalParcelas})` : descricao;
+      const info = ins.run(dados.venda_id || null, clienteId, desc, valores[i - 1], i, totalParcelas, venc);
       ids.push(info.lastInsertRowid);
     }
   });
   tx();
-  return { criadas: parcelas, ids };
+  return { criadas: ids.length, ids };
+}
+
+/** Edita uma conta a receber ja lancada (uma parcela/lancamento por vez). */
+function atualizarReceber(id, dados) {
+  const db = getDb();
+  const atual = db.prepare('SELECT * FROM contas_receber WHERE id = ?').get(id);
+  if (!atual) throw new AppError('Conta nao encontrada.', 404);
+  if (atual.tipo === 'venda_vista') throw new AppError('Recebimento de venda a vista nao pode ser editado.');
+  const descricao = dados.descricao !== undefined ? (dados.descricao || '').trim() : atual.descricao;
+  if (!descricao) throw new AppError('Informe a descricao.');
+  const valor = dados.valor !== undefined && dados.valor !== '' ? Number(dados.valor) : atual.valor;
+  if (!(valor > 0)) throw new AppError('Informe um valor maior que zero.');
+  const vencimento = dados.vencimento !== undefined ? (dados.vencimento || null) : atual.vencimento;
+  const clienteId = dados.cliente_id !== undefined ? (dados.cliente_id || null) : atual.cliente_id;
+  const valorArred = arred(valor);
+  const tx = db.transaction(() => {
+    db.prepare('UPDATE contas_receber SET descricao=?, valor=?, vencimento=?, cliente_id=? WHERE id=?')
+      .run(descricao, valorArred, vencimento, clienteId, id);
+    if (atual.status === 'recebido' && valorArred !== Number(atual.valor)) {
+      db.prepare("UPDATE contas_financeiras_mov SET valor=? WHERE origem='recebimento' AND referencia_id=?").run(valorArred, id);
+    }
+  });
+  tx();
+  return db.prepare('SELECT * FROM contas_receber WHERE id = ?').get(id);
 }
 
 function baixarReceber(id, { data_recebimento, forma_recebimento, conta_financeira_id } = {}) {
@@ -709,10 +788,10 @@ function dre({ inicio, fim } = {}) {
 }
 
 module.exports = {
-  listarPagar, criarPagar, baixarPagar, reabrirPagar, excluirPagar,
+  listarPagar, criarPagar, atualizarPagar, baixarPagar, reabrirPagar, excluirPagar,
   listarCategoriasDespesa, criarCategoriaDespesa, atualizarCategoriaDespesa, excluirCategoriaDespesa,
   dre,
-  listarReceber, criarReceber, baixarReceber, reabrirReceber, excluirReceber,
+  listarReceber, criarReceber, atualizarReceber, baixarReceber, reabrirReceber, excluirReceber,
   alertas, fluxoCaixa,
   listarContasFixas, criarContaFixa, atualizarContaFixa, excluirContaFixa, gerarContasFixasPendentes,
   listarAssinaturas, criarAssinatura, atualizarAssinatura, excluirAssinatura, gerarAssinaturasPendentes,
