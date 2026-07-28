@@ -131,7 +131,7 @@ window.PaginaAtendimento = (function () {
       <div class="wa-duas-colunas">
         <div class="wa-coluna-inbox">
           <div class="wa-abas" id="wa-abas"></div>
-          <input id="wa-busca" placeholder="Buscar conversas" />
+          <div class="wa-busca"><input id="wa-busca" placeholder="Buscar conversas" /></div>
           <button class="btn" id="wa-nova">+ Nova conversa</button>
           <div class="wa-lista" id="wa-lista"></div>
         </div>

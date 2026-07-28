@@ -208,7 +208,7 @@ function tentarCriarLeadAutomatico(db, conversaId, nome, telefone) {
     if (!cfg || cfg.valor !== 'agencia_viagem') return;
     // eslint-disable-next-line global-require
     const crmService = require('./crmService');
-    const lead = crmService.criarLead({ nome, telefone, origem: 'whatsapp' });
+    const lead = crmService.criarLead({ nome: nome || telefone, telefone, origem: 'whatsapp' });
     db.prepare('UPDATE conversas_whatsapp SET lead_id = ? WHERE id = ?').run(lead.id, conversaId);
   } catch (e) {
     console.error('[whatsapp] erro ao criar lead automatico:', e.message);
@@ -469,6 +469,7 @@ async function iniciarConversa(telefone, texto, nome, atendenteId) {
       VALUES (?, ?, ?, 'atendimento', 'humano', ?, ?)
     `).run(chatId, contato.nome, numeroLimpo, contato.id, atendenteId || null);
     conversa = db.prepare('SELECT * FROM conversas_whatsapp WHERE id = ?').get(info.lastInsertRowid);
+    tentarCriarLeadAutomatico(db, conversa.id, contato.nome, numeroLimpo);
   } else if (conversa.status === 'resolvida') {
     db.prepare(`
       UPDATE conversas_whatsapp SET status='atendimento', modo_atual='humano', comentario_resolucao=NULL, resolvida_em=NULL, atendente_id=?

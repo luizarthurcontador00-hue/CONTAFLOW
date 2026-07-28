@@ -535,14 +535,29 @@ kbd { background: var(--fundo-tabela-cabecalho); color: var(--texto); border: 1p
   background: var(--fundo-card); border: 1px solid var(--borda); border-radius: 12px; overflow: hidden;
 }
 
-.wa-abas { display: flex; gap: 8px; flex-wrap: wrap; }
-.wa-aba {
-  padding: 8px 14px; border-radius: 999px; border: 1px solid var(--borda);
-  background: var(--fundo-app); cursor: pointer; font-size: 13.5px;
-  display: flex; align-items: center; gap: 6px; color: var(--texto);
+.wa-abas {
+  display: flex; gap: 4px; background: var(--fundo-app); border: 1px solid var(--borda);
+  border-radius: 10px; padding: 4px;
 }
-.wa-aba.ativa { background: var(--texto); color: var(--fundo-card); border-color: var(--texto); }
-.wa-aba__contador { background: rgba(127,127,127,.25); border-radius: 999px; padding: 1px 7px; font-size: 12px; }
+.wa-aba {
+  flex: 1; padding: 7px 6px; border-radius: 7px; border: none;
+  background: transparent; cursor: pointer; font-size: 12.5px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; gap: 5px; color: var(--texto);
+  white-space: nowrap;
+}
+.wa-aba.ativa { background: var(--fundo-card); color: var(--texto); box-shadow: var(--sombra); }
+.wa-aba__contador { background: rgba(127,127,127,.25); border-radius: 999px; padding: 1px 6px; font-size: 11px; }
+
+.wa-busca { position: relative; }
+.wa-busca::before {
+  content: "🔎"; position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  font-size: 13px; pointer-events: none; opacity: .6;
+}
+.wa-busca input {
+  width: 100%; padding: 9px 12px 9px 32px; border-radius: 999px; border: 1px solid var(--borda);
+  background: var(--fundo-input); color: var(--texto); font-size: 13.5px;
+}
+.wa-busca input:focus { outline: none; border-color: var(--primaria); box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
 
 .wa-lista { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; min-height: 0; }
 .wa-item { display: flex; gap: 10px; padding: 10px 8px; border-radius: 8px; cursor: pointer; align-items: center; }
