@@ -511,19 +511,42 @@ kbd { background: var(--fundo-tabela-cabecalho); color: var(--texto); border: 1p
 .nav-submenu .nav-item__texto { opacity: 1; }
 .nav-submenu .nav-item { padding: 8px 10px; font-size: 13.5px; }
 
-/* ===================== Atendimento: lista de conversas (estilo inbox) ===================== */
-.wa-abas { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+/* ===================== Atendimento: inbox + conversa lado a lado ===================== */
+.wa-faixa {
+  display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;
+  margin-bottom: 16px;
+}
+.wa-faixa select { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--borda); background: var(--fundo-input); color: var(--texto); }
+.wa-pill {
+  padding: 4px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+  background: var(--fundo-hover); border: 1px solid var(--borda); cursor: pointer;
+}
+.wa-pill--ok { background: #dcfce7; color: #166534; border-color: transparent; }
+.wa-pill--espera { background: #fef3c7; color: #92400e; border-color: transparent; }
+.wa-pill--erro { background: #fee2e2; color: #991b1b; border-color: transparent; }
+
+.wa-duas-colunas { display: flex; gap: 16px; height: calc(100vh - 240px); min-height: 420px; }
+.wa-coluna-inbox {
+  width: 340px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px;
+  background: var(--fundo-card); border: 1px solid var(--borda); border-radius: 12px; padding: 14px; min-height: 0;
+}
+.wa-coluna-chat {
+  flex: 1; min-width: 0; display: flex; flex-direction: column;
+  background: var(--fundo-card); border: 1px solid var(--borda); border-radius: 12px; overflow: hidden;
+}
+
+.wa-abas { display: flex; gap: 8px; flex-wrap: wrap; }
 .wa-aba {
   padding: 8px 14px; border-radius: 999px; border: 1px solid var(--borda);
-  background: var(--fundo-card); cursor: pointer; font-size: 13.5px;
+  background: var(--fundo-app); cursor: pointer; font-size: 13.5px;
   display: flex; align-items: center; gap: 6px; color: var(--texto);
 }
 .wa-aba.ativa { background: var(--texto); color: var(--fundo-card); border-color: var(--texto); }
 .wa-aba__contador { background: rgba(127,127,127,.25); border-radius: 999px; padding: 1px 7px; font-size: 12px; }
 
-.wa-lista { display: flex; flex-direction: column; gap: 2px; max-height: 62vh; overflow-y: auto; }
+.wa-lista { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; min-height: 0; }
 .wa-item { display: flex; gap: 10px; padding: 10px 8px; border-radius: 8px; cursor: pointer; align-items: center; }
-.wa-item:hover { background: var(--fundo-hover); }
+.wa-item:hover, .wa-item.ativo { background: var(--fundo-hover); }
 .wa-avatar {
   width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center;
   justify-content: center; color: #fff; font-weight: 700; font-size: 14px; flex-shrink: 0;
@@ -538,6 +561,39 @@ kbd { background: var(--fundo-tabela-cabecalho); color: var(--texto); border: 1p
   background: var(--sucesso); color: #fff; border-radius: 999px; min-width: 20px; height: 20px;
   padding: 0 6px; font-size: 11.5px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
+
+.wa-vazio {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: var(--texto-suave); gap: 8px;
+}
+.wa-vazio__icone { font-size: 44px; opacity: .5; }
+
+.wa-chat-cabecalho {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 14px 16px; border-bottom: 1px solid var(--borda);
+}
+.wa-chat-corpo { flex: 1; overflow-y: auto; padding: 16px; background: var(--fundo-app); min-height: 0; }
+.wa-chat-rodape {
+  display: flex; align-items: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--borda);
+}
+.wa-chat-rodape textarea {
+  flex: 1; resize: none; border: 1px solid var(--borda); border-radius: 10px; padding: 10px 12px;
+  font: inherit; background: var(--fundo-input); color: var(--texto); max-height: 120px;
+}
+.wa-icone-btn {
+  border: none; background: transparent; font-size: 19px; cursor: pointer; padding: 6px 8px;
+  border-radius: 8px; line-height: 1;
+}
+.wa-icone-btn:hover { background: var(--fundo-hover); }
+.wa-icone-btn.wa-gravando { background: var(--perigo); color: #fff; animation: wa-pulsar 1s infinite; }
+@keyframes wa-pulsar { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+
+.wa-nc-resultado {
+  display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 8px; cursor: pointer;
+}
+.wa-nc-resultado:hover { background: var(--fundo-hover); }
+.wa-atalho-item { padding: 8px 10px; border-radius: 8px; cursor: pointer; border: 1px solid var(--borda); margin-bottom: 8px; }
+.wa-atalho-item:hover { background: var(--fundo-hover); }
 
 /* ===================== Agenda: calendário mensal ===================== */
 .cal-grade { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }

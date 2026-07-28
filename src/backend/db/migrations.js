@@ -805,6 +805,56 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 20,
+    name: 'atendimento-contatos-e-encerramento',
+    up(db) {
+      db.exec(`
+        -- Agenda de contatos do WhatsApp, independente de ter conversa ativa
+        -- (permite a aba "Contatos" e editar o apelido sem precisar de conversa).
+        CREATE TABLE IF NOT EXISTS contatos_whatsapp (
+          id               INTEGER PRIMARY KEY AUTOINCREMENT,
+          wa_chat_id       TEXT NOT NULL UNIQUE,
+          telefone         TEXT,
+          nome             TEXT,   -- apelido editavel pela equipe
+          push_name        TEXT,   -- nome que o proprio WhatsApp informa
+          criado_em        TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+          ultima_interacao TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_contatos_wa_chatid ON contatos_whatsapp(wa_chat_id);
+
+        ALTER TABLE conversas_whatsapp ADD COLUMN contato_id INTEGER REFERENCES contatos_whatsapp(id) ON DELETE SET NULL;
+        -- Encerramento formal do atendimento (fecha a conversa, some das abas ativas).
+        ALTER TABLE conversas_whatsapp ADD COLUMN comentario_resolucao TEXT;
+        ALTER TABLE conversas_whatsapp ADD COLUMN resolvida_em TEXT;
+
+        CREATE TABLE IF NOT EXISTS respostas_rapidas_whatsapp (
+          id        INTEGER PRIMARY KEY AUTOINCREMENT,
+          atalho    TEXT NOT NULL UNIQUE,   -- ex.: "boleto" -> digitar "/boleto " expande
+          titulo    TEXT,
+          conteudo  TEXT NOT NULL,
+          ativo     INTEGER NOT NULL DEFAULT 1
+        );
+
+        -- Quem enviou cada mensagem "enviada" (mostra o rotulo na bolha do chat).
+        ALTER TABLE mensagens_whatsapp ADD COLUMN remetente_tipo TEXT;
+        -- remetente_tipo: atendente | bot | sistema (nulo em mensagens recebidas)
+        ALTER TABLE mensagens_whatsapp ADD COLUMN remetente_id INTEGER REFERENCES profissionais(id) ON DELETE SET NULL;
+      `);
+
+      // Migra os contatos que ja existiam embutidos em conversas_whatsapp
+      // para a nova tabela dedicada, e vincula cada conversa ao seu contato.
+      const conversas = db.prepare('SELECT id, wa_chat_id, telefone, nome_contato FROM conversas_whatsapp').all();
+      const inserirContato = db.prepare(
+        'INSERT INTO contatos_whatsapp (wa_chat_id, telefone, nome, push_name, ultima_interacao) VALUES (?, ?, ?, ?, ?)'
+      );
+      const vincularContato = db.prepare('UPDATE conversas_whatsapp SET contato_id = ? WHERE id = ?');
+      for (const c of conversas) {
+        const info = inserirContato.run(c.wa_chat_id, c.telefone, c.nome_contato, c.nome_contato, null);
+        vincularContato.run(info.lastInsertRowid, c.id);
+      }
+    },
+  },
 ];
 
 /**

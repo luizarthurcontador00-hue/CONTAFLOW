@@ -71,4 +71,19 @@ const uploadPlanilha = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
 });
 
-module.exports = { uploadFoto, uploadXml, uploadPlanilha };
+// ----------------------- Upload de anexo/audio do Atendimento (WhatsApp) -----------------------
+const storageWhatsapp = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, paths.whatsappMidiaDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname) || '';
+    const nome = crypto.randomBytes(8).toString('hex') + '_' + Date.now() + ext;
+    cb(null, nome);
+  },
+});
+
+const uploadWhatsappMidia = multer({
+  storage: storageWhatsapp,
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB
+});
+
+module.exports = { uploadFoto, uploadXml, uploadPlanilha, uploadWhatsappMidia };

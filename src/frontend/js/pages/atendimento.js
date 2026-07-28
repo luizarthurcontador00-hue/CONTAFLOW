@@ -1,148 +1,57 @@
 'use strict';
 
 /**
- * Atendimento via WhatsApp Web: conexao por QR Code, caixa de entrada em
- * lista (com abas Novos / Pendentes / Em atendimento, busca e "Nova
- * conversa"), conversa com suporte a texto, imagem, video, audio,
- * documento e figurinha, bot configuravel de primeiro atendimento,
- * atribuicao de atendente e criacao de tarefa a partir da conversa.
- * Disponivel para qualquer tipo de negocio (nao depende de perfil/ramo).
+ * Atendimento via WhatsApp Web: inbox + conversa lado a lado (sem popup),
+ * abas Contatos / Pendentes / Em atendimento, bot configuravel de primeiro
+ * atendimento, envio de texto/anexo/audio gravado, respostas rapidas por
+ * "/atalho", indicador de digitando e encerramento formal do atendimento
+ * (com reabertura automatica se o contato escrever de novo). Disponivel
+ * para qualquer tipo de negocio (nao depende de perfil/ramo).
  */
 window.PaginaAtendimento = (function () {
+  const CHAVE_ATENDENTE = 'wa_atendente_atual';
+
   let statusAtual = { estado: 'desconectado', qr: null };
   let conversas = [];
+  let contatos = [];
+  let respostasRapidas = [];
   let responsaveis = [];
-  let abaAtiva = 'aguardando';
+
+  let abaAtiva = 'pendentes'; // contatos | pendentes | em_atendimento
   let termoBusca = '';
-  let pollStatus = null;
-  let pollConversas = null;
-  let pollThread = null;
+  let timerBuscaContatos = null;
+
   let conversaAbertaId = null;
+  let conversaAberta = null;
+  let contatoAberto = null;
+  let ultimaContagemMsgs = 0;
 
-  const ABAS = [
-    { status: 'contato', titulo: '🆕 Novos' },
-    { status: 'aguardando', titulo: '⏳ Pendentes' },
-    { status: 'atendimento', titulo: '💬 Em atendimento' },
-  ];
-  const ROTULO_ESTADO = {
-    desconectado: '⚪ Desconectado', gerando_qr: '🟡 Gerando QR Code…',
-    aguardando_leitura: '🟡 Aguardando leitura do QR Code', conectado: '🟢 Conectado', erro: '🔴 Erro na conexão',
-  };
+  let pollStatus = null;
+  let pollLista = null;
+  let pollThread = null;
 
-  async function render(container) {
-    responsaveis = await API.get('/api/agenda/profissionais').catch(() => []);
-    container.innerHTML = `
-      <div class="barra-ferramentas">
-        <div class="cresce"></div>
-        <button class="btn btn--secundario" id="wa-bot-config">🤖 Configurar bot</button>
-      </div>
-      <div class="card mb-16" id="wa-conexao"></div>
-      <div class="wa-abas" id="wa-abas"></div>
-      <div class="flex gap-12 mb-16">
-        <input id="wa-busca" class="cresce" placeholder="🔎 Buscar conversas…" />
-        <button class="btn" id="wa-nova">+ Nova conversa</button>
-      </div>
-      <div class="wa-lista" id="wa-lista"></div>`;
-
-    container.querySelector('#wa-bot-config').addEventListener('click', () => abrirConfigBot());
-    container.querySelector('#wa-nova').addEventListener('click', () => abrirNovaConversa());
-    container.querySelector('#wa-busca').addEventListener('input', (e) => { termoBusca = e.target.value; renderLista(); });
-
-    await atualizarStatus();
-    await listar();
-
-    if (pollStatus) clearInterval(pollStatus);
-    pollStatus = setInterval(atualizarStatus, 3000);
-    if (pollConversas) clearInterval(pollConversas);
-    pollConversas = setInterval(listar, 10000);
-  }
-
-  async function atualizarStatus() {
-    const alvo = document.getElementById('wa-conexao');
-    if (!alvo) { pararPolling(); return; }
-    try { statusAtual = await API.get('/api/whatsapp/status'); }
-    catch (e) { statusAtual = { estado: 'erro', erro: e.message }; }
-    renderConexao();
-  }
-
-  function pararPolling() {
-    if (pollStatus) clearInterval(pollStatus);
-    if (pollConversas) clearInterval(pollConversas);
-    if (pollThread) clearInterval(pollThread);
-  }
-
-  function renderConexao() {
-    const alvo = document.getElementById('wa-conexao');
-    if (!alvo) return;
-    const e = statusAtual.estado;
-    alvo.innerHTML = `
-      <div class="flex flex--between" style="align-items:center;flex-wrap:wrap;gap:12px">
-        <div>
-          <strong>${ROTULO_ESTADO[e] || e}</strong>
-          ${statusAtual.erro ? `<div class="dica" style="color:var(--perigo)">${UI.escapar(statusAtual.erro)}</div>` : ''}
-        </div>
-        <div class="flex gap-12">
-          ${e === 'desconectado' || e === 'erro' ? '<button class="btn" id="wa-conectar">Conectar WhatsApp</button>' : ''}
-          ${e === 'conectado' ? '<button class="btn btn--perigo" id="wa-desconectar">Desconectar</button>' : ''}
-        </div>
-      </div>
-      ${e === 'aguardando_leitura' && statusAtual.qr ? `
-        <div class="mt-16" style="text-align:center">
-          <img src="${statusAtual.qr}" alt="QR Code do WhatsApp" style="width:220px;height:220px;border:1px solid var(--borda);border-radius:8px">
-          <p class="dica mt-16">Abra o WhatsApp no celular → Aparelhos conectados → Conectar um aparelho, e escaneie este código.</p>
-        </div>` : ''}
-      ${e === 'desconectado' ? '<p class="dica mt-16">Conecte para começar a receber e responder mensagens direto por aqui.</p>' : ''}`;
-
-    const btnC = alvo.querySelector('#wa-conectar');
-    if (btnC) btnC.addEventListener('click', async () => {
-      btnC.disabled = true; btnC.textContent = 'Conectando…';
-      try { statusAtual = await API.post('/api/whatsapp/conectar', {}); renderConexao(); }
-      catch (err) { UI.erro(err.message); btnC.disabled = false; btnC.textContent = 'Conectar WhatsApp'; }
-    });
-    const btnD = alvo.querySelector('#wa-desconectar');
-    if (btnD) btnD.addEventListener('click', async () => {
-      const ok = await UI.confirmar('Desconectar o WhatsApp? Você vai precisar escanear o QR Code de novo para reconectar.', { titulo: 'Desconectar', textoConfirmar: 'Desconectar', perigo: true });
-      if (!ok) return;
-      try { statusAtual = await API.post('/api/whatsapp/desconectar', {}); renderConexao(); }
-      catch (err) { UI.erro(err.message); }
-    });
-  }
-
-  async function listar() {
-    const alvo = document.getElementById('wa-lista');
-    if (!alvo) { pararPolling(); return; }
-    try { conversas = await API.get('/api/whatsapp/conversas'); }
-    catch (e) { alvo.innerHTML = UI.escapar(e.message); return; }
-    renderAbas();
-    renderLista();
-  }
-
-  function renderAbas() {
-    const alvo = document.getElementById('wa-abas');
-    if (!alvo) return;
-    alvo.innerHTML = ABAS.map((a) => {
-      const qtd = conversas.filter((c) => c.status === a.status).length;
-      return `<button type="button" class="wa-aba ${abaAtiva === a.status ? 'ativa' : ''}" data-aba="${a.status}">${a.titulo} <span class="wa-aba__contador">${qtd}</span></button>`;
-    }).join('');
-    alvo.querySelectorAll('[data-aba]').forEach((b) => b.addEventListener('click', () => {
-      abaAtiva = b.dataset.aba;
-      renderAbas();
-      renderLista();
-    }));
-  }
+  let gravador = null;
+  let chunksAudio = [];
+  let gravando = false;
+  let ultimoDigitando = 0;
 
   const ICONE_TIPO = { texto: '', imagem: '📷 ', video: '🎥 ', audio: '🎤 ', documento: '📄 ', sticker: '🩹 ' };
   const ROTULO_TIPO = { imagem: 'Foto', video: 'Vídeo', audio: 'Áudio', documento: 'Documento', sticker: 'Figurinha' };
+  const TICK_STATUS = { enviada: '✓', entregue: '✓✓', lida: '✓✓' };
+  const ROTULO_ESTADO = {
+    desconectado: '⚪ Desconectado', gerando_qr: '🟡 Conectando…',
+    aguardando_leitura: '🟡 Escaneie o QR Code', conectado: '🟢 Conectado', erro: '🔴 Erro',
+  };
 
-  function renderLista() {
-    const alvo = document.getElementById('wa-lista');
-    if (!alvo) return;
-    const termo = termoBusca.trim().toLowerCase();
-    const itens = conversas
-      .filter((c) => c.status === abaAtiva)
-      .filter((c) => !termo || (c.nome_contato || '').toLowerCase().includes(termo) || (c.telefone || '').includes(termo));
-    alvo.innerHTML = itens.length ? itens.map(cardConversaItem).join('') : '<p class="dica" style="padding:12px">Nenhuma conversa aqui.</p>';
-    alvo.querySelectorAll('[data-abrir]').forEach((el) => el.addEventListener('click', () => abrirConversa(Number(el.dataset.abrir))));
+  // ------------------------------- Helpers -------------------------------
+
+  function atendenteAtualId() {
+    const v = localStorage.getItem(CHAVE_ATENDENTE);
+    return v ? Number(v) : null;
+  }
+  function definirAtendenteAtual(id) {
+    if (id) localStorage.setItem(CHAVE_ATENDENTE, String(id));
+    else localStorage.removeItem(CHAVE_ATENDENTE);
   }
 
   function iniciaisContato(nome, telefone) {
@@ -182,6 +91,217 @@ window.PaginaAtendimento = (function () {
     return `${ICONE_TIPO[c.ultima_mensagem_tipo] || ''}[${ROTULO_TIPO[c.ultima_mensagem_tipo] || c.ultima_mensagem_tipo}]`;
   }
 
+  // Nao inclui o "+55" dentro do valor mascarado: se os digitos do prefixo
+  // ficassem no proprio <input>, cada nova tecla digitada re-extrairia os
+  // digitos "55" do prefixo junto com o numero real, corrompendo o valor
+  // progressivamente (loop de realimentacao). O "+55" fica num rotulo fixo
+  // ao lado do campo (ver #nc-prefixo-tel), fora da area editavel.
+  function mascararTelefone(digitos) {
+    if (!digitos) return '';
+    if (digitos.length <= 2) return '(' + digitos;
+    const ddd = digitos.slice(0, 2);
+    const resto = digitos.slice(2);
+    if (resto.length <= 4) return `(${ddd}) ${resto}`;
+    const fim = resto.slice(-4);
+    const meio = resto.slice(0, -4);
+    return `(${ddd}) ${meio}-${fim}`;
+  }
+
+  function formatarTelefone(tel) {
+    const d = String(tel || '').replace(/\D/g, '');
+    if (d.length === 12 || d.length === 13) return '+55 ' + mascararTelefone(d.slice(2));
+    if (d.length === 10 || d.length === 11) return '+55 ' + mascararTelefone(d);
+    return tel || '—';
+  }
+
+  function pararPolling() {
+    if (pollStatus) clearInterval(pollStatus);
+    if (pollLista) clearInterval(pollLista);
+    if (pollThread) clearInterval(pollThread);
+  }
+
+  // ------------------------------- Render raiz -------------------------------
+
+  async function render(container) {
+    responsaveis = await API.get('/api/agenda/profissionais').catch(() => []);
+    respostasRapidas = await API.get('/api/whatsapp/respostas-rapidas').catch(() => []);
+
+    container.innerHTML = `
+      <div class="wa-faixa" id="wa-faixa"></div>
+      <div class="wa-duas-colunas">
+        <div class="wa-coluna-inbox">
+          <div class="wa-abas" id="wa-abas"></div>
+          <input id="wa-busca" placeholder="Buscar conversas" />
+          <button class="btn" id="wa-nova">+ Nova conversa</button>
+          <div class="wa-lista" id="wa-lista"></div>
+        </div>
+        <div class="wa-coluna-chat" id="wa-coluna-chat"></div>
+      </div>`;
+
+    conversaAbertaId = null;
+    conversaAberta = null;
+    renderChatColuna();
+
+    container.querySelector('#wa-nova').addEventListener('click', abrirNovaConversa);
+    container.querySelector('#wa-busca').addEventListener('input', (e) => {
+      termoBusca = e.target.value;
+      if (abaAtiva === 'contatos') { clearTimeout(timerBuscaContatos); timerBuscaContatos = setTimeout(carregarLista, 250); }
+      else renderListaInbox();
+    });
+
+    await atualizarStatus();
+    renderFaixa();
+    await carregarLista();
+
+    if (pollStatus) clearInterval(pollStatus);
+    pollStatus = setInterval(async () => {
+      if (!document.getElementById('wa-faixa')) { pararPolling(); return; }
+      await atualizarStatus();
+      renderFaixa();
+    }, 5000);
+    if (pollLista) clearInterval(pollLista);
+    pollLista = setInterval(() => {
+      if (!document.getElementById('wa-lista')) { pararPolling(); return; }
+      carregarLista();
+    }, 10000);
+  }
+
+  async function atualizarStatus() {
+    try { statusAtual = await API.get('/api/whatsapp/status'); }
+    catch (e) { statusAtual = { estado: 'erro', erro: e.message }; }
+  }
+
+  // ------------------------------- Faixa de saudação -------------------------------
+
+  function renderFaixa() {
+    const alvo = document.getElementById('wa-faixa');
+    if (!alvo) return;
+    const atual = atendenteAtualId();
+    const nomeAtual = (responsaveis.find((r) => r.id === atual) || {}).nome || 'Equipe';
+    const classePill = statusAtual.estado === 'conectado' ? 'wa-pill--ok' : statusAtual.estado === 'erro' ? 'wa-pill--erro' : 'wa-pill--espera';
+    alvo.innerHTML = `
+      <div>Olá, <strong>${UI.escapar(nomeAtual)}</strong>! 👋 Seja bem-vindo(a) ao <strong>Atendimento</strong></div>
+      <div class="flex gap-12" style="align-items:center;flex-wrap:wrap">
+        <select id="wa-atendente-atual" title="Quem está atendendo agora">
+          <option value="">— selecionar atendente —</option>
+          ${responsaveis.map((r) => `<option value="${r.id}" ${atual === r.id ? 'selected' : ''}>${UI.escapar(r.nome)}</option>`).join('')}
+        </select>
+        <span class="wa-pill ${classePill}" id="wa-pill-conexao">${ROTULO_ESTADO[statusAtual.estado] || statusAtual.estado}</span>
+        <button class="btn btn--secundario" id="wa-atalhos-gerenciar">⚡ Respostas rápidas</button>
+        <button class="btn btn--secundario" id="wa-bot-config">🤖 Bot</button>
+      </div>`;
+
+    alvo.querySelector('#wa-atendente-atual').addEventListener('change', (e) => {
+      definirAtendenteAtual(e.target.value ? Number(e.target.value) : null);
+      renderFaixa();
+    });
+    alvo.querySelector('#wa-pill-conexao').addEventListener('click', abrirConexaoModal);
+    alvo.querySelector('#wa-atalhos-gerenciar').addEventListener('click', abrirGerenciarAtalhos);
+    alvo.querySelector('#wa-bot-config').addEventListener('click', abrirConfigBot);
+  }
+
+  function abrirConexaoModal() {
+    Modal.abrir({
+      titulo: '🔌 Conexão do WhatsApp', tamanho: 'modal--pequeno', mostrarConfirmar: false,
+      corpoHTML: `<div id="wa-conexao-corpo"></div>`,
+      aoAbrir: (el) => {
+        renderConexaoCorpo(el);
+        const poll = setInterval(async () => {
+          if (!document.getElementById('wa-conexao-corpo')) { clearInterval(poll); return; }
+          try { statusAtual = await API.get('/api/whatsapp/status'); } catch (_) { /* ignora falha de poll */ }
+          renderConexaoCorpo(el);
+          renderFaixa();
+        }, 2000);
+      },
+    });
+  }
+
+  function renderConexaoCorpo(el) {
+    const corpo = el.querySelector('#wa-conexao-corpo');
+    if (!corpo) return;
+    const e = statusAtual.estado;
+    corpo.innerHTML = `
+      <div class="flex flex--between" style="align-items:center;flex-wrap:wrap;gap:12px">
+        <strong>${ROTULO_ESTADO[e] || e}</strong>
+        <div class="flex gap-12">
+          ${e === 'desconectado' || e === 'erro' ? '<button class="btn" id="wa-conectar">Conectar WhatsApp</button>' : ''}
+          ${e === 'conectado' ? '<button class="btn btn--perigo" id="wa-desconectar">Desconectar</button>' : ''}
+        </div>
+      </div>
+      ${statusAtual.erro ? `<div class="dica mt-16" style="color:var(--perigo)">${UI.escapar(statusAtual.erro)}</div>` : ''}
+      ${e === 'aguardando_leitura' && statusAtual.qr ? `
+        <div class="mt-16" style="text-align:center">
+          <img src="${statusAtual.qr}" alt="QR Code do WhatsApp" style="width:220px;height:220px;border:1px solid var(--borda);border-radius:8px">
+          <p class="dica mt-16">Abra o WhatsApp no celular → Aparelhos conectados → Conectar um aparelho.</p>
+        </div>` : ''}
+      ${e === 'desconectado' ? '<p class="dica mt-16">Conecte para começar a receber e responder mensagens direto por aqui.</p>' : ''}`;
+
+    const btnC = corpo.querySelector('#wa-conectar');
+    if (btnC) btnC.addEventListener('click', async () => {
+      btnC.disabled = true; btnC.textContent = 'Conectando…';
+      try { statusAtual = await API.post('/api/whatsapp/conectar', {}); renderConexaoCorpo(el); renderFaixa(); }
+      catch (err) { UI.erro(err.message); btnC.disabled = false; btnC.textContent = 'Conectar WhatsApp'; }
+    });
+    const btnD = corpo.querySelector('#wa-desconectar');
+    if (btnD) btnD.addEventListener('click', async () => {
+      const ok = await UI.confirmar('Desconectar o WhatsApp? Você vai precisar escanear o QR Code de novo para reconectar.', { titulo: 'Desconectar', textoConfirmar: 'Desconectar', perigo: true });
+      if (!ok) return;
+      try { statusAtual = await API.post('/api/whatsapp/desconectar', {}); renderConexaoCorpo(el); renderFaixa(); }
+      catch (err) { UI.erro(err.message); }
+    });
+  }
+
+  // ------------------------------- Inbox: abas + lista -------------------------------
+
+  async function carregarLista() {
+    try { conversas = await API.get('/api/whatsapp/conversas'); } catch (_) { /* mantem a lista anterior */ }
+    renderAbas();
+    if (abaAtiva === 'contatos') {
+      try { contatos = await API.get(`/api/whatsapp/contatos${termoBusca ? '?busca=' + encodeURIComponent(termoBusca) : ''}`); }
+      catch (_) { contatos = []; }
+    }
+    renderListaInbox();
+  }
+
+  function renderAbas() {
+    const alvo = document.getElementById('wa-abas');
+    if (!alvo) return;
+    const qtdPendentes = conversas.filter((c) => c.status === 'contato' || c.status === 'aguardando').length;
+    const qtdAtendimento = conversas.filter((c) => c.status === 'atendimento').length;
+    alvo.innerHTML = `
+      <button type="button" class="wa-aba ${abaAtiva === 'contatos' ? 'ativa' : ''}" data-aba="contatos">Contatos</button>
+      <button type="button" class="wa-aba ${abaAtiva === 'pendentes' ? 'ativa' : ''}" data-aba="pendentes">Pendentes <span class="wa-aba__contador">${qtdPendentes}</span></button>
+      <button type="button" class="wa-aba ${abaAtiva === 'em_atendimento' ? 'ativa' : ''}" data-aba="em_atendimento">Em atend. <span class="wa-aba__contador">${qtdAtendimento}</span></button>`;
+    alvo.querySelectorAll('[data-aba]').forEach((b) => b.addEventListener('click', () => { abaAtiva = b.dataset.aba; carregarLista(); }));
+  }
+
+  function renderListaInbox() {
+    const alvo = document.getElementById('wa-lista');
+    if (!alvo) return;
+
+    if (abaAtiva === 'contatos') {
+      alvo.innerHTML = contatos.length ? contatos.map(cardContatoItem).join('') : '<p class="dica" style="padding:12px">Nenhum contato ainda.</p>';
+      alvo.querySelectorAll('[data-contato]').forEach((el) => el.addEventListener('click', () => abrirContatoDaLista(Number(el.dataset.contato))));
+      return;
+    }
+
+    const termo = termoBusca.trim().toLowerCase();
+    const statusAlvo = abaAtiva === 'pendentes' ? ['contato', 'aguardando'] : ['atendimento'];
+    const itens = conversas
+      .filter((c) => statusAlvo.includes(c.status))
+      .filter((c) => !termo || (c.nome_contato || '').toLowerCase().includes(termo) || (c.telefone || '').includes(termo));
+    alvo.innerHTML = itens.length ? itens.map(cardConversaItem).join('') : '<p class="dica" style="padding:12px">Nenhuma conversa aqui.</p>';
+    alvo.querySelectorAll('[data-abrir]').forEach((el) => el.addEventListener('click', () => abrirConversaInline(Number(el.dataset.abrir))));
+    marcarItemAtivo();
+  }
+
+  function marcarItemAtivo() {
+    document.querySelectorAll('.wa-item').forEach((el) => el.classList.remove('ativo'));
+    if (!conversaAbertaId) return;
+    const el = document.querySelector(`.wa-item[data-abrir="${conversaAbertaId}"]`);
+    if (el) el.classList.add('ativo');
+  }
+
   function cardConversaItem(c) {
     return `<div class="wa-item" data-abrir="${c.id}">
       <div class="wa-avatar" style="background:${corAvatar(c.wa_chat_id || c.telefone)}">${UI.escapar(iniciaisContato(c.nome_contato, c.telefone))}</div>
@@ -191,174 +311,203 @@ window.PaginaAtendimento = (function () {
           <span class="wa-item__hora">${tempoRelativo(c.ultima_mensagem_em)}</span>
         </div>
         <div class="wa-item__baixo">
-          <span class="wa-item__preview">${UI.escapar(previewMensagem(c))}${c.modo_atual === 'bot' ? ' · 🤖 bot' : ''}</span>
+          <span class="wa-item__preview">${UI.escapar(previewMensagem(c))}${c.modo_atual === 'bot' ? ' · 🤖' : ''}</span>
           ${c.nao_lidas > 0 ? `<span class="wa-badge">${c.nao_lidas}</span>` : ''}
         </div>
       </div>
     </div>`;
   }
 
-  function abrirNovaConversa() {
-    Modal.abrir({
-      titulo: 'Nova conversa', tamanho: 'modal--pequeno',
-      corpoHTML: `
-        <div class="campo"><label>Telefone (com DDD) *</label><input id="nc-telefone" placeholder="Ex.: 11999999999" /></div>
-        <div class="campo mt-16"><label>Mensagem *</label><textarea id="nc-texto" placeholder="Olá! …"></textarea></div>
-        <p class="dica mt-16">O número precisa estar cadastrado no WhatsApp. A conversa começa direto em "Em atendimento".</p>`,
-      textoConfirmar: 'Enviar',
-      aoConfirmar: async (el) => {
-        const telefone = el.querySelector('#nc-telefone').value;
-        const texto = el.querySelector('#nc-texto').value;
-        let conversa;
-        try { conversa = await API.post('/api/whatsapp/conversas', { telefone, texto }); }
-        catch (e) { UI.erro(e.message); return false; }
-        UI.sucesso('Mensagem enviada.');
-        await listar();
-        abrirConversa(conversa.id);
-      },
-    });
+  function cardContatoItem(c) {
+    const semConversa = !c.conversa_id;
+    return `<div class="wa-item" data-contato="${c.id}">
+      <div class="wa-avatar" style="background:${corAvatar(c.wa_chat_id || c.telefone)}">${UI.escapar(iniciaisContato(c.nome, c.telefone))}</div>
+      <div class="wa-item__corpo">
+        <div class="wa-item__topo">
+          <span class="wa-item__nome">${UI.escapar(c.nome || c.telefone || '—')}</span>
+          <span class="wa-item__hora">${c.ultima_interacao ? tempoRelativo(c.ultima_interacao) : ''}</span>
+        </div>
+        <div class="wa-item__baixo">
+          <span class="wa-item__preview">${semConversa ? 'Sem conversa ainda' : UI.escapar(previewMensagem(c))}</span>
+          ${c.nao_lidas > 0 ? `<span class="wa-badge">${c.nao_lidas}</span>` : ''}
+        </div>
+      </div>
+    </div>`;
   }
 
-  async function abrirConversa(id) {
+  function abrirContatoDaLista(contatoId) {
+    const c = contatos.find((x) => x.id === contatoId);
+    if (c && c.conversa_id) { abrirConversaInline(c.conversa_id); return; }
+    UI.toast('Este contato ainda não tem conversa. Use "+ Nova" para iniciar.', 'info');
+  }
+
+  // ------------------------------- Coluna da conversa -------------------------------
+
+  async function abrirConversaInline(id) {
     let conversa;
     try { conversa = await API.get(`/api/whatsapp/conversas/${id}`); }
     catch (e) { UI.erro(e.message); return; }
-    if (conversa.nao_lidas > 0) { API.post(`/api/whatsapp/conversas/${id}/marcar-lida`, {}).catch(() => {}); }
 
     conversaAbertaId = id;
-    Modal.abrir({
-      titulo: `💬 ${conversa.nome_contato || conversa.telefone}`, tamanho: 'modal--grande',
-      corpoHTML: `
-        <div class="flex gap-12 mb-16" style="flex-wrap:wrap">
-          ${ABAS.map((col) => `<button class="btn ${conversa.status === col.status ? '' : 'btn--secundario'}" data-mover="${col.status}" ${conversa.status === col.status ? 'disabled' : ''}>${col.titulo}</button>`).join('')}
-        </div>
-        <div class="flex gap-12 mb-16" style="flex-wrap:wrap;align-items:center">
-          <div class="campo" style="min-width:220px;margin:0">
-            <label>Atendente</label>
-            <select id="wa-atendente"><option value="">— sem atendente —</option>${responsaveis.map((r) => `<option value="${r.id}" ${conversa.atendente_id === r.id ? 'selected' : ''}>${UI.escapar(r.nome)}</option>`).join('')}</select>
-          </div>
-          <button class="btn btn--secundario" id="wa-ver-cliente">👤 Detalhes do cliente</button>
-          <button class="btn btn--secundario" id="wa-criar-tarefa">✅ Criar tarefa</button>
-        </div>
-        <div id="wa-drawer-cliente" class="card mb-16" style="display:none;background:var(--fundo-app)"></div>
-        <div id="wa-thread" style="max-height:340px;overflow-y:auto;border:1px solid var(--borda);border-radius:8px;padding:12px;background:var(--fundo-app)"></div>
-        <div class="flex gap-12 mt-16">
-          <input id="wa-resposta" class="cresce" placeholder="Digite uma resposta…" />
-          <button class="btn" id="wa-enviar">Enviar</button>
-        </div>`,
-      mostrarConfirmar: false,
-      aoAbrir: (el) => {
-        renderThread(el, conversa);
-        el.querySelectorAll('[data-mover]').forEach((b) => b.addEventListener('click', async () => {
-          try { await API.put(`/api/whatsapp/conversas/${id}/status`, { status: b.dataset.mover }); UI.sucesso('Status atualizado.'); el.remove(); conversaAbertaId = null; await listar(); }
-          catch (e) { UI.erro(e.message); }
-        }));
+    conversaAberta = conversa;
+    contatoAberto = null;
+    ultimaContagemMsgs = 0;
 
-        el.querySelector('#wa-atendente').addEventListener('change', async (ev) => {
-          try { await API.put(`/api/whatsapp/conversas/${id}/atendente`, { atendente_id: ev.target.value || null }); await listar(); }
-          catch (e) { UI.erro(e.message); }
-        });
+    if (conversa.contato_id) {
+      try { contatoAberto = await API.get(`/api/whatsapp/contatos/${conversa.contato_id}`); } catch (_) { /* segue sem push_name */ }
+    }
+    if (conversa.nao_lidas > 0) API.post(`/api/whatsapp/conversas/${id}/marcar-lida`, {}).catch(() => {});
 
-        el.querySelector('#wa-ver-cliente').addEventListener('click', () => alternarDrawerCliente(el, conversa));
-        el.querySelector('#wa-criar-tarefa').addEventListener('click', () => abrirCriarTarefa(conversa));
+    renderChatColuna();
+    marcarItemAtivo();
 
-        const enviar = async () => {
-          const inp = el.querySelector('#wa-resposta');
-          const texto = inp.value.trim();
-          if (!texto) return;
-          const btn = el.querySelector('#wa-enviar');
-          btn.disabled = true;
-          try {
-            const atualizada = await API.post(`/api/whatsapp/conversas/${id}/mensagens`, { texto });
-            conversa = atualizada;
-            inp.value = '';
-            renderThread(el, atualizada);
-            await listar();
-          } catch (e) { UI.erro(e.message); }
-          btn.disabled = false;
-        };
-        el.querySelector('#wa-enviar').addEventListener('click', enviar);
-        el.querySelector('#wa-resposta').addEventListener('keydown', (e) => { if (e.key === 'Enter') enviar(); });
-
-        if (pollThread) clearInterval(pollThread);
-        pollThread = setInterval(async () => {
-          if (!document.getElementById('wa-thread')) { clearInterval(pollThread); return; }
-          try {
-            const atualizada = await API.get(`/api/whatsapp/conversas/${id}`);
-            conversa = atualizada;
-            renderThread(el, atualizada);
-          } catch (_) { /* ignora falha de poll */ }
-        }, 8000);
-      },
-    });
+    if (pollThread) clearInterval(pollThread);
+    pollThread = setInterval(async () => {
+      if (!conversaAbertaId || !document.getElementById('wa-thread')) { clearInterval(pollThread); return; }
+      try {
+        const atualizada = await API.get(`/api/whatsapp/conversas/${conversaAbertaId}`);
+        conversaAberta = atualizada;
+        renderThread(false);
+      } catch (_) { /* ignora falha de poll */ }
+    }, 4000);
   }
 
-  async function alternarDrawerCliente(el, conversa) {
-    const drawer = el.querySelector('#wa-drawer-cliente');
-    if (!drawer) return;
-    if (drawer.style.display !== 'none') { drawer.style.display = 'none'; return; }
-    drawer.style.display = 'block';
-    drawer.innerHTML = '<p class="dica">Carregando…</p>';
-    if (!conversa.cliente_id && !conversa.lead_id) {
-      drawer.innerHTML = '<p class="dica">Nenhum cliente ou lead vinculado a esta conversa ainda.</p>';
+  function renderChatColuna() {
+    const alvo = document.getElementById('wa-coluna-chat');
+    if (!alvo) return;
+
+    if (!conversaAberta) {
+      alvo.innerHTML = `<div class="wa-vazio"><div class="wa-vazio__icone">💬</div><p>Nenhuma conversa selecionada.</p></div>`;
       return;
     }
-    try {
-      if (conversa.cliente_id) {
-        const c = await API.get(`/api/clientes/${conversa.cliente_id}`);
-        drawer.innerHTML = `
-          <strong>Cliente cadastrado</strong>
-          <div class="mt-16">Nome: ${UI.escapar(c.nome || '—')}</div>
-          <div>Telefone: ${UI.escapar(c.telefone || '—')}</div>
-          <div>E-mail: ${UI.escapar(c.email || '—')}</div>`;
-      } else {
-        const l = await API.get(`/api/crm/leads/${conversa.lead_id}`);
-        drawer.innerHTML = `
-          <strong>Lead no CRM</strong>
-          <div class="mt-16">Nome: ${UI.escapar(l.nome || '—')}</div>
-          <div>Status do funil: ${UI.escapar(l.status || '—')}</div>
-          <div>Origem: ${UI.escapar(l.origem || '—')}</div>`;
+
+    const pushNameDiferente = contatoAberto && contatoAberto.push_name && contatoAberto.push_name !== (conversaAberta.nome_contato || '');
+    alvo.innerHTML = `
+      <div class="wa-chat-cabecalho">
+        <div class="flex gap-12" style="align-items:center">
+          <div class="wa-avatar" style="background:${corAvatar(conversaAberta.wa_chat_id || conversaAberta.telefone)}">${UI.escapar(iniciaisContato(conversaAberta.nome_contato, conversaAberta.telefone))}</div>
+          <div>
+            <div class="flex gap-6" style="align-items:center">
+              <strong>${UI.escapar(conversaAberta.nome_contato || conversaAberta.telefone || '—')}</strong>
+              <button class="wa-icone-btn" id="wa-editar-contato" title="Editar contato" style="font-size:15px">✏️</button>
+            </div>
+            ${pushNameDiferente ? `<div class="dica">${UI.escapar(contatoAberto.push_name)}</div>` : ''}
+          </div>
+        </div>
+        <div class="flex gap-8" style="flex-wrap:wrap">
+          <button class="btn btn--secundario" id="wa-toggle-bot">${conversaAberta.modo_atual === 'bot' ? '🤖 Desativar robô' : '🤖 Ativar robô'}</button>
+          <button class="btn btn--secundario" id="wa-iniciar-atendimento">Iniciar Atendimento</button>
+          <button class="btn" id="wa-finalizar-atendimento">Finalizar Atendimento</button>
+        </div>
+      </div>
+      <div class="wa-chat-corpo" id="wa-thread"></div>
+      <div class="wa-chat-rodape">
+        <button class="wa-icone-btn" id="wa-anexo-btn" title="Anexar arquivo">📎</button>
+        <button class="wa-icone-btn" id="wa-audio-btn" title="Gravar áudio">🎤</button>
+        <button class="wa-icone-btn" id="wa-atalho-btn" title="Respostas rápidas">⚡</button>
+        <textarea id="wa-resposta" rows="1" placeholder="Digite uma mensagem… (Enter envia · /atalho para resposta rápida)"></textarea>
+        <button class="btn" id="wa-enviar">Enviar</button>
+        <input type="file" id="wa-arquivo-input" style="display:none" />
+      </div>`;
+
+    renderThread(true);
+    ligarEventosChat();
+  }
+
+  function ligarEventosChat() {
+    const id = conversaAbertaId;
+
+    document.getElementById('wa-editar-contato').addEventListener('click', abrirEditarContato);
+
+    document.getElementById('wa-toggle-bot').addEventListener('click', async () => {
+      try { conversaAberta = await API.post(`/api/whatsapp/conversas/${id}/alternar-bot`, {}); renderChatColuna(); await carregarLista(); }
+      catch (e) { UI.erro(e.message); }
+    });
+
+    document.getElementById('wa-iniciar-atendimento').addEventListener('click', async () => {
+      try {
+        conversaAberta = await API.post(`/api/whatsapp/conversas/${id}/iniciar-atendimento`, { atendente_id: atendenteAtualId() });
+        UI.sucesso('Atendimento iniciado.');
+        renderChatColuna();
+        await carregarLista();
+      } catch (e) { UI.erro(e.message); }
+    });
+
+    document.getElementById('wa-finalizar-atendimento').addEventListener('click', abrirFinalizarAtendimento);
+
+    const inp = document.getElementById('wa-resposta');
+    const enviar = async () => {
+      const texto = inp.value.trim();
+      if (!texto) return;
+      const btn = document.getElementById('wa-enviar');
+      btn.disabled = true;
+      try {
+        conversaAberta = await API.post(`/api/whatsapp/conversas/${id}/mensagens`, { texto, atendente_id: atendenteAtualId() });
+        inp.value = '';
+        renderThread(true);
+        await carregarLista();
+      } catch (e) { UI.erro(e.message); }
+      btn.disabled = false;
+    };
+    document.getElementById('wa-enviar').addEventListener('click', enviar);
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviar(); } });
+    inp.addEventListener('input', () => {
+      const m = inp.value.match(/^\/(\S+)\s$/);
+      if (m) {
+        const r = respostasRapidas.find((x) => x.ativo && x.atalho === m[1].toLowerCase());
+        if (r) inp.value = r.conteudo;
       }
-    } catch (e) {
-      drawer.innerHTML = `<p class="dica">Não foi possível carregar: ${UI.escapar(e.message)}</p>`;
+      notificarDigitando(id);
+    });
+
+    document.getElementById('wa-anexo-btn').addEventListener('click', () => document.getElementById('wa-arquivo-input').click());
+    document.getElementById('wa-arquivo-input').addEventListener('change', (e) => {
+      const arquivo = e.target.files[0];
+      e.target.value = '';
+      if (arquivo) abrirModalAnexo(id, arquivo);
+    });
+    document.getElementById('wa-audio-btn').addEventListener('click', () => alternarGravacaoAudio(id));
+    document.getElementById('wa-atalho-btn').addEventListener('click', () => abrirListaAtalhos());
+  }
+
+  function notificarDigitando(conversaId) {
+    const agora = Date.now();
+    if (agora - ultimoDigitando < 3000) return;
+    ultimoDigitando = agora;
+    API.post(`/api/whatsapp/conversas/${conversaId}/digitando`, {}).catch(() => {});
+  }
+
+  function estaPertoDoFim(el) {
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }
+
+  function renderThread(forcar) {
+    const thread = document.getElementById('wa-thread');
+    if (!thread || !conversaAberta) return;
+    const novaContagem = conversaAberta.mensagens.length;
+    const chegouNova = novaContagem > ultimaContagemMsgs;
+    const deveRolar = forcar || chegouNova || estaPertoDoFim(thread);
+    ultimaContagemMsgs = novaContagem;
+
+    thread.innerHTML = conversaAberta.mensagens.map(bolhaMensagem).join('') || '<p class="muted">Nenhuma mensagem ainda.</p>';
+
+    if (deveRolar) {
+      thread.scrollTop = thread.scrollHeight;
+      thread.querySelectorAll('img,video').forEach((m) => {
+        const rerolar = () => { thread.scrollTop = thread.scrollHeight; };
+        m.addEventListener('load', rerolar, { once: true });
+        m.addEventListener('loadedmetadata', rerolar, { once: true });
+      });
     }
   }
 
-  function abrirCriarTarefa(conversa) {
-    Modal.abrir({
-      titulo: 'Criar tarefa a partir da conversa', tamanho: 'modal--pequeno',
-      corpoHTML: `
-        <div class="campo"><label>Título *</label><input id="wat-titulo" value="Atender ${UI.escapar(conversa.nome_contato || conversa.telefone || '')}" /></div>
-        <div class="campo mt-16"><label>Descrição</label><textarea id="wat-desc"></textarea></div>
-        <div class="form-grid mt-16">
-          <div class="campo"><label>Responsável</label><select id="wat-resp"><option value="">— sem responsável —</option>${responsaveis.map((r) => `<option value="${r.id}">${UI.escapar(r.nome)}</option>`).join('')}</select></div>
-          <div class="campo"><label>Prazo</label><input id="wat-prazo" type="date" /></div>
-        </div>`,
-      textoConfirmar: 'Criar tarefa',
-      aoConfirmar: async (el) => {
-        const dados = {
-          titulo: el.querySelector('#wat-titulo').value,
-          descricao: el.querySelector('#wat-desc').value,
-          responsavel_id: el.querySelector('#wat-resp').value || null,
-          prazo: el.querySelector('#wat-prazo').value || null,
-          conversa_whatsapp_id: conversa.id,
-        };
-        try { await API.post('/api/tarefas', dados); UI.sucesso('Tarefa criada.'); }
-        catch (e) { UI.erro(e.message); return false; }
-      },
-    });
-  }
-
-  function renderThread(el, conversa) {
-    const thread = el.querySelector('#wa-thread');
-    if (!thread) return;
-    thread.innerHTML = conversa.mensagens.map(bolhaMensagem).join('') || '<p class="muted">Nenhuma mensagem ainda.</p>';
-    thread.scrollTop = thread.scrollHeight;
-  }
-
-  const TICK_STATUS = { enviada: '✓', entregue: '✓✓', lida: '✓✓' };
-
   function bolhaMensagem(m) {
+    if (m.remetente_tipo === 'sistema') {
+      return `<div class="flex" style="justify-content:center;margin:10px 0">
+        <span class="dica" style="background:var(--fundo-hover);padding:4px 12px;border-radius:999px">${UI.escapar(m.texto || '')}</span>
+      </div>`;
+    }
+
     const minha = m.direcao === 'enviada';
     const url = m.arquivo ? `/uploads/whatsapp/${encodeURIComponent(m.arquivo)}` : null;
     let corpo = '';
@@ -366,19 +515,342 @@ window.PaginaAtendimento = (function () {
     else if (m.tipo === 'sticker' && url) corpo = `<img src="${url}" style="width:96px;display:block">`;
     else if (m.tipo === 'video' && url) corpo = `<video src="${url}" controls style="max-width:240px;border-radius:8px;display:block"></video>`;
     else if (m.tipo === 'audio' && url) corpo = `<audio src="${url}" controls></audio>`;
-    else if (m.tipo === 'documento' && url) corpo = `<a href="${url}" target="_blank" rel="noopener" class="btn btn--secundario">📄 ${UI.escapar(m.arquivo_nome_original || 'Documento')}</a>`;
+    else if (m.tipo === 'documento' && url) corpo = `<a href="${url}" target="_blank" rel="noopener" class="btn btn--secundario">📄 baixar ${UI.escapar(ROTULO_TIPO.documento)}</a>`;
     if (m.texto) corpo += `<div>${UI.escapar(m.texto)}</div>`;
     if (!corpo) corpo = `<div class="dica">[${UI.escapar(m.tipo)}]</div>`;
 
-    const tick = minha ? (TICK_STATUS[m.status] || '✓') : '';
+    let rotulo = '';
+    if (minha) {
+      if (m.remetente_tipo === 'bot') rotulo = '🤖 Bot';
+      else if (m.remetente_tipo === 'atendente' && m.remetente_id) {
+        const resp = responsaveis.find((r) => r.id === m.remetente_id);
+        rotulo = resp ? UI.escapar(resp.nome) : '';
+      }
+    }
+
+    const tick = minha ? (m.status === 'erro' ? '⚠️' : (TICK_STATUS[m.status] || '✓')) : '';
     const corTick = m.status === 'lida' ? '#53bdeb' : 'inherit';
 
     return `<div class="flex" style="justify-content:${minha ? 'flex-end' : 'flex-start'};margin-bottom:8px">
       <div style="max-width:75%;padding:8px 12px;border-radius:10px;background:${minha ? 'var(--primaria)' : 'var(--fundo-card)'};color:${minha ? '#fff' : 'var(--texto)'};border:1px solid ${minha ? 'transparent' : 'var(--borda)'}">
+        ${rotulo ? `<div style="font-size:11px;font-weight:700;opacity:.85;margin-bottom:2px">${rotulo}</div>` : ''}
         ${corpo}
         <div style="font-size:10.5px;opacity:.75;margin-top:4px;text-align:right">${UI.dataHora(m.criado_em)}${tick ? ` <span style="color:${corTick}">${tick}</span>` : ''}</div>
       </div>
     </div>`;
+  }
+
+  // ------------------------------- Ações da conversa -------------------------------
+
+  function abrirFinalizarAtendimento() {
+    const id = conversaAbertaId;
+    Modal.abrir({
+      titulo: '✅ Finalizar atendimento', tamanho: 'modal--pequeno',
+      corpoHTML: `<div class="campo"><label>Comentário do atendimento (opcional)</label><textarea id="fin-comentario" placeholder="Resumo do que foi resolvido, combinados, etc."></textarea></div>`,
+      textoConfirmar: 'Finalizar',
+      aoConfirmar: async (el) => {
+        const comentario = el.querySelector('#fin-comentario').value;
+        try {
+          await API.post(`/api/whatsapp/conversas/${id}/finalizar`, { comentario });
+          UI.sucesso('Atendimento finalizado.');
+          conversaAbertaId = null;
+          conversaAberta = null;
+          renderChatColuna();
+          await carregarLista();
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
+  function abrirEditarContato() {
+    if (!conversaAberta || !conversaAberta.contato_id) { UI.erro('Contato não encontrado.'); return; }
+    Modal.abrir({
+      titulo: '👤 Dados do contato', tamanho: 'modal--pequeno',
+      corpoHTML: `
+        <div class="flex gap-12 mb-16" style="align-items:center">
+          <div class="wa-avatar" style="background:${corAvatar(conversaAberta.wa_chat_id)}">${UI.escapar(iniciaisContato((contatoAberto && contatoAberto.nome), conversaAberta.telefone))}</div>
+          <div>
+            <div class="dica">Nome no WhatsApp</div>
+            <div>${UI.escapar((contatoAberto && contatoAberto.push_name) || '—')}</div>
+          </div>
+        </div>
+        <div class="campo"><label>Telefone</label><input value="${UI.escapar(formatarTelefone(conversaAberta.telefone))}" disabled /></div>
+        <div class="campo mt-16"><label>Nome do contato (apelido interno)</label><input id="ec-nome" value="${UI.escapar((contatoAberto && contatoAberto.nome) || '')}" /></div>`,
+      textoConfirmar: 'Salvar',
+      aoConfirmar: async (el) => {
+        const nome = el.querySelector('#ec-nome').value;
+        try {
+          await API.put(`/api/whatsapp/contatos/${conversaAberta.contato_id}`, { nome });
+          UI.sucesso('Contato atualizado.');
+          conversaAberta = await API.get(`/api/whatsapp/conversas/${conversaAbertaId}`);
+          contatoAberto = await API.get(`/api/whatsapp/contatos/${conversaAberta.contato_id}`);
+          renderChatColuna();
+          await carregarLista();
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
+  async function alternarGravacaoAudio(conversaId) {
+    const btn = document.getElementById('wa-audio-btn');
+    if (!btn) return;
+
+    if (!gravando) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        chunksAudio = [];
+        gravador = new MediaRecorder(stream);
+        gravador.ondataavailable = (e) => { if (e.data.size > 0) chunksAudio.push(e.data); };
+        gravador.onstop = async () => {
+          stream.getTracks().forEach((t) => t.stop());
+          const blob = new Blob(chunksAudio, { type: 'audio/webm' });
+          await enviarAudioGravado(conversaId, blob);
+        };
+        gravador.start();
+        gravando = true;
+        btn.textContent = '⏹️';
+        btn.classList.add('wa-gravando');
+      } catch (e) { UI.erro('Não foi possível acessar o microfone: ' + e.message); }
+    } else {
+      gravador.stop();
+      gravando = false;
+      btn.textContent = '🎤';
+      btn.classList.remove('wa-gravando');
+    }
+  }
+
+  async function enviarAudioGravado(conversaId, blob) {
+    const fd = new FormData();
+    fd.append('arquivo', blob, 'audio.webm');
+    fd.append('como_audio', '1');
+    const atendente = atendenteAtualId();
+    if (atendente) fd.append('atendente_id', String(atendente));
+    try {
+      conversaAberta = await API.post(`/api/whatsapp/conversas/${conversaId}/midia`, fd);
+      renderThread(true);
+      await carregarLista();
+    } catch (e) { UI.erro(e.message); }
+  }
+
+  function abrirModalAnexo(conversaId, arquivo) {
+    const ehImagem = arquivo.type.startsWith('image/');
+    const previewUrl = ehImagem ? URL.createObjectURL(arquivo) : null;
+    Modal.abrir({
+      titulo: 'Enviar anexo', tamanho: 'modal--pequeno',
+      corpoHTML: `
+        ${ehImagem
+          ? `<img src="${previewUrl}" style="max-width:100%;border-radius:8px;display:block;margin-bottom:12px" />`
+          : `<div class="card mb-16">📄 ${UI.escapar(arquivo.name)} <span class="dica">(${(arquivo.size / 1024).toFixed(0)} KB)</span></div>`}
+        <div class="campo"><label>Descrição (opcional)</label><input id="anexo-legenda" placeholder="Legenda…" /></div>`,
+      textoConfirmar: 'Enviar',
+      aoConfirmar: async (el) => {
+        const legenda = el.querySelector('#anexo-legenda').value;
+        const fd = new FormData();
+        fd.append('arquivo', arquivo);
+        if (legenda) fd.append('legenda', legenda);
+        const atendente = atendenteAtualId();
+        if (atendente) fd.append('atendente_id', String(atendente));
+        try {
+          conversaAberta = await API.post(`/api/whatsapp/conversas/${conversaId}/midia`, fd);
+          renderThread(true);
+          await carregarLista();
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
+  // ------------------------------- Nova conversa -------------------------------
+
+  function abrirNovaConversa() {
+    let resultadosBusca = [];
+    let numeroValido = false;
+
+    const fechar = Modal.abrir({
+      titulo: '💬 Nova conversa', tamanho: 'modal--pequeno',
+      corpoHTML: `
+        <p class="dica mb-16">Busque um contato existente ou digite um número novo</p>
+        <div class="campo"><label>Contato ou número de WhatsApp</label>
+          <div class="flex gap-8" style="align-items:center">
+            <span id="nc-prefixo-tel" class="dica" style="display:none">+55</span>
+            <input id="nc-campo" class="cresce" placeholder="Nome ou (11) 99999-9999" autocomplete="off" />
+          </div>
+        </div>
+        <div id="nc-resultados"></div>
+        <div id="nc-status-numero" class="dica"></div>
+        <div class="campo mt-16" id="nc-nome-wrap" style="display:none"><label>Nome do contato (opcional)</label><input id="nc-nome" /></div>
+        <div class="campo mt-16" id="nc-msg-wrap" style="display:none"><label>Primeira mensagem</label><textarea id="nc-texto"></textarea></div>`,
+      textoConfirmar: 'Criar conversa',
+      aoAbrir: (el) => {
+        const campo = el.querySelector('#nc-campo');
+        const prefixo = el.querySelector('#nc-prefixo-tel');
+        const btnConfirmar = el.querySelector('[data-confirmar]');
+        const resultadosEl = el.querySelector('#nc-resultados');
+        const statusEl = el.querySelector('#nc-status-numero');
+        const nomeWrap = el.querySelector('#nc-nome-wrap');
+        const msgWrap = el.querySelector('#nc-msg-wrap');
+        const textoEl = el.querySelector('#nc-texto');
+        btnConfirmar.disabled = true;
+        let timerBusca = null;
+
+        function atualizarBotao() { btnConfirmar.disabled = !(numeroValido && textoEl.value.trim()); }
+
+        campo.addEventListener('input', () => {
+          const valor = campo.value;
+          resultadosEl.innerHTML = '';
+          statusEl.innerHTML = '';
+          numeroValido = false;
+
+          if (/[a-zA-Z]/.test(valor)) {
+            prefixo.style.display = 'none';
+            nomeWrap.style.display = 'none';
+            msgWrap.style.display = 'none';
+            btnConfirmar.disabled = true;
+            clearTimeout(timerBusca);
+            if (!valor.trim()) return;
+            timerBusca = setTimeout(async () => {
+              try {
+                const r = await API.get(`/api/whatsapp/contatos?busca=${encodeURIComponent(valor)}`);
+                resultadosBusca = r.slice(0, 6);
+                resultadosEl.innerHTML = resultadosBusca.length
+                  ? resultadosBusca.map((c) => `<div class="wa-nc-resultado" data-id="${c.id}">
+                      <div class="wa-avatar" style="background:${corAvatar(c.wa_chat_id)}">${UI.escapar(iniciaisContato(c.nome, c.telefone))}</div>
+                      <span>${UI.escapar(c.nome || c.telefone)}</span></div>`).join('')
+                  : '<p class="dica">Nenhum contato encontrado.</p>';
+                resultadosEl.querySelectorAll('.wa-nc-resultado').forEach((item) => item.addEventListener('click', () => {
+                  const c = resultadosBusca.find((x) => x.id === Number(item.dataset.id));
+                  if (!c) return;
+                  if (c.conversa_id) { fechar(); abrirConversaInline(c.conversa_id); }
+                  else {
+                    // Numero salvo ja vem com o codigo do pais (55); tira antes de por no campo.
+                    const semPais = String(c.telefone || '').replace(/\D/g, '').replace(/^55/, '');
+                    campo.value = semPais;
+                    campo.dispatchEvent(new Event('input'));
+                  }
+                }));
+              } catch (_) { /* ignora falha de busca */ }
+            }, 250);
+          } else {
+            const digitos = valor.replace(/\D/g, '').slice(0, 11);
+            campo.value = mascararTelefone(digitos);
+            prefixo.style.display = digitos.length ? '' : 'none';
+            nomeWrap.style.display = '';
+            msgWrap.style.display = '';
+            numeroValido = digitos.length === 10 || digitos.length === 11;
+            statusEl.innerHTML = digitos.length
+              ? (numeroValido ? '<span style="color:var(--sucesso)">✅ Número válido</span>' : '<span style="color:var(--perigo)">❌ Número incompleto</span>')
+              : '';
+            atualizarBotao();
+          }
+        });
+        textoEl.addEventListener('input', atualizarBotao);
+      },
+      aoConfirmar: async (el) => {
+        const campo = el.querySelector('#nc-campo');
+        const telefone = '55' + campo.value.replace(/\D/g, '');
+        const nome = el.querySelector('#nc-nome').value;
+        const texto = el.querySelector('#nc-texto').value;
+        const btn = el.querySelector('[data-confirmar]');
+        btn.textContent = 'Criando…';
+        try {
+          const conversa = await API.post('/api/whatsapp/conversas', { telefone, texto, nome, atendente_id: atendenteAtualId() });
+          UI.sucesso('Conversa criada.');
+          await carregarLista();
+          abrirConversaInline(conversa.id);
+        } catch (e) { UI.erro(e.message); btn.textContent = 'Criar conversa'; return false; }
+      },
+    });
+  }
+
+  // ------------------------------- Respostas rápidas -------------------------------
+
+  function abrirListaAtalhos() {
+    const disponiveis = respostasRapidas.filter((r) => r.ativo);
+    const fechar = Modal.abrir({
+      titulo: '⚡ Respostas rápidas', tamanho: 'modal--pequeno', mostrarConfirmar: false,
+      corpoHTML: disponiveis.length
+        ? disponiveis.map((r) => `
+          <div class="wa-atalho-item" data-atalho="${r.id}">
+            <strong>/${UI.escapar(r.atalho)}</strong>${r.titulo ? ` — ${UI.escapar(r.titulo)}` : ''}
+            <div class="dica">${UI.escapar(r.conteudo)}</div>
+          </div>`).join('')
+        : '<p class="dica">Nenhuma resposta rápida cadastrada. Configure em "⚡ Respostas rápidas" no topo da tela.</p>',
+      aoAbrir: (el) => {
+        el.querySelectorAll('[data-atalho]').forEach((item) => item.addEventListener('click', () => {
+          const r = respostasRapidas.find((x) => x.id === Number(item.dataset.atalho));
+          const inp = document.getElementById('wa-resposta');
+          if (inp && r) inp.value = r.conteudo;
+          fechar();
+        }));
+      },
+    });
+  }
+
+  async function abrirGerenciarAtalhos() {
+    try { respostasRapidas = await API.get('/api/whatsapp/respostas-rapidas'); } catch (e) { UI.erro(e.message); return; }
+    Modal.abrir({
+      titulo: '⚡ Respostas rápidas', tamanho: 'modal--grande', mostrarConfirmar: false,
+      corpoHTML: `
+        <div class="flex flex--between" style="align-items:center">
+          <p class="dica" style="margin:0">Digite "/atalho " (com espaço) na conversa para expandir automaticamente.</p>
+          <button class="btn btn--secundario" id="rr-nova" type="button">+ Nova</button>
+        </div>
+        <div id="rr-lista" class="mt-16"></div>`,
+      aoAbrir: (el) => {
+        renderListaAtalhosGerenciar(el);
+        el.querySelector('#rr-nova').addEventListener('click', () => formAtalho(el));
+      },
+    });
+  }
+
+  function renderListaAtalhosGerenciar(el) {
+    const alvo = el.querySelector('#rr-lista');
+    if (!alvo) return;
+    alvo.innerHTML = respostasRapidas.length ? respostasRapidas.map((r) => `
+      <div class="flex flex--between" style="align-items:center;border:1px solid var(--borda);border-radius:8px;padding:8px 12px;margin-bottom:8px;${r.ativo ? '' : 'opacity:.55'}">
+        <div><strong>/${UI.escapar(r.atalho)}</strong>${r.titulo ? ` — ${UI.escapar(r.titulo)}` : ''}<div class="dica">${UI.escapar(r.conteudo)}</div></div>
+        <div class="flex gap-12">
+          <button class="btn btn--secundario" type="button" data-editar="${r.id}">Editar</button>
+          <button class="btn btn--perigo" type="button" data-excluir="${r.id}">Excluir</button>
+        </div>
+      </div>`).join('') : '<p class="dica">Nenhuma resposta rápida cadastrada ainda.</p>';
+
+    alvo.querySelectorAll('[data-editar]').forEach((b) => b.addEventListener('click', () => formAtalho(el, respostasRapidas.find((r) => r.id === Number(b.dataset.editar)))));
+    alvo.querySelectorAll('[data-excluir]').forEach((b) => b.addEventListener('click', async () => {
+      const ok = await UI.confirmar('Excluir esta resposta rápida?', { titulo: 'Excluir', textoConfirmar: 'Excluir' });
+      if (!ok) return;
+      try {
+        await API.del(`/api/whatsapp/respostas-rapidas/${b.dataset.excluir}`);
+        respostasRapidas = respostasRapidas.filter((r) => r.id !== Number(b.dataset.excluir));
+        renderListaAtalhosGerenciar(el);
+      } catch (e) { UI.erro(e.message); }
+    }));
+  }
+
+  function formAtalho(elPai, atalho) {
+    const ehEdicao = !!atalho;
+    Modal.abrir({
+      titulo: ehEdicao ? 'Editar resposta rápida' : 'Nova resposta rápida', tamanho: 'modal--pequeno',
+      corpoHTML: `
+        <div class="campo"><label>Atalho *</label><input id="rr-atalho" value="${UI.escapar(atalho ? atalho.atalho : '')}" placeholder="ex: boleto" /></div>
+        <div class="campo mt-16"><label>Título (opcional)</label><input id="rr-titulo" value="${UI.escapar(atalho && atalho.titulo ? atalho.titulo : '')}" /></div>
+        <div class="campo mt-16"><label>Conteúdo *</label><textarea id="rr-conteudo">${UI.escapar(atalho ? atalho.conteudo : '')}</textarea></div>`,
+      textoConfirmar: 'Salvar',
+      aoConfirmar: async (el) => {
+        const dados = {
+          atalho: el.querySelector('#rr-atalho').value,
+          titulo: el.querySelector('#rr-titulo').value,
+          conteudo: el.querySelector('#rr-conteudo').value,
+        };
+        try {
+          const salvo = ehEdicao
+            ? await API.put(`/api/whatsapp/respostas-rapidas/${atalho.id}`, dados)
+            : await API.post('/api/whatsapp/respostas-rapidas', dados);
+          if (ehEdicao) Object.assign(atalho, salvo);
+          else respostasRapidas.push(salvo);
+          renderListaAtalhosGerenciar(elPai);
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
   }
 
   // ------------------------------- Bot configuravel -------------------------------

@@ -179,6 +179,28 @@ function tratarConfirmacao(msg, ack) {
   getDb().prepare("UPDATE mensagens_whatsapp SET status = ? WHERE wa_message_id = ? AND direcao = 'enviada'").run(novoStatus, wamid);
 }
 
+/** Busca (ou cria) o contato pelo chat_id, atualizando o nome que o WhatsApp informa. */
+function obterOuCriarContato(db, waChatId, telefone, pushName) {
+  let contato = db.prepare('SELECT * FROM contatos_whatsapp WHERE wa_chat_id = ?').get(waChatId);
+  if (!contato) {
+    const info = db.prepare(`
+      INSERT INTO contatos_whatsapp (wa_chat_id, telefone, nome, push_name, ultima_interacao)
+      VALUES (?, ?, ?, ?, datetime('now','localtime'))
+    `).run(waChatId, telefone, pushName || null, pushName || null);
+    contato = db.prepare('SELECT * FROM contatos_whatsapp WHERE id = ?').get(info.lastInsertRowid);
+  } else {
+    db.prepare(`
+      UPDATE contatos_whatsapp SET push_name = COALESCE(?, push_name), ultima_interacao = datetime('now','localtime')
+      WHERE id = ?
+    `).run(pushName || null, contato.id);
+    if (!contato.nome && pushName) {
+      db.prepare('UPDATE contatos_whatsapp SET nome = ? WHERE id = ?').run(pushName, contato.id);
+    }
+    contato = db.prepare('SELECT * FROM contatos_whatsapp WHERE id = ?').get(contato.id);
+  }
+  return contato;
+}
+
 /** Cria/atualiza um lead automatico no CRM quando o ramo e agencia de viagem. */
 function tentarCriarLeadAutomatico(db, conversaId, nome, telefone) {
   try {
@@ -302,9 +324,10 @@ async function enviarRespostasBot(conversa, respostas) {
     try {
       const enviada = await client.sendMessage(conversa.wa_chat_id, texto);
       const wamid = await idAposEnviar(conversa.wa_chat_id, enviada);
-      getDb().prepare(
-        "INSERT OR IGNORE INTO mensagens_whatsapp (conversa_id, wa_message_id, direcao, tipo, texto, status) VALUES (?, ?, 'enviada', 'texto', ?, 'enviada')"
-      ).run(conversa.id, wamid, texto);
+      getDb().prepare(`
+        INSERT OR IGNORE INTO mensagens_whatsapp (conversa_id, wa_message_id, direcao, tipo, texto, status, remetente_tipo)
+        VALUES (?, ?, 'enviada', 'texto', ?, 'enviada', 'bot')
+      `).run(conversa.id, wamid, texto);
     } catch (e) {
       console.error('[whatsapp] erro ao enviar resposta do bot:', descreverErro(e));
     }
@@ -327,19 +350,30 @@ async function tratarMensagemRecebida(msg) {
 
   let nome = msg.from.split('@')[0];
   try {
-    const contato = await msg.getContact();
-    if (contato && (contato.pushname || contato.name)) nome = contato.pushname || contato.name;
+    const wacontato = await msg.getContact();
+    if (wacontato && (wacontato.pushname || wacontato.name)) nome = wacontato.pushname || wacontato.name;
   } catch (_) { /* usa o numero como nome mesmo */ }
   const telefone = msg.from.split('@')[0];
 
+  const contato = obterOuCriarContato(db, msg.from, telefone, nome);
+
   let conversa = db.prepare('SELECT * FROM conversas_whatsapp WHERE wa_chat_id = ?').get(msg.from);
   const novaConversa = !conversa;
+  const reabrindo = !!conversa && conversa.status === 'resolvida';
   if (!conversa) {
     const modoInicial = obterConfigBot().ativo ? 'bot' : 'humano';
     const info = db.prepare(
-      "INSERT INTO conversas_whatsapp (wa_chat_id, nome_contato, telefone, status, modo_atual) VALUES (?, ?, ?, 'contato', ?)"
-    ).run(msg.from, nome, telefone, modoInicial);
+      "INSERT INTO conversas_whatsapp (wa_chat_id, nome_contato, telefone, status, modo_atual, contato_id) VALUES (?, ?, ?, 'contato', ?, ?)"
+    ).run(msg.from, contato.nome || nome, telefone, modoInicial, contato.id);
     conversa = db.prepare('SELECT * FROM conversas_whatsapp WHERE id = ?').get(info.lastInsertRowid);
+  } else if (reabrindo) {
+    // Conversa ja tinha sido finalizada: chegar mensagem nova reabre do zero.
+    const modoInicial = obterConfigBot().ativo ? 'bot' : 'humano';
+    db.prepare(`
+      UPDATE conversas_whatsapp SET status='contato', modo_atual=?, comentario_resolucao=NULL, resolvida_em=NULL
+      WHERE id=?
+    `).run(modoInicial, conversa.id);
+    conversa = db.prepare('SELECT * FROM conversas_whatsapp WHERE id = ?').get(conversa.id);
   }
 
   const tipo = MAPA_TIPOS[msg.type] || 'texto';
@@ -376,13 +410,13 @@ async function tratarMensagemRecebida(msg) {
   const novoModo = transferiuAgora ? 'humano' : conversa.modo_atual;
   const novoStatus = conversa.status === 'atendimento'
     ? 'atendimento'
-    : (transferiuAgora ? 'aguardando' : (novaConversa ? 'contato' : (conversa.modo_atual === 'bot' ? 'contato' : 'aguardando')));
+    : (transferiuAgora ? 'aguardando' : (conversa.modo_atual === 'bot' ? 'contato' : 'aguardando'));
 
   db.prepare(`
     UPDATE conversas_whatsapp SET status=?, modo_atual=?, nao_lidas = nao_lidas + 1,
       ultima_mensagem_em = datetime('now','localtime'), nome_contato = ?
     WHERE id=?
-  `).run(novoStatus, novoModo, nome, conversa.id);
+  `).run(novoStatus, novoModo, contato.nome || nome, conversa.id);
 
   if (novaConversa) tentarCriarLeadAutomatico(db, conversa.id, nome, telefone);
 
@@ -406,7 +440,7 @@ function listarConversas({ status: filtroStatus } = {}) {
 }
 
 /** Inicia uma conversa nova (a equipe fala primeiro com um numero que ainda nao escreveu). */
-async function iniciarConversa(telefone, texto) {
+async function iniciarConversa(telefone, texto, nome, atendenteId) {
   if (!client || estado !== 'conectado') throw new AppError('WhatsApp não está conectado. Conecte em Atendimento antes de iniciar uma conversa.');
   const numeroLimpo = String(telefone || '').replace(/\D/g, '');
   if (!numeroLimpo) throw new AppError('Informe um telefone válido.');
@@ -421,16 +455,65 @@ async function iniciarConversa(telefone, texto) {
   const chatId = numeroId._serialized;
 
   const db = getDb();
+  const contato = obterOuCriarContato(db, chatId, numeroLimpo, null);
+  const nomeLimpo = (nome || '').trim();
+  if (nomeLimpo) {
+    db.prepare('UPDATE contatos_whatsapp SET nome = ? WHERE id = ?').run(nomeLimpo, contato.id);
+    contato.nome = nomeLimpo;
+  }
+
   let conversa = db.prepare('SELECT * FROM conversas_whatsapp WHERE wa_chat_id = ?').get(chatId);
   if (!conversa) {
     const info = db.prepare(`
-      INSERT INTO conversas_whatsapp (wa_chat_id, nome_contato, telefone, status, modo_atual)
-      VALUES (?, ?, ?, 'atendimento', 'humano')
-    `).run(chatId, numeroLimpo, numeroLimpo);
+      INSERT INTO conversas_whatsapp (wa_chat_id, nome_contato, telefone, status, modo_atual, contato_id, atendente_id)
+      VALUES (?, ?, ?, 'atendimento', 'humano', ?, ?)
+    `).run(chatId, contato.nome, numeroLimpo, contato.id, atendenteId || null);
     conversa = db.prepare('SELECT * FROM conversas_whatsapp WHERE id = ?').get(info.lastInsertRowid);
+  } else if (conversa.status === 'resolvida') {
+    db.prepare(`
+      UPDATE conversas_whatsapp SET status='atendimento', modo_atual='humano', comentario_resolucao=NULL, resolvida_em=NULL, atendente_id=?
+      WHERE id=?
+    `).run(atendenteId || null, conversa.id);
   }
 
-  return enviarTexto(conversa.id, texto2);
+  return enviarTexto(conversa.id, texto2, atendenteId);
+}
+
+// ============================== Contatos ==============================
+
+function listarContatos({ busca } = {}) {
+  const db = getDb();
+  const termo = busca ? `%${busca}%` : null;
+  const where = termo ? 'WHERE c.nome LIKE @termo OR c.push_name LIKE @termo OR c.telefone LIKE @termo' : '';
+  return db.prepare(`
+    SELECT c.*,
+      (SELECT v.id FROM conversas_whatsapp v WHERE v.contato_id = c.id ORDER BY v.id DESC LIMIT 1) AS conversa_id,
+      (SELECT v.status FROM conversas_whatsapp v WHERE v.contato_id = c.id ORDER BY v.id DESC LIMIT 1) AS conversa_status,
+      (SELECT v.nao_lidas FROM conversas_whatsapp v WHERE v.contato_id = c.id ORDER BY v.id DESC LIMIT 1) AS nao_lidas,
+      (SELECT m.tipo FROM mensagens_whatsapp m JOIN conversas_whatsapp v2 ON v2.id = m.conversa_id
+        WHERE v2.contato_id = c.id ORDER BY m.id DESC LIMIT 1) AS ultima_mensagem_tipo,
+      (SELECT m.texto FROM mensagens_whatsapp m JOIN conversas_whatsapp v2 ON v2.id = m.conversa_id
+        WHERE v2.contato_id = c.id ORDER BY m.id DESC LIMIT 1) AS ultima_mensagem_texto
+    FROM contatos_whatsapp c
+    ${where}
+    ORDER BY (c.ultima_interacao IS NULL), datetime(c.ultima_interacao) DESC
+  `).all({ termo });
+}
+
+function obterContato(id) {
+  const contato = getDb().prepare('SELECT * FROM contatos_whatsapp WHERE id = ?').get(id);
+  if (!contato) throw new AppError('Contato nao encontrado.', 404);
+  return contato;
+}
+
+function atualizarContato(id, nome) {
+  const db = getDb();
+  const nomeLimpo = (nome || '').trim();
+  if (!nomeLimpo) throw new AppError('Informe um nome.');
+  const info = db.prepare('UPDATE contatos_whatsapp SET nome = ? WHERE id = ?').run(nomeLimpo, id);
+  if (!info.changes) throw new AppError('Contato nao encontrado.', 404);
+  db.prepare('UPDATE conversas_whatsapp SET nome_contato = ? WHERE contato_id = ?').run(nomeLimpo, id);
+  return db.prepare('SELECT * FROM contatos_whatsapp WHERE id = ?').get(id);
 }
 
 function obterConversa(id) {
@@ -442,7 +525,7 @@ function obterConversa(id) {
 }
 
 function atualizarStatusConversa(id, novoStatus) {
-  if (!['contato', 'aguardando', 'atendimento'].includes(novoStatus)) throw new AppError('Status invalido.');
+  if (!['contato', 'aguardando', 'atendimento', 'resolvida'].includes(novoStatus)) throw new AppError('Status invalido.');
   const db = getDb();
   const info = db.prepare('UPDATE conversas_whatsapp SET status = ?, nao_lidas = 0 WHERE id = ?').run(novoStatus, id);
   if (!info.changes) throw new AppError('Conversa nao encontrada.', 404);
@@ -456,6 +539,39 @@ function atribuirAtendente(id, atendenteId) {
   return db.prepare('SELECT * FROM conversas_whatsapp WHERE id = ?').get(id);
 }
 
+/** "Iniciar Atendimento": assume a conversa para um atendente, sem exigir que ja tenha dono. */
+function iniciarAtendimento(id, atendenteId) {
+  const db = getDb();
+  const conversa = db.prepare('SELECT * FROM conversas_whatsapp WHERE id = ?').get(id);
+  if (!conversa) throw new AppError('Conversa nao encontrada.', 404);
+  db.prepare(`
+    UPDATE conversas_whatsapp SET status='atendimento', modo_atual='humano', atendente_id=?, nao_lidas=0
+    WHERE id=?
+  `).run(atendenteId || null, id);
+  return obterConversa(id);
+}
+
+/** Liga/desliga o robo para uma conversa especifica (botao "Ativar/Desativar robô"). */
+function alternarModoConversa(id) {
+  const db = getDb();
+  const conversa = db.prepare('SELECT * FROM conversas_whatsapp WHERE id = ?').get(id);
+  if (!conversa) throw new AppError('Conversa nao encontrada.', 404);
+  const novoModo = conversa.modo_atual === 'bot' ? 'humano' : 'bot';
+  db.prepare('UPDATE conversas_whatsapp SET modo_atual = ? WHERE id = ?').run(novoModo, id);
+  return obterConversa(id);
+}
+
+/** "Finalizar Atendimento": encerra a conversa (some das abas ativas ate chegar mensagem nova). */
+function finalizarConversa(id, comentario) {
+  const db = getDb();
+  const info = db.prepare(`
+    UPDATE conversas_whatsapp SET status='resolvida', comentario_resolucao=?, resolvida_em=datetime('now','localtime')
+    WHERE id=?
+  `).run((comentario || '').trim() || null, id);
+  if (!info.changes) throw new AppError('Conversa nao encontrada.', 404);
+  return obterConversa(id);
+}
+
 function marcarLida(id) {
   const db = getDb();
   const info = db.prepare('UPDATE conversas_whatsapp SET nao_lidas = 0 WHERE id = ?').run(id);
@@ -463,7 +579,7 @@ function marcarLida(id) {
   return db.prepare('SELECT * FROM conversas_whatsapp WHERE id = ?').get(id);
 }
 
-async function enviarTexto(conversaId, texto) {
+async function enviarTexto(conversaId, texto, atendenteId) {
   if (!client || estado !== 'conectado') throw new AppError('WhatsApp não está conectado. Conecte em Atendimento antes de responder.');
   const db = getDb();
   const conversa = db.prepare('SELECT * FROM conversas_whatsapp WHERE id = ?').get(conversaId);
@@ -474,8 +590,9 @@ async function enviarTexto(conversaId, texto) {
   const enviada = await client.sendMessage(conversa.wa_chat_id, texto2);
   const wamid = await idAposEnviar(conversa.wa_chat_id, enviada);
   db.prepare(`
-    INSERT OR IGNORE INTO mensagens_whatsapp (conversa_id, wa_message_id, direcao, tipo, texto, status) VALUES (?, ?, 'enviada', 'texto', ?, 'enviada')
-  `).run(conversaId, wamid, texto2);
+    INSERT OR IGNORE INTO mensagens_whatsapp (conversa_id, wa_message_id, direcao, tipo, texto, status, remetente_tipo, remetente_id)
+    VALUES (?, ?, 'enviada', 'texto', ?, 'enviada', 'atendente', ?)
+  `).run(conversaId, wamid, texto2, atendenteId || null);
   db.prepare(`
     UPDATE conversas_whatsapp SET ultima_mensagem_em = datetime('now','localtime'),
       modo_atual = 'humano',
@@ -484,6 +601,113 @@ async function enviarTexto(conversaId, texto) {
   `).run(conversaId);
 
   return obterConversa(conversaId);
+}
+
+/**
+ * Envia um arquivo ja salvo em paths.whatsappMidiaDir (subido via multer) como
+ * midia da conversa: imagem/video/documento, ou nota de voz se comoAudio=true.
+ */
+async function enviarMidia(conversaId, { arquivoSalvo, mimetype, nomeOriginal, legenda, comoAudio, atendenteId }) {
+  if (!client || estado !== 'conectado') throw new AppError('WhatsApp não está conectado. Conecte em Atendimento antes de enviar.');
+  const db = getDb();
+  const conversa = db.prepare('SELECT * FROM conversas_whatsapp WHERE id = ?').get(conversaId);
+  if (!conversa) throw new AppError('Conversa nao encontrada.', 404);
+
+  // eslint-disable-next-line global-require
+  const { MessageMedia } = require('whatsapp-web.js');
+  const caminho = path.join(paths.whatsappMidiaDir, arquivoSalvo);
+  const media = MessageMedia.fromFilePath(caminho);
+  if (nomeOriginal) media.filename = nomeOriginal;
+
+  const opcoes = {};
+  if (legenda) opcoes.caption = legenda;
+  if (comoAudio) opcoes.sendAudioAsVoice = true;
+
+  const enviada = await client.sendMessage(conversa.wa_chat_id, media, opcoes);
+  const wamid = await idAposEnviar(conversa.wa_chat_id, enviada);
+
+  const mimeReal = media.mimetype || mimetype || '';
+  const tipoMsg = comoAudio ? 'audio'
+    : mimeReal.startsWith('image/') ? 'imagem'
+      : mimeReal.startsWith('video/') ? 'video'
+        : mimeReal.startsWith('audio/') ? 'audio' : 'documento';
+
+  db.prepare(`
+    INSERT OR IGNORE INTO mensagens_whatsapp (conversa_id, wa_message_id, direcao, tipo, texto, arquivo, arquivo_nome_original, status, remetente_tipo, remetente_id)
+    VALUES (?, ?, 'enviada', ?, ?, ?, ?, 'enviada', 'atendente', ?)
+  `).run(conversaId, wamid, tipoMsg, legenda || null, arquivoSalvo, nomeOriginal || null, atendenteId || null);
+
+  db.prepare(`
+    UPDATE conversas_whatsapp SET ultima_mensagem_em = datetime('now','localtime'), modo_atual = 'humano',
+      status = CASE WHEN status != 'atendimento' THEN 'atendimento' ELSE status END
+    WHERE id = ?
+  `).run(conversaId);
+
+  return obterConversa(conversaId);
+}
+
+/** Sinaliza "digitando…" pro contato (a equipe deve chamar isso no maximo a cada poucos segundos). */
+async function enviarDigitando(conversaId) {
+  if (!client || estado !== 'conectado') return { ok: false };
+  const conversa = getDb().prepare('SELECT wa_chat_id FROM conversas_whatsapp WHERE id = ?').get(conversaId);
+  if (!conversa) return { ok: false };
+  try {
+    const chat = await client.getChatById(conversa.wa_chat_id);
+    await chat.sendStateTyping();
+  } catch (e) {
+    console.error('[whatsapp] erro ao enviar indicador de digitando:', descreverErro(e));
+  }
+  return { ok: true };
+}
+
+// ============================== Respostas rapidas ==============================
+
+function listarRespostasRapidas() {
+  return getDb().prepare('SELECT * FROM respostas_rapidas_whatsapp ORDER BY atalho').all();
+}
+
+function criarRespostaRapida(dados) {
+  const db = getDb();
+  const atalho = (dados.atalho || '').trim().toLowerCase().replace(/^\//, '');
+  const conteudo = (dados.conteudo || '').trim();
+  if (!atalho) throw new AppError('Informe o atalho.');
+  if (!conteudo) throw new AppError('Informe o conteúdo da resposta.');
+  try {
+    const info = db.prepare('INSERT INTO respostas_rapidas_whatsapp (atalho, titulo, conteudo) VALUES (?, ?, ?)')
+      .run(atalho, dados.titulo || null, conteudo);
+    return db.prepare('SELECT * FROM respostas_rapidas_whatsapp WHERE id = ?').get(info.lastInsertRowid);
+  } catch (e) {
+    if (String(e.message).includes('UNIQUE')) throw new AppError('Já existe uma resposta rápida com esse atalho.');
+    throw e;
+  }
+}
+
+function atualizarRespostaRapida(id, dados) {
+  const db = getDb();
+  const atual = db.prepare('SELECT * FROM respostas_rapidas_whatsapp WHERE id = ?').get(id);
+  if (!atual) throw new AppError('Resposta rápida não encontrada.', 404);
+  const atalho = dados.atalho !== undefined ? (dados.atalho || '').trim().toLowerCase().replace(/^\//, '') : atual.atalho;
+  const conteudo = dados.conteudo !== undefined ? (dados.conteudo || '').trim() : atual.conteudo;
+  if (!atalho) throw new AppError('Informe o atalho.');
+  if (!conteudo) throw new AppError('Informe o conteúdo da resposta.');
+  try {
+    db.prepare('UPDATE respostas_rapidas_whatsapp SET atalho=?, titulo=?, conteudo=?, ativo=? WHERE id=?').run(
+      atalho,
+      dados.titulo !== undefined ? dados.titulo : atual.titulo,
+      conteudo,
+      dados.ativo !== undefined ? (dados.ativo ? 1 : 0) : atual.ativo,
+      id
+    );
+  } catch (e) {
+    if (String(e.message).includes('UNIQUE')) throw new AppError('Já existe uma resposta rápida com esse atalho.');
+    throw e;
+  }
+  return db.prepare('SELECT * FROM respostas_rapidas_whatsapp WHERE id = ?').get(id);
+}
+
+function excluirRespostaRapida(id) {
+  getDb().prepare('DELETE FROM respostas_rapidas_whatsapp WHERE id = ?').run(id);
+  return { ok: true };
 }
 
 // ------------------------- apenas para testes automatizados -------------------------
@@ -495,7 +719,10 @@ function _definirClienteParaTeste(fakeClient, fakeEstado) {
 module.exports = {
   iniciar, desconectar, status,
   listarConversas, obterConversa, atualizarStatusConversa, atribuirAtendente, marcarLida, enviarTexto, iniciarConversa,
+  iniciarAtendimento, alternarModoConversa, finalizarConversa, enviarMidia, enviarDigitando,
+  listarContatos, obterContato, atualizarContato,
   tratarMensagemRecebida,
   obterConfigBot, salvarConfigBot, listarRegrasBot, criarRegraBot, atualizarRegraBot, excluirRegraBot,
+  listarRespostasRapidas, criarRespostaRapida, atualizarRespostaRapida, excluirRespostaRapida,
   _definirClienteParaTeste,
 };
