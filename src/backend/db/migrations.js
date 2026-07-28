@@ -903,6 +903,55 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 23,
+    name: 'devolucoes-e-trocas',
+    up(db) {
+      db.exec(`
+        -- Controla quanto de cada item vendido ja foi devolvido, para
+        -- permitir devolucoes parciais (nao precisa devolver a venda toda).
+        ALTER TABLE vendas_itens ADD COLUMN quantidade_devolvida REAL NOT NULL DEFAULT 0;
+
+        CREATE TABLE IF NOT EXISTS devolucoes (
+          id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+          venda_id                  INTEGER NOT NULL REFERENCES vendas(id) ON DELETE CASCADE,
+          motivo                    TEXT,
+          valor_devolvido           REAL NOT NULL DEFAULT 0,   -- valor dos itens devolvidos
+          valor_novos_itens         REAL NOT NULL DEFAULT 0,   -- valor dos itens levados na troca (se houver)
+          diferenca                 REAL NOT NULL DEFAULT 0,   -- >0: loja deve ao cliente | <0: cliente paga a diferenca
+          forma_pagamento_diferenca TEXT,
+          data                      TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+          observacao                TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_devolucoes_venda ON devolucoes(venda_id);
+
+        CREATE TABLE IF NOT EXISTS devolucoes_itens (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          devolucao_id   INTEGER NOT NULL REFERENCES devolucoes(id) ON DELETE CASCADE,
+          venda_item_id  INTEGER NOT NULL REFERENCES vendas_itens(id) ON DELETE CASCADE,
+          produto_id     INTEGER REFERENCES produtos(id) ON DELETE SET NULL,
+          descricao      TEXT,
+          quantidade     REAL NOT NULL DEFAULT 0,
+          valor_unitario REAL NOT NULL DEFAULT 0,
+          valor_total    REAL NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_devolucoes_itens_devolucao ON devolucoes_itens(devolucao_id);
+
+        -- Itens levados pelo cliente em troca (quando a devolucao e uma troca
+        -- por outro produto, e nao so o dinheiro de volta).
+        CREATE TABLE IF NOT EXISTS devolucoes_itens_troca (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          devolucao_id   INTEGER NOT NULL REFERENCES devolucoes(id) ON DELETE CASCADE,
+          produto_id     INTEGER NOT NULL REFERENCES produtos(id),
+          descricao      TEXT,
+          quantidade     REAL NOT NULL DEFAULT 0,
+          valor_unitario REAL NOT NULL DEFAULT 0,
+          valor_total    REAL NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_devolucoes_troca_devolucao ON devolucoes_itens_troca(devolucao_id);
+      `);
+    },
+  },
 ];
 
 /**
