@@ -201,18 +201,17 @@ function obterOuCriarContato(db, waChatId, telefone, pushName) {
   return contato;
 }
 
-/** Cria/atualiza um lead automatico no CRM quando o ramo e agencia de viagem. */
-function tentarCriarLeadAutomatico(db, conversaId, nome, telefone) {
-  try {
-    const cfg = db.prepare("SELECT valor FROM config WHERE chave = 'ramo_servico'").get();
-    if (!cfg || cfg.valor !== 'agencia_viagem') return;
-    // eslint-disable-next-line global-require
-    const crmService = require('./crmService');
-    const lead = crmService.criarLead({ nome: nome || telefone, telefone, origem: 'whatsapp' });
-    db.prepare('UPDATE conversas_whatsapp SET lead_id = ? WHERE id = ?').run(lead.id, conversaId);
-  } catch (e) {
-    console.error('[whatsapp] erro ao criar lead automatico:', e.message);
-  }
+/** Cria o lead no CRM a partir de uma conversa, sob demanda (botao "Criar lead no CRM"). */
+function criarLeadDaConversa(conversaId) {
+  const db = getDb();
+  const conversa = db.prepare('SELECT * FROM conversas_whatsapp WHERE id = ?').get(conversaId);
+  if (!conversa) throw new AppError('Conversa nao encontrada.', 404);
+  if (conversa.lead_id) throw new AppError('Esta conversa ja tem um lead vinculado.');
+  // eslint-disable-next-line global-require
+  const crmService = require('./crmService');
+  const lead = crmService.criarLead({ nome: conversa.nome_contato || conversa.telefone, telefone: conversa.telefone, origem: 'whatsapp' });
+  db.prepare('UPDATE conversas_whatsapp SET lead_id = ? WHERE id = ?').run(lead.id, conversaId);
+  return obterConversa(conversaId);
 }
 
 // ============================== Bot configuravel ==============================
@@ -358,7 +357,6 @@ async function tratarMensagemRecebida(msg) {
   const contato = obterOuCriarContato(db, msg.from, telefone, nome);
 
   let conversa = db.prepare('SELECT * FROM conversas_whatsapp WHERE wa_chat_id = ?').get(msg.from);
-  const novaConversa = !conversa;
   const reabrindo = !!conversa && conversa.status === 'resolvida';
   if (!conversa) {
     const modoInicial = obterConfigBot().ativo ? 'bot' : 'humano';
@@ -418,8 +416,6 @@ async function tratarMensagemRecebida(msg) {
     WHERE id=?
   `).run(novoStatus, novoModo, contato.nome || nome, conversa.id);
 
-  if (novaConversa) tentarCriarLeadAutomatico(db, conversa.id, nome, telefone);
-
   if (resultadoBot && resultadoBot.respostas.length) {
     const conversaAtualizada = db.prepare('SELECT * FROM conversas_whatsapp WHERE id = ?').get(conversa.id);
     await enviarRespostasBot(conversaAtualizada, resultadoBot.respostas);
@@ -469,7 +465,6 @@ async function iniciarConversa(telefone, texto, nome, atendenteId) {
       VALUES (?, ?, ?, 'atendimento', 'humano', ?, ?)
     `).run(chatId, contato.nome, numeroLimpo, contato.id, atendenteId || null);
     conversa = db.prepare('SELECT * FROM conversas_whatsapp WHERE id = ?').get(info.lastInsertRowid);
-    tentarCriarLeadAutomatico(db, conversa.id, contato.nome, numeroLimpo);
   } else if (conversa.status === 'resolvida') {
     db.prepare(`
       UPDATE conversas_whatsapp SET status='atendimento', modo_atual='humano', comentario_resolucao=NULL, resolvida_em=NULL, atendente_id=?
@@ -860,7 +855,7 @@ module.exports = {
   iniciar, desconectar, status,
   listarConversas, obterConversa, atualizarStatusConversa, atribuirAtendente, marcarLida, enviarTexto, iniciarConversa,
   iniciarAtendimento, alternarModoConversa, finalizarConversa, enviarMidia, enviarDigitando,
-  listarContatos, obterContato, atualizarContato,
+  listarContatos, obterContato, atualizarContato, criarLeadDaConversa,
   tratarMensagemRecebida,
   obterConfigBot, salvarConfigBot, listarRegrasBot, criarRegraBot, atualizarRegraBot, excluirRegraBot,
   listarRespostasRapidas, criarRespostaRapida, atualizarRespostaRapida, excluirRespostaRapida,

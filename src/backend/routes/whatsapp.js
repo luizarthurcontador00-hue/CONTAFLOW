@@ -19,6 +19,7 @@ router.put('/conversas/:id/atendente', asyncHandler((req, res) => res.json(svc.a
 router.post('/conversas/:id/iniciar-atendimento', asyncHandler((req, res) => res.json(svc.iniciarAtendimento(req.params.id, req.body.atendente_id))));
 router.post('/conversas/:id/alternar-bot', asyncHandler((req, res) => res.json(svc.alternarModoConversa(req.params.id))));
 router.post('/conversas/:id/finalizar', asyncHandler((req, res) => res.json(svc.finalizarConversa(req.params.id, req.body.comentario))));
+router.post('/conversas/:id/criar-lead', asyncHandler((req, res) => res.status(201).json(svc.criarLeadDaConversa(req.params.id))));
 router.post('/conversas/:id/marcar-lida', asyncHandler((req, res) => res.json(svc.marcarLida(req.params.id))));
 router.post('/conversas/:id/digitando', asyncHandler(async (req, res) => res.json(await svc.enviarDigitando(req.params.id))));
 router.post('/conversas/:id/mensagens', asyncHandler(async (req, res) => res.status(201).json(await svc.enviarTexto(req.params.id, req.body.texto, req.body.atendente_id))));

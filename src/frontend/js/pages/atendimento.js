@@ -122,6 +122,10 @@ window.PaginaAtendimento = (function () {
     return (perfil === 'servico' || perfil === 'ambos') && ramo !== 'agencia_viagem';
   }
 
+  function crmDisponivel() {
+    return window.__ramoServico === 'agencia_viagem';
+  }
+
   function pararPolling() {
     if (pollStatus) clearInterval(pollStatus);
     if (pollLista) clearInterval(pollLista);
@@ -409,6 +413,7 @@ window.PaginaAtendimento = (function () {
           <button class="btn btn--secundario" id="wa-toggle-bot">${conversaAberta.modo_atual === 'bot' ? '🤖 Desativar robô' : '🤖 Ativar robô'}</button>
           <button class="btn btn--secundario" id="wa-iniciar-atendimento">Iniciar Atendimento</button>
           ${agendaDisponivel() ? '<button class="btn btn--secundario" id="wa-agendar-horario">📅 Agendar horário</button>' : ''}
+          ${crmDisponivel() && !conversaAberta.lead_id ? '<button class="btn btn--secundario" id="wa-criar-lead">📇 Criar lead no CRM</button>' : ''}
           <button class="btn btn--secundario" id="wa-agendar-mensagem">⏰ Agendar mensagem</button>
           <button class="btn" id="wa-finalizar-atendimento">Finalizar Atendimento</button>
         </div>
@@ -449,6 +454,15 @@ window.PaginaAtendimento = (function () {
     document.getElementById('wa-finalizar-atendimento').addEventListener('click', abrirFinalizarAtendimento);
     const btnAgendar = document.getElementById('wa-agendar-horario');
     if (btnAgendar) btnAgendar.addEventListener('click', abrirAgendarHorario);
+    const btnCriarLead = document.getElementById('wa-criar-lead');
+    if (btnCriarLead) btnCriarLead.addEventListener('click', async () => {
+      try {
+        conversaAberta = await API.post(`/api/whatsapp/conversas/${id}/criar-lead`, {});
+        UI.sucesso('Lead criado no CRM.');
+        renderChatColuna();
+        await carregarLista();
+      } catch (e) { UI.erro(e.message); }
+    });
     document.getElementById('wa-agendar-mensagem').addEventListener('click', () => {
       if (!conversaAberta.contato_id) { UI.erro('Contato não encontrado.'); return; }
       formAgendamento('unica', { id: conversaAberta.contato_id, nome: conversaAberta.nome_contato, telefone: conversaAberta.telefone });
