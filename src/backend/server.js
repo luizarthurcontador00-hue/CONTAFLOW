@@ -71,6 +71,20 @@ function createApp() {
     });
   });
 
+  montarRota(app, '/api/licenca', './routes/licenca');
+
+  // Bloqueia o resto da API enquanto a licenca deste computador nao estiver
+  // ativa — o front mostra a tela de ativacao antes de deixar usar o resto
+  // do sistema (ver /api/licenca/status e /api/licenca/ativar acima).
+  app.use('/api', (req, res, next) => {
+    if (req.path.startsWith('/licenca') || req.path === '/health') return next();
+    // eslint-disable-next-line global-require
+    const licenca = require('./services/licencaService');
+    const st = licenca.status();
+    if (!st.ativo) return res.status(403).json({ erro: 'Licença inválida ou expirada.', licenca: st });
+    next();
+  });
+
   // ------------------------- Rotas dos modulos ------------------------
   // (adicionadas por fase — cada arquivo exporta um express.Router)
   montarRota(app, '/api/categorias', './routes/categorias');

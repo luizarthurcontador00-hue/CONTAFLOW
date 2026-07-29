@@ -341,8 +341,9 @@
 
   window.addEventListener('hashchange', navegar);
   window.addEventListener('DOMContentLoaded', async () => {
-    if (!location.hash) location.hash = '#/inicio';
     configurarSubmenus();
+    await window.__verificarLicenca();
+    if (!location.hash) location.hash = '#/inicio';
     verificarConexao();
     atualizarAvisoLembretes();
     setInterval(atualizarAvisoLembretes, 5 * 60 * 1000);

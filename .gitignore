@@ -14,3 +14,8 @@ puppeteer-cache/
 _legado/*.db
 _legado/*.db-shm
 _legado/*.db-wal
+
+# Chave privada de licenciamento — NUNCA deve ser versionada (guarde uma copia
+# segura fora do repositorio; sem ela nao da pra emitir novas licencas).
+scripts/licenca/chave-privada.pem
+scripts/licenca/licencas-emitidas.log
