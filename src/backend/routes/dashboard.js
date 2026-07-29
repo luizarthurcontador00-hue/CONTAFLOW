@@ -8,6 +8,7 @@ const router = express.Router();
 
 router.get('/resumo', asyncHandler((req, res) => res.json(dash.resumoGeral())));
 router.get('/central', asyncHandler((req, res) => res.json(dash.centralAtencao())));
+router.get('/professor', asyncHandler((req, res) => res.json(dash.painelProfessor())));
 router.get('/vendas-periodo', asyncHandler((req, res) => res.json(dash.vendasPorPeriodo(req.query))));
 router.get('/mais-vendidos', asyncHandler((req, res) => res.json(dash.maisVendidos(req.query))));
 router.get('/margem-categoria', asyncHandler((req, res) => res.json(dash.margemPorCategoria(req.query))));

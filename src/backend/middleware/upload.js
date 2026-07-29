@@ -71,6 +71,20 @@ const uploadPlanilha = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
 });
 
+// ----------------------- Upload de extrato OFX (conciliacao bancaria) -----------------------
+// So fica em memoria: e interpretado (parse das transacoes) e descartado, nunca persistido em disco.
+function ofxFilter(req, file, cb) {
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (ext !== '.ofx') return cb(new AppError('Envie um arquivo .ofx exportado do seu banco.'));
+  cb(null, true);
+}
+
+const uploadOfx = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: ofxFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+});
+
 // ----------------------- Upload de anexo/audio do Atendimento (WhatsApp) -----------------------
 const storageWhatsapp = multer.diskStorage({
   destination: (req, file, cb) => cb(null, paths.whatsappMidiaDir),
@@ -86,4 +100,4 @@ const uploadWhatsappMidia = multer({
   limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB
 });
 
-module.exports = { uploadFoto, uploadXml, uploadPlanilha, uploadWhatsappMidia };
+module.exports = { uploadFoto, uploadXml, uploadPlanilha, uploadWhatsappMidia, uploadOfx };

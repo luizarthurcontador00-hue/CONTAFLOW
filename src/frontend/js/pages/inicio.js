@@ -36,8 +36,14 @@ window.PaginaInicio = (function () {
           detalhe: `${UI.moeda(d.atual)} até agora (mês anterior: ${UI.moeda(d.anterior)})`,
         };
       }
-      case 'clientes_inativos':
-        return { titulo: `${d.qtd} cliente${d.qtd > 1 ? 's' : ''} há mais de ${d.dias} dias sem comprar`, detalhe: 'Um contato pode reativar essas vendas.' };
+      case 'clientes_inativos': {
+        const professor = window.__ramoServico === 'professor';
+        const quem = professor ? 'aluno' : 'cliente';
+        return {
+          titulo: `${d.qtd} ${quem}${d.qtd > 1 ? 's' : ''} há mais de ${d.dias} dias sem ${professor ? 'aula' : 'comprar'}`,
+          detalhe: professor ? 'Um contato pode reativar essas aulas.' : 'Um contato pode reativar essas vendas.',
+        };
+      }
       case 'meta_mensal':
         return {
           titulo: `A meta mensal está em ${d.pct}%`,
@@ -107,7 +113,9 @@ window.PaginaInicio = (function () {
   async function carregarResumo() {
     const alvo = document.getElementById('central-resumo');
     if (!alvo) return;
-    const temProdutos = window.__perfilNegocio !== 'servico' && window.__ramoServico !== 'professor';
+    if (window.__ramoServico === 'professor') return carregarResumoProfessor(alvo);
+
+    const temProdutos = window.__perfilNegocio !== 'servico';
     let r;
     try { r = await API.get('/api/dashboard/resumo'); } catch { alvo.innerHTML = ''; return; }
     alvo.innerHTML = `
@@ -115,6 +123,18 @@ window.PaginaInicio = (function () {
       ${cardStat('Faturamento do mês', UI.moeda(r.vendas_mes.total), `${r.vendas_mes.qtd} venda(s)`)}
       ${cardStat('Lucro do mês', UI.moeda(r.lucro_mes), `margem ${r.margem_mes}%`)}
       ${temProdutos ? cardStat('Estoque baixo', r.estoque_baixo, 'produto(s)') : ''}
+      ${cardStat('A receber', UI.moeda(r.a_receber), 'pendente')}
+      ${cardStat('A pagar', UI.moeda(r.a_pagar), 'pendente')}`;
+  }
+
+  async function carregarResumoProfessor(alvo) {
+    let r;
+    try { r = await API.get('/api/dashboard/professor'); } catch { alvo.innerHTML = ''; return; }
+    alvo.innerHTML = `
+      ${cardStat('Horas de aula no mês', UI.numero(r.horas_aula_mes) + 'h', `${r.aulas_mes} aula(s)`)}
+      ${cardStat('Alunos cadastrados', r.alunos_ativos, 'ativos')}
+      ${cardStat('Faturamento do mês', UI.moeda(r.faturamento_mes), '')}
+      ${cardStat('Lucro do mês', UI.moeda(r.lucro_mes), `margem ${r.margem_mes}%`)}
       ${cardStat('A receber', UI.moeda(r.a_receber), 'pendente')}
       ${cardStat('A pagar', UI.moeda(r.a_pagar), 'pendente')}`;
   }

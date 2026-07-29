@@ -52,6 +52,7 @@ window.PaginaFinanceiro = (function () {
         <div class="tab" data-aba="assinaturas">Mensalidades</div>
         <div class="tab" data-aba="fluxo">Fluxo de Caixa</div>
         <div class="tab" data-aba="dre">DRE</div>
+        <div class="tab" data-aba="conciliacao">🏦 Conciliação</div>
       </div>
       <div id="fin-conteudo"></div>`;
 
@@ -87,6 +88,7 @@ window.PaginaFinanceiro = (function () {
     else if (abaAtual === 'receber') renderReceber();
     else if (abaAtual === 'assinaturas') renderAssinaturas();
     else if (abaAtual === 'dre') renderDRE();
+    else if (abaAtual === 'conciliacao') renderConciliacao();
     else renderFluxo();
   }
 
@@ -886,6 +888,164 @@ window.PaginaFinanceiro = (function () {
             el.querySelector('#cat-nome').value = ''; render(); UI.sucesso('Categoria adicionada.');
           } catch (e) { UI.erro(e.message); }
         });
+      },
+    });
+  }
+
+  // ----------------------- Conciliação bancária (OFX) -----------------------
+  const conciliacaoFiltro = { conta_financeira_id: '', status: 'pendente' };
+  const FORMAS_CONCILIACAO = { transferencia: 'Transferência', pix: 'PIX', dinheiro: 'Dinheiro', cartao_credito: 'Cartão crédito', cartao_debito: 'Cartão débito', boleto: 'Boleto' };
+
+  async function renderConciliacao() {
+    const alvo = document.getElementById('fin-conteudo');
+    contasFin = await API.get('/api/financeiro/contas-financeiras').catch(() => []);
+    if (!contasFin.length) {
+      alvo.innerHTML = '<div class="card vazio">Cadastre uma conta financeira primeiro (aba "Formas de pagamento → contas" ou no botão de saldos) para poder importar um extrato.</div>';
+      return;
+    }
+    alvo.innerHTML = `
+      <div class="card mb-16">
+        <h3 style="margin-top:0">Importar extrato (.ofx)</h3>
+        <p class="dica">Importe o extrato exportado do seu banco (formato OFX) para bater as transações com as contas a pagar/receber do sistema — e já dar baixa nelas.</p>
+        <div class="form-grid">
+          <div class="campo"><label>Conta financeira</label><select id="cc-conta">${contasFin.map((c) => `<option value="${c.id}">${UI.escapar(c.nome)}</option>`).join('')}</select></div>
+          <div class="campo"><label>Arquivo OFX</label><input type="file" id="cc-arquivo" accept=".ofx" /></div>
+        </div>
+        <button class="btn mt-16" id="cc-importar">Importar extrato</button>
+      </div>
+      <div class="barra-ferramentas">
+        <select id="cc-filtro-conta"><option value="">Todas as contas</option>${contasFin.map((c) => `<option value="${c.id}">${UI.escapar(c.nome)}</option>`).join('')}</select>
+        <select id="cc-filtro-status">
+          <option value="pendente">Pendentes</option>
+          <option value="conciliada">Conciliadas</option>
+          <option value="ignorada">Ignoradas</option>
+          <option value="">Todas</option>
+        </select>
+        <div class="cresce"></div>
+      </div>
+      <div class="card"><div id="cc-lista">Carregando…</div></div>`;
+
+    alvo.querySelector('#cc-importar').addEventListener('click', importarExtratoOfx);
+    alvo.querySelector('#cc-filtro-conta').addEventListener('change', (e) => { conciliacaoFiltro.conta_financeira_id = e.target.value; listarConciliacao(); });
+    alvo.querySelector('#cc-filtro-status').addEventListener('change', (e) => { conciliacaoFiltro.status = e.target.value; listarConciliacao(); });
+    await listarConciliacao();
+  }
+
+  async function importarExtratoOfx() {
+    const contaId = document.getElementById('cc-conta').value;
+    const arquivo = document.getElementById('cc-arquivo').files[0];
+    if (!contaId) { UI.erro('Selecione a conta financeira.'); return; }
+    if (!arquivo) { UI.erro('Selecione o arquivo .ofx.'); return; }
+    const fd = new FormData();
+    fd.append('conta_financeira_id', contaId);
+    fd.append('ofx', arquivo);
+    try {
+      const r = await API.post('/api/conciliacao/importar', fd);
+      UI.sucesso(`${r.importadas} transação(ões) importada(s)${r.duplicadas ? ` — ${r.duplicadas} já tinha(m) sido importada(s) antes` : ''}.`);
+      document.getElementById('cc-arquivo').value = '';
+      await listarConciliacao();
+    } catch (e) { UI.erro(e.message); }
+  }
+
+  async function listarConciliacao() {
+    const alvo = document.getElementById('cc-lista');
+    if (!alvo) return;
+    const params = new URLSearchParams();
+    if (conciliacaoFiltro.conta_financeira_id) params.set('conta_financeira_id', conciliacaoFiltro.conta_financeira_id);
+    if (conciliacaoFiltro.status) params.set('status', conciliacaoFiltro.status);
+    let transacoes;
+    try { transacoes = await API.get('/api/conciliacao?' + params.toString()); }
+    catch (e) { alvo.innerHTML = UI.escapar(e.message); return; }
+    if (!transacoes.length) { alvo.innerHTML = '<p class="muted">Nenhuma transação neste filtro.</p>'; return; }
+
+    alvo.innerHTML = `<table class="tabela">
+      <thead><tr><th>Data</th><th>Descrição</th><th>Tipo</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+      <tbody>${transacoes.map((t) => `<tr>
+        <td>${t.data}</td>
+        <td>${UI.escapar(t.descricao)}${t.pagar_descricao ? `<div class="dica">↳ ${UI.escapar(t.pagar_descricao)}</div>` : ''}${t.receber_descricao ? `<div class="dica">↳ ${UI.escapar(t.receber_descricao)}</div>` : ''}</td>
+        <td><span class="chip-forma">${t.tipo === 'credito' ? '🟢 Crédito' : '🔴 Débito'}</span></td>
+        <td>${UI.moeda(t.valor)}</td>
+        <td>${t.status === 'pendente' ? '<span class="badge badge--alerta">Pendente</span>' : t.status === 'conciliada' ? '<span class="badge badge--ok">Conciliada</span>' : '<span class="badge badge--muted">Ignorada</span>'}</td>
+        <td style="text-align:right;white-space:nowrap">
+          ${t.status === 'pendente' ? `<button class="btn" data-conciliar="${t.id}">Conciliar</button><button class="btn btn--secundario" data-ignorar="${t.id}">Ignorar</button>` : `<button class="btn btn--secundario" data-reabrir="${t.id}">Reabrir</button>`}
+        </td>
+      </tr>`).join('')}</tbody></table>`;
+
+    alvo.querySelectorAll('[data-conciliar]').forEach((b) => b.addEventListener('click', () => {
+      const t = transacoes.find((x) => x.id === Number(b.dataset.conciliar));
+      formConciliar(t);
+    }));
+    alvo.querySelectorAll('[data-ignorar]').forEach((b) => b.addEventListener('click', async () => {
+      const ok = await UI.confirmar('Ignorar esta transação? Ela não vai gerar nenhum lançamento.', { titulo: 'Ignorar transação', textoConfirmar: 'Ignorar' });
+      if (!ok) return;
+      try { await API.post(`/api/conciliacao/${b.dataset.ignorar}/ignorar`, {}); await listarConciliacao(); } catch (e) { UI.erro(e.message); }
+    }));
+    alvo.querySelectorAll('[data-reabrir]').forEach((b) => b.addEventListener('click', async () => {
+      try { await API.post(`/api/conciliacao/${b.dataset.reabrir}/reabrir`, {}); UI.sucesso('Transação reaberta.'); await listarConciliacao(); } catch (e) { UI.erro(e.message); }
+    }));
+  }
+
+  async function formConciliar(t) {
+    let sugestoes;
+    try { sugestoes = await API.get(`/api/conciliacao/${t.id}/sugestoes`); } catch (e) { UI.erro(e.message); return; }
+    const tipo = t.tipo === 'debito' ? 'pagar' : 'receber';
+
+    const corpo = `
+      <div class="card mb-16">
+        <div class="flex flex--between"><strong>${UI.escapar(t.descricao)}</strong><strong>${UI.moeda(t.valor)}</strong></div>
+        <div class="dica">${t.data} · ${t.tipo === 'credito' ? 'Entrada (crédito)' : 'Saída (débito)'}</div>
+      </div>
+      ${sugestoes.length ? `
+      <div class="campo"><label>Bate com uma conta já cadastrada?</label></div>
+      <div id="cc-sugestoes">${sugestoes.map((s, idx) => `
+        <label class="flex gap-12" style="align-items:center;padding:8px 0;border-bottom:1px solid var(--borda)">
+          <input type="radio" name="cc-opcao" value="${s.id}" ${idx === 0 ? 'checked' : ''} />
+          <span>${UI.escapar(s.descricao)} <span class="dica">${s.vencimento ? '— vence ' + s.vencimento : ''} — ${UI.moeda(s.valor)}</span></span>
+        </label>`).join('')}
+        <label class="flex gap-12" style="align-items:center;padding:8px 0">
+          <input type="radio" name="cc-opcao" value="novo" />
+          <span>Nenhuma dessas — criar um lançamento novo</span>
+        </label>
+      </div>` : '<div class="dica mb-16">Nenhuma conta pendente com esse valor. Crie um lançamento novo:</div>'}
+      <div id="cc-form-novo" class="mt-16" style="${sugestoes.length ? 'display:none' : ''}">
+        <div class="campo"><label>Descrição</label><input id="cc-nova-desc" value="${UI.escapar(t.descricao)}" /></div>
+        ${tipo === 'pagar' ? `
+        <div class="form-grid mt-16">
+          <div class="campo"><label>Fornecedor</label><select id="cc-nova-forn"><option value="">—</option>${fornecedores.map((f) => `<option value="${f.id}">${UI.escapar(f.nome)}</option>`).join('')}</select></div>
+          <div class="campo"><label>Categoria (DRE)</label><select id="cc-nova-cat"><option value="">— sem categoria —</option>${categoriasDespesa.map((c) => `<option value="${c.id}">${UI.escapar(c.nome)}</option>`).join('')}</select></div>
+        </div>` : `
+        <div class="campo mt-16"><label>Cliente</label><select id="cc-nova-cliente"><option value="">—</option>${clientes.map((c) => `<option value="${c.id}">${UI.escapar(c.nome)}</option>`).join('')}</select></div>`}
+      </div>
+      <div class="campo mt-16"><label>Forma de pagamento</label><select id="cc-forma">${Object.entries(FORMAS_CONCILIACAO).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>`;
+
+    Modal.abrir({
+      titulo: `Conciliar — ${tipo === 'pagar' ? 'a pagar' : 'a receber'}`, tamanho: 'modal--grande', corpoHTML: corpo, textoConfirmar: 'Confirmar',
+      aoAbrir: (el) => {
+        el.querySelectorAll('input[name="cc-opcao"]').forEach((r) => r.addEventListener('change', () => {
+          const sel = el.querySelector('input[name="cc-opcao"]:checked');
+          el.querySelector('#cc-form-novo').style.display = sel && sel.value === 'novo' ? '' : 'none';
+        }));
+      },
+      aoConfirmar: async (el) => {
+        const opcaoSel = el.querySelector('input[name="cc-opcao"]:checked');
+        const forma = el.querySelector('#cc-forma').value;
+        try {
+          if (opcaoSel && opcaoSel.value !== 'novo') {
+            await API.post(`/api/conciliacao/${t.id}/conciliar`, { tipo, conta_id: Number(opcaoSel.value), forma });
+            UI.sucesso('Conciliado.');
+          } else {
+            const dados = { tipo, descricao: el.querySelector('#cc-nova-desc').value, forma };
+            if (tipo === 'pagar') {
+              dados.fornecedor_id = el.querySelector('#cc-nova-forn').value || null;
+              dados.categoria_despesa_id = el.querySelector('#cc-nova-cat').value || null;
+            } else {
+              dados.cliente_id = el.querySelector('#cc-nova-cliente').value || null;
+            }
+            await API.post(`/api/conciliacao/${t.id}/novo-lancamento`, dados);
+            UI.sucesso('Lançamento criado e conciliado.');
+          }
+          await listarConciliacao(); carregarAlertas();
+        } catch (e) { UI.erro(e.message); return false; }
       },
     });
   }

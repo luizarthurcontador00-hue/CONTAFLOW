@@ -244,6 +244,17 @@ function exportarContador({ inicio, fim } = {}) {
     WHERE cr.status = 'recebido' AND date(cr.data_recebimento) BETWEEN date(?) AND date(?) ORDER BY date(cr.data_recebimento)
   `).all(ini, f);
 
+  const extratoConciliado = db.prepare(`
+    SELECT t.data AS "Data", cf.nome AS "Conta", t.tipo AS "Tipo", t.valor AS "Valor",
+      t.descricao AS "Descrição (banco)", COALESCE(cp.descricao, cr.descricao) AS "Lançamento vinculado"
+    FROM extrato_ofx_transacoes t
+    JOIN contas_financeiras cf ON cf.id = t.conta_financeira_id
+    LEFT JOIN contas_pagar cp ON cp.id = t.contas_pagar_id
+    LEFT JOIN contas_receber cr ON cr.id = t.contas_receber_id
+    WHERE t.status = 'conciliada' AND date(t.data) BETWEEN date(?) AND date(?)
+    ORDER BY date(t.data)
+  `).all(ini, f);
+
   const wb = XLSX.utils.book_new();
   const addSheet = (nome, linhas) => {
     const ws = linhas.length ? XLSX.utils.json_to_sheet(linhas) : XLSX.utils.aoa_to_sheet([['Sem registros no período']]);
@@ -253,6 +264,7 @@ function exportarContador({ inicio, fim } = {}) {
   addSheet('Compras', compras);
   addSheet('Contas Pagas', contasPagas);
   addSheet('Contas Recebidas', contasRecebidas);
+  addSheet('Extrato Conciliado', extratoConciliado);
 
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 }

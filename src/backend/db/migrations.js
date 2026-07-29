@@ -1022,6 +1022,34 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 26,
+    name: 'conciliacao-bancaria-ofx',
+    up(db) {
+      db.exec(`
+        -- Conciliacao bancaria: cada linha e uma transacao lida de um extrato
+        -- OFX importado, vinculada a uma conta financeira do sistema. O
+        -- usuario concilia cada uma com uma conta a pagar/receber existente
+        -- (dando baixa nela, se ainda nao paga) ou cria um lancamento novo.
+        CREATE TABLE IF NOT EXISTS extrato_ofx_transacoes (
+          id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+          conta_financeira_id INTEGER NOT NULL REFERENCES contas_financeiras(id) ON DELETE CASCADE,
+          fitid               TEXT,                 -- identificador do banco (evita importar 2x)
+          data                TEXT NOT NULL,
+          valor               REAL NOT NULL,        -- sempre positivo
+          tipo                TEXT NOT NULL,        -- credito | debito
+          descricao           TEXT,
+          status              TEXT NOT NULL DEFAULT 'pendente', -- pendente | conciliada | ignorada
+          contas_pagar_id     INTEGER REFERENCES contas_pagar(id) ON DELETE SET NULL,
+          contas_receber_id   INTEGER REFERENCES contas_receber(id) ON DELETE SET NULL,
+          importado_em        TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_ofx_conta ON extrato_ofx_transacoes(conta_financeira_id);
+        CREATE INDEX IF NOT EXISTS idx_ofx_status ON extrato_ofx_transacoes(status);
+        CREATE INDEX IF NOT EXISTS idx_ofx_fitid ON extrato_ofx_transacoes(conta_financeira_id, fitid);
+      `);
+    },
+  },
 ];
 
 /**

@@ -54,7 +54,7 @@
   function rotaVisivel(nome) {
     if (nome === 'ordens' && (perfil === 'servico' || perfil === 'ambos') && (ramo === 'salao' || ramo === 'agencia_viagem' || ramo === 'professor')) return false;
     if (nome === 'agenda' && (perfil === 'servico' || perfil === 'ambos') && ramo === 'agencia_viagem') return false;
-    if ((nome === 'pdv' || nome === 'vendas') && (perfil === 'servico' || perfil === 'ambos') && ramo === 'professor') return false;
+    if ((nome === 'pdv' || nome === 'vendas' || nome === 'comissoes' || nome === 'dashboard') && (perfil === 'servico' || perfil === 'ambos') && ramo === 'professor') return false;
     if (rotaRamo[nome] && ramo !== rotaRamo[nome]) return false;
     const p = rotaPerfil[nome];
     return !p || perfil === 'ambos' || perfil === p;
@@ -66,7 +66,7 @@
       a.style.display = mostra ? '' : 'none';
     });
     // Regras compostas (dependem tambem do ramo, nao so do perfil).
-    ['ordens', 'agenda', 'crm', 'viagens', 'pdv', 'vendas'].forEach((nome) => {
+    ['ordens', 'agenda', 'crm', 'viagens', 'pdv', 'vendas', 'comissoes', 'dashboard'].forEach((nome) => {
       const link = document.querySelector(`.nav-item[data-rota="${nome}"]`);
       if (link) link.style.display = rotaVisivel(nome) ? '' : 'none';
     });
