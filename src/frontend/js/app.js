@@ -18,6 +18,7 @@
     catalogo: { titulo: 'Catálogo', pagina: () => window.PaginaCatalogo },
     compras: { titulo: 'Compras', pagina: () => window.PaginaCompras },
     vendas: { titulo: 'Vendas', pagina: () => window.PaginaVendas },
+    sacolas: { titulo: 'Sacolas de venda', pagina: () => window.PaginaSacolas },
     pdv: { titulo: 'PDV', pagina: () => window.PaginaPDV },
     precificacao: { titulo: 'Precificação', pagina: () => window.PaginaPrecificacao },
     financeiro: { titulo: 'Financeiro', pagina: () => window.PaginaFinanceiro },
@@ -44,7 +45,7 @@
   // ex.: Ordens de Serviço/Pátio (foco oficina) não faz sentido num salão.
   let ramo = 'geral';
   const rotaPerfil = {
-    produtos: 'comercio', compras: 'comercio', fornecedores: 'comercio', precificacao: 'comercio',
+    produtos: 'comercio', compras: 'comercio', fornecedores: 'comercio', precificacao: 'comercio', sacolas: 'comercio',
     servicos: 'servico', agenda: 'servico', ordens: 'servico', comissoes: 'servico', crm: 'servico', viagens: 'servico',
   };
   // Rotas exclusivas de um ramo especifico (so aparecem alem do filtro de perfil).

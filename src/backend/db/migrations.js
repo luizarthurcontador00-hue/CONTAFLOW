@@ -952,6 +952,42 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 24,
+    name: 'sacolas-de-venda',
+    up(db) {
+      db.exec(`
+        -- Sacola de vendas ("leva e traz"): produtos que saem da loja para
+        -- serem mostrados/vendidos fora (na casa do cliente, por exemplo).
+        -- Ao montar, os itens saem do estoque. Na conferencia, o que voltou
+        -- entra de volta no estoque e o que nao voltou vira uma venda.
+        CREATE TABLE IF NOT EXISTS sacolas_venda (
+          id               INTEGER PRIMARY KEY AUTOINCREMENT,
+          cliente_id       INTEGER REFERENCES clientes(id) ON DELETE SET NULL,
+          cliente_nome     TEXT,                          -- avulso, quando nao tem cadastro
+          vendedor_id      INTEGER REFERENCES profissionais(id) ON DELETE SET NULL,
+          data_saida       TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+          data_conferencia TEXT,
+          status           TEXT NOT NULL DEFAULT 'aberta', -- aberta | conferida
+          venda_id         INTEGER REFERENCES vendas(id) ON DELETE SET NULL,
+          observacao       TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_sacolas_status ON sacolas_venda(status);
+
+        CREATE TABLE IF NOT EXISTS sacolas_venda_itens (
+          id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+          sacola_id            INTEGER NOT NULL REFERENCES sacolas_venda(id) ON DELETE CASCADE,
+          produto_id           INTEGER NOT NULL REFERENCES produtos(id),
+          descricao            TEXT,
+          quantidade_levada    REAL NOT NULL DEFAULT 0,
+          quantidade_retornada REAL,                      -- NULL ate a conferencia
+          preco_unitario       REAL NOT NULL DEFAULT 0,    -- snapshot no momento da saida
+          custo_unitario       REAL NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_sacolas_itens_sacola ON sacolas_venda_itens(sacola_id);
+      `);
+    },
+  },
 ];
 
 /**
