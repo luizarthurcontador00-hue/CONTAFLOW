@@ -40,6 +40,9 @@ window.PaginaConfiguracoes = (function () {
           <div class="campo"><label>Markup padrão (%)</label>
             <input name="markup_padrao" type="number" step="0.01" min="0" value="${cfg.markup_padrao != null ? cfg.markup_padrao : 100}" />
             <span class="dica">Usado no cálculo de preço quando o produto não tem markup próprio.</span></div>
+          <div class="campo"><label>Meta mensal de faturamento (R$)</label>
+            <input name="meta_mensal_faturamento" type="number" step="0.01" min="0" value="${cfg.meta_mensal_faturamento || ''}" placeholder="Ex.: 30000" />
+            <span class="dica">Acompanhe o progresso na Central de Gestão (tela inicial).</span></div>
           <div class="campo col-2" style="border-top:1px solid var(--borda);padding-top:16px">
             <label class="flex gap-12" style="align-items:center">
               <input type="checkbox" name="gerar_codigo_auto" id="cfg-cod-auto" ${String(cfg.gerar_codigo_auto ?? '1') === '1' ? 'checked' : ''} />

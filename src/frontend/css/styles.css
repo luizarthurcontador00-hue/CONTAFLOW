@@ -140,6 +140,28 @@ a { text-decoration: none; color: inherit; }
 .stat__label { color: var(--texto-suave); font-size: 13px; }
 .stat__value { font-size: 28px; font-weight: 700; }
 
+/* Central de Gestão: lista de pontos que precisam de atenção agora. */
+.central-lista { display: flex; flex-direction: column; gap: 10px; }
+.central-item {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--fundo-card); border: 1px solid var(--borda); border-left: 4px solid var(--borda);
+  border-radius: 10px; padding: 14px 18px; cursor: pointer;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.central-item:hover { box-shadow: var(--sombra); transform: translateY(-1px); }
+.central-item__icone { font-size: 20px; line-height: 1; flex-shrink: 0; }
+.central-item__corpo { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.central-item__titulo { font-weight: 600; color: var(--texto); }
+.central-item__detalhe { font-size: 13px; color: var(--texto-suave); }
+.central-item__seta { color: var(--texto-suave); font-size: 18px; flex-shrink: 0; }
+.central-item--vermelho { border-left-color: var(--perigo); }
+.central-item--laranja { border-left-color: var(--alerta); }
+.central-item--amarelo { border-left-color: #eab308; }
+.central-item--azul { border-left-color: #2563eb; }
+.central-item--verde { border-left-color: var(--sucesso); }
+.central-item--info { border-left-color: var(--texto-suave); }
+.central-vazio { text-align: center; padding: 40px 20px; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+
 .badge {
   display: inline-block; padding: 4px 10px; border-radius: 999px;
   font-size: 12.5px; font-weight: 600;

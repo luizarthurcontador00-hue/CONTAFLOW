@@ -6,7 +6,7 @@
  */
 (function () {
   const rotas = {
-    inicio: { titulo: 'Início', pagina: () => window.PaginaInicio },
+    inicio: { titulo: 'Central de Gestão', pagina: () => window.PaginaInicio },
     produtos: { titulo: 'Produtos', pagina: () => window.PaginaProdutos },
     servicos: { titulo: 'Serviços', pagina: () => window.PaginaServicos },
     agenda: { titulo: 'Agenda', pagina: () => window.PaginaAgenda },
