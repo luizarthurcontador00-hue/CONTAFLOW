@@ -2,14 +2,18 @@
 
 /**
  * Pagina de Clientes: cadastro, busca, saldo devedor (fiado) e detalhe com
- * historico de compras e contas a receber.
+ * historico de compras e contas a receber. Para o ramo "professor" (aulas
+ * particulares), a mesma tela e os mesmos dados aparecem como "Alunos".
  */
 window.PaginaClientes = (function () {
+  const ehProfessor = () => window.__ramoServico === 'professor';
+  const rotulo = (maiusc) => (ehProfessor() ? (maiusc ? 'Aluno' : 'aluno') : (maiusc ? 'Cliente' : 'cliente'));
+
   async function render(container) {
     container.innerHTML = `
       <div class="barra-ferramentas">
         <input type="search" id="cl-busca" class="cresce" placeholder="Buscar por nome, CPF ou telefone…" />
-        <button class="btn" id="cl-novo">+ Novo cliente</button>
+        <button class="btn" id="cl-novo">+ Novo ${rotulo()}</button>
       </div>
       <div class="card"><div id="cl-lista">Carregando…</div></div>`;
     container.querySelector('#cl-busca').addEventListener('input', debounce(listar, 250));
@@ -24,7 +28,7 @@ window.PaginaClientes = (function () {
     let clientes;
     try { clientes = await API.get('/api/clientes' + (busca ? '?busca=' + encodeURIComponent(busca) : '')); }
     catch (e) { alvo.innerHTML = UI.escapar(e.message); return; }
-    if (!clientes.length) { alvo.innerHTML = '<p class="muted">Nenhum cliente cadastrado.</p>'; return; }
+    if (!clientes.length) { alvo.innerHTML = `<p class="muted">Nenhum ${rotulo()} cadastrado.</p>`; return; }
     alvo.innerHTML = `<table class="tabela">
       <thead><tr><th>Nome</th><th>Telefone</th><th>CPF</th><th>Deve (fiado)</th><th></th></tr></thead>
       <tbody>${clientes.map((c) => `<tr>
@@ -39,7 +43,7 @@ window.PaginaClientes = (function () {
     const c = cliente || {};
     const ed = !!cliente;
     Modal.abrir({
-      titulo: ed ? 'Editar cliente' : 'Novo cliente', tamanho: 'modal--grande',
+      titulo: ed ? `Editar ${rotulo()}` : `Novo ${rotulo()}`, tamanho: 'modal--grande',
       corpoHTML: `<form id="fc" class="form-grid">
         <div class="campo col-2"><label>Nome *</label><input name="nome" value="${UI.escapar(c.nome || '')}" required /></div>
         <div class="campo"><label>Telefone</label><input name="telefone" value="${UI.escapar(c.telefone || '')}" /></div>
@@ -57,7 +61,7 @@ window.PaginaClientes = (function () {
         try {
           if (ed) await API.put('/api/clientes/' + cliente.id, body);
           else await API.post('/api/clientes', body);
-          UI.sucesso('Cliente salvo.'); await listar();
+          UI.sucesso(`${rotulo(true)} salvo.`); await listar();
         } catch (e) { UI.erro(e.message); return false; }
       },
     });
@@ -96,9 +100,9 @@ window.PaginaClientes = (function () {
         const bDel = document.createElement('button');
         bDel.className = 'btn btn--perigo'; bDel.textContent = 'Excluir';
         bDel.addEventListener('click', async () => {
-          const ok = await UI.confirmar(`Excluir o cliente "${c.nome}"? Se tiver histórico, será apenas inativado.`, { titulo: 'Excluir cliente', textoConfirmar: 'Excluir' });
+          const ok = await UI.confirmar(`Excluir o ${rotulo()} "${c.nome}"? Se tiver histórico, será apenas inativado.`, { titulo: `Excluir ${rotulo()}`, textoConfirmar: 'Excluir' });
           if (!ok) return;
-          try { const r = await API.del('/api/clientes/' + c.id); UI.sucesso(r.inativado ? 'Cliente inativado.' : 'Cliente excluído.'); el.remove(); await listar(); }
+          try { const r = await API.del('/api/clientes/' + c.id); UI.sucesso(r.inativado ? `${rotulo(true)} inativado.` : `${rotulo(true)} excluído.`); el.remove(); await listar(); }
           catch (e) { UI.erro(e.message); }
         });
         foot.insertBefore(bDel, foot.firstChild);

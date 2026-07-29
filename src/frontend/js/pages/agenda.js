@@ -8,10 +8,11 @@
 window.PaginaAgenda = (function () {
   let dia = new Date().toISOString().slice(0, 10);
   let mesAtual = dia.slice(0, 7); // 'YYYY-MM', usado na visão de calendário
-  let vista = 'dia'; // 'dia' | 'mes'
+  let vista = 'dia'; // 'dia' | 'mes' | 'recorrentes'
   let profissionais = [];
   let clientes = [];
   let servicos = [];
+  let aulasRecorrentes = [];
   let filtroProf = '';
 
   const STATUS = {
@@ -19,6 +20,13 @@ window.PaginaAgenda = (function () {
     atendido: ['Atendido', 'ok'], cancelado: ['Cancelado', 'muted'], faltou: ['Faltou', 'erro'],
   };
   const FORMAS = { dinheiro: 'Dinheiro', cartao_credito: 'Cartão crédito', cartao_debito: 'Cartão débito', pix: 'PIX', prazo: 'A prazo' };
+  const DIAS_SEMANA = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+
+  // Rotulos: para o ramo "professor" (aulas particulares), fala a lingua do dia a dia do professor.
+  const ehProfessor = () => window.__ramoServico === 'professor';
+  const rCliente = (m) => (ehProfessor() ? (m ? 'Aluno' : 'aluno') : (m ? 'Cliente' : 'cliente'));
+  const rServico = (m) => (ehProfessor() ? (m ? 'Matéria' : 'matéria') : (m ? 'Serviço' : 'serviço'));
+  const rAula = (m) => (ehProfessor() ? (m ? 'Aula' : 'aula') : (m ? 'Agendamento' : 'agendamento'));
 
   function badge(s) { const [t, c] = STATUS[s] || [s, 'muted']; return `<span class="badge badge--${c}">${t}</span>`; }
   function mudarDia(delta) {
@@ -48,11 +56,13 @@ window.PaginaAgenda = (function () {
       API.get('/api/clientes').catch(() => []),
       API.get('/api/produtos?eh_servico=1').catch(() => []),
     ]);
+    await API.post('/api/agenda/aulas-recorrentes/gerar-pendentes', {}).catch(() => {});
 
     container.innerHTML = `
       <div class="subtabs">
         <button class="subtab ${vista === 'dia' ? 'subtab--ativa' : ''}" data-vista="dia">📋 Dia</button>
         <button class="subtab ${vista === 'mes' ? 'subtab--ativa' : ''}" data-vista="mes">📆 Mês</button>
+        <button class="subtab ${vista === 'recorrentes' ? 'subtab--ativa' : ''}" data-vista="recorrentes">🔁 ${rAula(true)} fixa</button>
       </div>
       <div id="ag-corpo"></div>`;
     container.querySelectorAll('[data-vista]').forEach((b) => b.addEventListener('click', () => {
@@ -61,6 +71,7 @@ window.PaginaAgenda = (function () {
     }));
 
     if (vista === 'mes') await renderMes();
+    else if (vista === 'recorrentes') await renderRecorrentes();
     else await renderDia();
   }
 
@@ -83,7 +94,7 @@ window.PaginaAgenda = (function () {
         </select>
         <div class="cresce"></div>
         <button class="btn btn--secundario" id="ag-equipe">👥 Equipe</button>
-        <button class="btn" id="ag-novo">+ Novo agendamento</button>
+        <button class="btn" id="ag-novo">+ Nov${rAula() === 'aula' ? 'a' : 'o'} ${rAula()}</button>
       </div>
       <div id="ag-resumo"></div>
       <div id="ag-lista"><div class="card">Carregando…</div></div>`;
@@ -114,27 +125,27 @@ window.PaginaAgenda = (function () {
 
     const res = document.getElementById('ag-resumo');
     if (res) res.innerHTML = `<div class="grid grid--cards mb-16">
-      <div class="card stat"><span class="stat__label">Agendamentos do dia</span><span class="stat__value">${resumo.total}</span></div>
+      <div class="card stat"><span class="stat__label">${rAula(true)}s do dia</span><span class="stat__value">${resumo.total}</span></div>
       <div class="card stat"><span class="stat__label">Pendentes</span><span class="stat__value" style="color:var(--alerta)">${resumo.pendentes}</span></div>
       <div class="card stat"><span class="stat__label">Atendidos</span><span class="stat__value" style="color:var(--sucesso)">${resumo.atendidos}</span></div>
       <div class="card stat"><span class="stat__label">Previsto no dia</span><span class="stat__value">${UI.moeda(resumo.previsto)}</span></div>
     </div>`;
 
     if (!itens.length) {
-      alvo.innerHTML = `<div class="card vazio">Nenhum agendamento neste dia.
-        <div class="mt-16"><button class="btn" onclick="document.getElementById('ag-novo').click()">+ Novo agendamento</button></div></div>`;
+      alvo.innerHTML = `<div class="card vazio">Nenhum${rAula() === 'aula' ? 'a' : ''} ${rAula()} neste dia.
+        <div class="mt-16"><button class="btn" onclick="document.getElementById('ag-novo').click()">+ Nov${rAula() === 'aula' ? 'a' : 'o'} ${rAula()}</button></div></div>`;
       return;
     }
 
     alvo.innerHTML = `<div class="card"><div class="agenda-lista">
       ${itens.map((a) => {
-        const nome = a.cliente_cadastro || a.cliente_nome || 'Sem cliente';
+        const nome = a.cliente_cadastro || a.cliente_nome || `Sem ${rCliente()}`;
         const tel = a.cliente_telefone || a.telefone;
         return `<div class="agenda-item" style="border-left-color:${a.profissional_cor || 'var(--primaria)'}">
           <div class="agenda-item__hora">${UI.escapar(a.hora_inicio)}${a.hora_fim ? `<span class="dica">até ${UI.escapar(a.hora_fim)}</span>` : ''}</div>
           <div class="agenda-item__info">
-            <strong>${UI.escapar(nome)}</strong> ${badge(a.status)}${a.venda_id ? ' <span class="badge badge--ok">faturado</span>' : ''}
-            <div class="dica">${UI.escapar(a.servico_nome || 'Serviço')}${a.profissional_nome ? ' · ' + UI.escapar(a.profissional_nome) : ''}${tel ? ' · ' + UI.escapar(tel) : ''}</div>
+            <strong>${UI.escapar(nome)}</strong> ${badge(a.status)}${a.venda_id ? ' <span class="badge badge--ok">faturado</span>' : ''}${a.aula_recorrente_id ? ` <span class="badge badge--muted" title="Gerado automaticamente de uma ${rAula()} fixa">🔁 fixa</span>` : ''}
+            <div class="dica">${UI.escapar(a.servico_nome || rServico(true))}${a.profissional_nome ? ' · ' + UI.escapar(a.profissional_nome) : ''}${tel ? ' · ' + UI.escapar(tel) : ''}</div>
           </div>
           <div class="agenda-item__valor">${UI.moeda(a.valor)}</div>
           <div class="agenda-item__acoes">
@@ -171,7 +182,7 @@ window.PaginaAgenda = (function () {
         </select>
         <div class="cresce"></div>
         <button class="btn btn--secundario" id="ag-equipe-mes">👥 Equipe</button>
-        <button class="btn" id="ag-novo-mes">+ Novo agendamento</button>
+        <button class="btn" id="ag-novo-mes">+ Nov${rAula() === 'aula' ? 'a' : 'o'} ${rAula()}</button>
       </div>
       <div id="ag-calendario"><div class="card">Carregando…</div></div>`;
 
@@ -220,7 +231,7 @@ window.PaginaAgenda = (function () {
           <div class="cal-dia__numero">${Number(iso.slice(8, 10))}</div>
           <div class="cal-dia__eventos">
             ${evs.slice(0, MOSTRAR).map((a) => {
-              const nome = a.cliente_cadastro || a.cliente_nome || 'Sem cliente';
+              const nome = a.cliente_cadastro || a.cliente_nome || `Sem ${rCliente()}`;
               return `<div class="cal-evento" data-evento="${a.id}" style="background:${a.profissional_cor || 'var(--primaria)'}" title="${UI.escapar(a.hora_inicio + ' — ' + nome)}">${UI.escapar(a.hora_inicio)} ${UI.escapar(nome)}</div>`;
             }).join('')}
             ${extras > 0 ? `<div class="cal-evento cal-evento--mais">+${extras} mais</div>` : ''}
@@ -239,12 +250,139 @@ window.PaginaAgenda = (function () {
     }));
   }
 
+  // ------------------------- Visão: Aulas fixas (recorrentes) -------------------------
+  async function renderRecorrentes() {
+    const alvo = document.getElementById('ag-corpo');
+    if (!alvo) return;
+    alvo.innerHTML = `
+      <p class="dica mb-16">Cadastre um${rAula() === 'aula' ? 'a' : ''} ${rAula()} fixa que se repete toda semana (ex.: "${rServico(true)} com ${rCliente(true).toLowerCase() === 'aluno' ? 'o aluno' : 'o cliente'} X, toda terça às 15h"). O sistema gera automaticamente as próximas ocorrências na agenda — sem precisar recriar toda semana.</p>
+      <div class="barra-ferramentas"><div class="cresce"></div><button class="btn" id="rec-nova">+ Nov${rAula() === 'aula' ? 'a' : 'o'} ${rAula()} fixa</button></div>
+      <div class="card"><div id="rec-lista">Carregando…</div></div>`;
+    alvo.querySelector('#rec-nova').addEventListener('click', () => formRecorrente());
+    await listarRecorrentes();
+  }
+
+  async function listarRecorrentes() {
+    const alvo = document.getElementById('rec-lista');
+    if (!alvo) return;
+    try { aulasRecorrentes = await API.get('/api/agenda/aulas-recorrentes'); }
+    catch (e) { alvo.innerHTML = UI.escapar(e.message); return; }
+    if (!aulasRecorrentes.length) { alvo.innerHTML = `<p class="muted">Nenhum${rAula() === 'aula' ? 'a' : ''} ${rAula()} fixa cadastrada.</p>`; return; }
+    alvo.innerHTML = `<table class="tabela">
+      <thead><tr><th>${rCliente(true)}</th><th>${rServico(true)}</th><th>Dia/Horário</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+      <tbody>${aulasRecorrentes.map((r) => `<tr style="${r.ativa ? '' : 'opacity:.55'}">
+        <td>${UI.escapar(r.aluno_cadastro_nome || r.aluno_nome || '—')}</td>
+        <td>${UI.escapar(r.materia_nome || '—')}</td>
+        <td>${DIAS_SEMANA[r.dia_semana]} · ${UI.escapar(r.hora_inicio)}${r.hora_fim ? ' às ' + UI.escapar(r.hora_fim) : ''}</td>
+        <td>${UI.moeda(r.valor)}</td>
+        <td>${r.ativa ? '<span class="badge badge--ok">Ativa</span>' : '<span class="badge badge--muted">Pausada</span>'}</td>
+        <td style="text-align:right;white-space:nowrap">
+          <button class="btn btn--secundario" data-rec-pausar="${r.id}" data-ativa="${r.ativa}">${r.ativa ? 'Pausar' : 'Reativar'}</button>
+          <button class="btn btn--secundario" data-rec-editar="${r.id}">Editar</button>
+          <button class="btn btn--secundario" data-rec-excluir="${r.id}">✕</button>
+        </td>
+      </tr>`).join('')}</tbody></table>`;
+
+    alvo.querySelectorAll('[data-rec-editar]').forEach((b) => b.addEventListener('click', () => {
+      const r = aulasRecorrentes.find((x) => x.id === Number(b.dataset.recEditar));
+      formRecorrente(r);
+    }));
+    alvo.querySelectorAll('[data-rec-pausar]').forEach((b) => b.addEventListener('click', async () => {
+      const ativa = b.dataset.ativa === '1';
+      try {
+        await API.put(`/api/agenda/aulas-recorrentes/${b.dataset.recPausar}`, { ativa: !ativa });
+        UI.sucesso(ativa ? `${rAula(true)} fixa pausada.` : `${rAula(true)} fixa reativada.`);
+        await listarRecorrentes();
+      } catch (e) { UI.erro(e.message); }
+    }));
+    alvo.querySelectorAll('[data-rec-excluir]').forEach((b) => b.addEventListener('click', async () => {
+      const ok = await UI.confirmar(`Excluir est${rAula() === 'aula' ? 'a' : 'e'} ${rAula()} fixa? As ocorrências já lançadas na agenda não serão apagadas.`, { titulo: `Excluir ${rAula()} fixa`, textoConfirmar: 'Excluir' });
+      if (!ok) return;
+      try { await API.del(`/api/agenda/aulas-recorrentes/${b.dataset.recExcluir}`); UI.sucesso(`${rAula(true)} fixa excluída.`); await listarRecorrentes(); }
+      catch (e) { UI.erro(e.message); }
+    }));
+  }
+
+  function formRecorrente(r) {
+    const ehEdicao = !!r;
+    Modal.abrir({
+      titulo: ehEdicao ? `Editar ${rAula()} fixa` : `Nov${rAula() === 'aula' ? 'a' : 'o'} ${rAula()} fixa`, tamanho: 'modal--grande',
+      corpoHTML: `
+        <div class="form-grid">
+          <div class="campo"><label>${rCliente(true)} (cadastrado)</label><select id="rec-aluno">
+            <option value="">— avulso —</option>${clientes.map((c) => `<option value="${c.id}" data-tel="${UI.escapar(c.telefone || '')}" ${r && String(r.aluno_id) === String(c.id) ? 'selected' : ''}>${UI.escapar(c.nome)}</option>`).join('')}
+          </select></div>
+          <div class="campo"><label>Ou nome do ${rCliente()}</label><input id="rec-aluno-nome" value="${UI.escapar(r ? r.aluno_nome || '' : '')}" placeholder="${rCliente(true)} sem cadastro" /></div>
+        </div>
+        <div class="form-grid mt-16">
+          <div class="campo"><label>${rServico(true)}</label><select id="rec-materia">
+            <option value="">— selecione —</option>${servicos.map((s) => `<option value="${s.id}" data-preco="${s.preco_venda}" ${r && String(r.produto_id) === String(s.id) ? 'selected' : ''}>${UI.escapar(s.nome)}</option>`).join('')}
+          </select></div>
+          <div class="campo"><label>Valor (R$)</label><input id="rec-valor" type="number" step="0.01" min="0" value="${r ? r.valor : ''}" /></div>
+        </div>
+        ${profissionais.length ? `<div class="campo mt-16"><label>Profissional</label><select id="rec-prof">
+          <option value="">—</option>${profissionais.map((p) => `<option value="${p.id}" ${r && String(r.profissional_id) === String(p.id) ? 'selected' : ''}>${UI.escapar(p.nome)}</option>`).join('')}
+        </select></div>` : ''}
+        <div class="form-grid mt-16">
+          <div class="campo"><label>Dia da semana *</label><select id="rec-dia">
+            ${DIAS_SEMANA.map((n, i) => `<option value="${i}" ${r ? (r.dia_semana === i ? 'selected' : '') : (i === 1 ? 'selected' : '')}>${n}</option>`).join('')}
+          </select></div>
+          <div class="campo"><label>Hora início *</label><input id="rec-hora-ini" type="time" value="${r ? r.hora_inicio : '15:00'}" required /></div>
+          <div class="campo"><label>Hora fim <span class="dica">(opcional)</span></label><input id="rec-hora-fim" type="time" value="${r && r.hora_fim ? r.hora_fim : ''}" /></div>
+        </div>
+        <div class="form-grid mt-16">
+          <div class="campo"><label>Começa em</label><input id="rec-inicio" type="date" value="${r ? r.data_inicio : new Date().toISOString().slice(0, 10)}" /></div>
+          <div class="campo"><label>Até <span class="dica">(opcional — deixe em branco para repetir sem data final)</span></label><input id="rec-fim" type="date" value="${r && r.data_fim ? r.data_fim : ''}" /></div>
+        </div>
+        <div class="campo mt-16"><label>Telefone (WhatsApp)</label><input id="rec-tel" value="${UI.escapar(r ? r.telefone || '' : '')}" placeholder="Ex.: 11999998888" /></div>
+        <div class="campo mt-16"><label>Observação</label><input id="rec-obs" value="${UI.escapar(r ? r.observacao || '' : '')}" /></div>
+        <div class="dica mt-16">O sistema gera automaticamente as próximas 8-9 semanas na agenda. Editar aqui não altera ocorrências já lançadas — só as futuras que ainda serão geradas.</div>`,
+      textoConfirmar: 'Salvar',
+      aoAbrir: (el) => {
+        const materia = el.querySelector('#rec-materia');
+        const valor = el.querySelector('#rec-valor');
+        materia.addEventListener('change', () => {
+          const opt = materia.selectedOptions[0];
+          if (opt && opt.dataset.preco && !valor.value) valor.value = opt.dataset.preco;
+        });
+        const aluno = el.querySelector('#rec-aluno');
+        aluno.addEventListener('change', () => {
+          const opt = aluno.selectedOptions[0];
+          const tel = el.querySelector('#rec-tel');
+          if (opt && opt.dataset.tel && !tel.value) tel.value = opt.dataset.tel;
+        });
+      },
+      aoConfirmar: async (el) => {
+        const dados = {
+          aluno_id: el.querySelector('#rec-aluno').value || null,
+          aluno_nome: el.querySelector('#rec-aluno-nome').value,
+          produto_id: el.querySelector('#rec-materia').value || null,
+          valor: el.querySelector('#rec-valor').value,
+          profissional_id: el.querySelector('#rec-prof') ? el.querySelector('#rec-prof').value || null : null,
+          dia_semana: el.querySelector('#rec-dia').value,
+          hora_inicio: el.querySelector('#rec-hora-ini').value,
+          hora_fim: el.querySelector('#rec-hora-fim').value || null,
+          data_inicio: el.querySelector('#rec-inicio').value || null,
+          data_fim: el.querySelector('#rec-fim').value || null,
+          telefone: el.querySelector('#rec-tel').value,
+          observacao: el.querySelector('#rec-obs').value,
+        };
+        try {
+          if (ehEdicao) await API.put(`/api/agenda/aulas-recorrentes/${r.id}`, dados);
+          else await API.post('/api/agenda/aulas-recorrentes', dados);
+          UI.sucesso(ehEdicao ? `${rAula(true)} fixa atualizada.` : `${rAula(true)} fixa cadastrada — as próximas ocorrências já foram lançadas na agenda.`);
+          await listarRecorrentes();
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
   // --------------------------- Form de agendamento ---------------------------
   function abrirForm(ag) {
     const ehEdicao = !!ag;
     const a = ag || {};
     Modal.abrir({
-      titulo: ehEdicao ? 'Editar agendamento' : 'Novo agendamento', tamanho: 'modal--grande',
+      titulo: ehEdicao ? `Editar ${rAula()}` : `Nov${rAula() === 'aula' ? 'a' : 'o'} ${rAula()}`, tamanho: 'modal--grande',
       corpoHTML: `
         <form id="form-ag" class="form-grid">
           <div class="campo"><label>Data *</label><input name="data" type="date" value="${a.data || dia}" required /></div>
@@ -253,14 +391,14 @@ window.PaginaAgenda = (function () {
           <div class="campo"><label>Profissional</label><select name="profissional_id">
             <option value="">—</option>${profissionais.map((p) => `<option value="${p.id}" ${String(a.profissional_id) === String(p.id) ? 'selected' : ''}>${UI.escapar(p.nome)}</option>`).join('')}
           </select></div>
-          <div class="campo"><label>Serviço</label><select name="produto_id" id="ag-serv">
+          <div class="campo"><label>${rServico(true)}</label><select name="produto_id" id="ag-serv">
             <option value="">— selecione —</option>${servicos.map((s) => `<option value="${s.id}" data-preco="${s.preco_venda}" ${String(a.produto_id) === String(s.id) ? 'selected' : ''}>${UI.escapar(s.nome)}</option>`).join('')}
           </select><span class="dica">Necessário para faturar o atendimento.</span></div>
           <div class="campo"><label>Valor (R$)</label><input name="valor" id="ag-valor" type="number" step="0.01" min="0" value="${a.valor != null ? a.valor : ''}" /></div>
-          <div class="campo"><label>Cliente (cadastrado)</label><select name="cliente_id" id="ag-cli">
+          <div class="campo"><label>${rCliente(true)} (cadastrado)</label><select name="cliente_id" id="ag-cli">
             <option value="">— avulso —</option>${clientes.map((c) => `<option value="${c.id}" data-tel="${UI.escapar(c.telefone || '')}" ${String(a.cliente_id) === String(c.id) ? 'selected' : ''}>${UI.escapar(c.nome)}</option>`).join('')}
           </select></div>
-          <div class="campo"><label>Ou nome do cliente</label><input name="cliente_nome" value="${UI.escapar(a.cliente_nome || '')}" placeholder="Cliente sem cadastro" /></div>
+          <div class="campo"><label>Ou nome do ${rCliente()}</label><input name="cliente_nome" value="${UI.escapar(a.cliente_nome || '')}" placeholder="${rCliente(true)} sem cadastro" /></div>
           <div class="campo col-2"><label>Telefone (WhatsApp)</label><input name="telefone" id="ag-tel" value="${UI.escapar(a.telefone || '')}" placeholder="Ex.: 11999998888" /></div>
           <div class="campo col-2"><label>Observações</label><textarea name="observacao">${UI.escapar(a.observacao || '')}</textarea></div>
         </form>`,
@@ -284,7 +422,7 @@ window.PaginaAgenda = (function () {
         try {
           if (ehEdicao) await API.put(`/api/agenda/${a.id}`, dados);
           else await API.post('/api/agenda', dados);
-          UI.sucesso(ehEdicao ? 'Agendamento atualizado.' : 'Agendamento criado.');
+          UI.sucesso(ehEdicao ? `${rAula(true)} atualizad${ehProfessor() ? 'a' : 'o'}.` : `${rAula(true)} criad${ehProfessor() ? 'a' : 'o'}.`);
           if (dados.data) { dia = dados.data; mesAtual = dados.data.slice(0, 7); }
           await render(document.getElementById('view'));
         } catch (e) { UI.erro(e.message); return false; }
@@ -294,16 +432,16 @@ window.PaginaAgenda = (function () {
 
   // ------------------------------ Detalhe ------------------------------
   function abrirDetalhe(a) {
-    const nome = a.cliente_cadastro || a.cliente_nome || 'Sem cliente';
+    const nome = a.cliente_cadastro || a.cliente_nome || `Sem ${rCliente()}`;
     const tel = a.cliente_telefone || a.telefone;
     Modal.abrir({
       titulo: `${a.hora_inicio} — ${nome}`, tamanho: 'modal--pequeno', mostrarConfirmar: false,
       corpoHTML: `
         <table class="tabela">
-          <tr><th>Status</th><td>${badge(a.status)}${a.venda_id ? ' <span class="badge badge--ok">faturado (venda #' + a.venda_id + ')</span>' : ''}</td></tr>
+          <tr><th>Status</th><td>${badge(a.status)}${a.venda_id ? ' <span class="badge badge--ok">faturado (venda #' + a.venda_id + ')</span>' : ''}${a.aula_recorrente_id ? ` <span class="badge badge--muted">🔁 ${rAula()} fixa</span>` : ''}</td></tr>
           <tr><th>Data</th><td>${diaLabel(a.data)}</td></tr>
           <tr><th>Horário</th><td>${UI.escapar(a.hora_inicio)}${a.hora_fim ? ' às ' + UI.escapar(a.hora_fim) : ''}</td></tr>
-          <tr><th>Serviço</th><td>${UI.escapar(a.servico_nome || '—')}</td></tr>
+          <tr><th>${rServico(true)}</th><td>${UI.escapar(a.servico_nome || '—')}</td></tr>
           <tr><th>Profissional</th><td>${UI.escapar(a.profissional_nome || '—')}</td></tr>
           <tr><th>Telefone</th><td>${UI.escapar(tel || '—')}</td></tr>
           <tr><th>Valor</th><td><strong>${UI.moeda(a.valor)}</strong></td></tr>
@@ -334,9 +472,9 @@ window.PaginaAgenda = (function () {
         if (ed) ed.addEventListener('click', () => { el.remove(); abrirForm(a); });
         const ex = foot.querySelector('#d-excluir');
         if (ex) ex.addEventListener('click', async () => {
-          const ok = await UI.confirmar('Excluir este agendamento?', { titulo: 'Excluir', textoConfirmar: 'Excluir' });
+          const ok = await UI.confirmar(`Excluir est${ehProfessor() ? 'a' : 'e'} ${rAula()}?`, { titulo: 'Excluir', textoConfirmar: 'Excluir' });
           if (!ok) return;
-          try { await API.del(`/api/agenda/${a.id}`); UI.sucesso('Agendamento excluído.'); el.remove(); await atualizarVistaAtual(); }
+          try { await API.del(`/api/agenda/${a.id}`); UI.sucesso(`${rAula(true)} excluíd${ehProfessor() ? 'a' : 'o'}.`); el.remove(); await atualizarVistaAtual(); }
           catch (e) { UI.erro(e.message); }
         });
         const fat = foot.querySelector('#d-faturar');
@@ -347,9 +485,9 @@ window.PaginaAgenda = (function () {
 
   function faturar(a, detalheEl) {
     Modal.abrir({
-      titulo: 'Faturar atendimento', tamanho: 'modal--pequeno',
+      titulo: `Faturar ${rAula()}`, tamanho: 'modal--pequeno',
       corpoHTML: `
-        <p class="dica" style="margin-top:0">Gera a venda do serviço de <strong>${UI.moeda(a.valor)}</strong> e marca o agendamento como atendido.</p>
+        <p class="dica" style="margin-top:0">Gera a venda d${rServico() === 'matéria' ? 'a' : 'o'} ${rServico()} de <strong>${UI.moeda(a.valor)}</strong> e marca ${ehProfessor() ? 'a aula' : 'o agendamento'} como atendid${ehProfessor() ? 'a' : 'o'}.</p>
         <div class="campo"><label>Forma de pagamento</label><select id="f-forma">${Object.entries(FORMAS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
         <div class="campo mt-16" id="f-venc-wrap" style="display:none"><label>Vencimento (a prazo)</label><input id="f-venc" type="date" /></div>`,
       textoConfirmar: 'Faturar',
@@ -379,10 +517,10 @@ window.PaginaAgenda = (function () {
 
   function enviarWhatsApp(a) {
     const tel = soDigitos(a.cliente_telefone || a.telefone);
-    if (!tel) { UI.erro('Este agendamento não tem telefone.'); return; }
-    const nome = a.cliente_cadastro || a.cliente_nome || 'cliente';
+    if (!tel) { UI.erro(`Est${ehProfessor() ? 'a' : 'e'} ${rAula()} não tem telefone.`); return; }
+    const nome = a.cliente_cadastro || a.cliente_nome || rCliente();
     const dataBR = new Date(a.data + 'T00:00:00').toLocaleDateString('pt-BR');
-    const padrao = `Olá, ${nome}! Confirmando seu horário de ${a.servico_nome || 'atendimento'} em ${dataBR} às ${a.hora_inicio}. Até lá!`;
+    const padrao = `Olá, ${nome}! Confirmando seu horário de ${a.servico_nome || rServico()} em ${dataBR} às ${a.hora_inicio}. Até lá!`;
     Modal.abrir({
       titulo: '💬 Enviar por WhatsApp', tamanho: 'modal--pequeno',
       corpoHTML: `

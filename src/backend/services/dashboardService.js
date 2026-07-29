@@ -198,10 +198,15 @@ function centralAtencao() {
     });
   }
 
-  // 3) Produtos abaixo do estoque minimo (so faz sentido para quem vende produtos).
-  const estoqueBaixo = db.prepare('SELECT COUNT(*) c FROM produtos WHERE ativo=1 AND eh_servico=0 AND eh_kit=0 AND estoque_atual <= estoque_minimo').get().c;
-  if (estoqueBaixo > 0) {
-    itens.push({ tipo: 'estoque_baixo', nivel: 'laranja', rota: 'produtos', peso: 2, dados: { qtd: estoqueBaixo } });
+  // 3) Produtos abaixo do estoque minimo (so faz sentido para quem vende produtos;
+  // nunca para o ramo "professor", que nao tem produto nenhum por definicao).
+  const ramoCfg = db.prepare("SELECT valor FROM config WHERE chave = 'ramo_servico'").get();
+  const ramoServico = ramoCfg && ramoCfg.valor;
+  if (ramoServico !== 'professor') {
+    const estoqueBaixo = db.prepare('SELECT COUNT(*) c FROM produtos WHERE ativo=1 AND eh_servico=0 AND eh_kit=0 AND estoque_atual <= estoque_minimo').get().c;
+    if (estoqueBaixo > 0) {
+      itens.push({ tipo: 'estoque_baixo', nivel: 'laranja', rota: 'produtos', peso: 2, dados: { qtd: estoqueBaixo } });
+    }
   }
 
   // 4) Faturamento do mes (ate hoje) vs o mesmo intervalo de dias no mes anterior.

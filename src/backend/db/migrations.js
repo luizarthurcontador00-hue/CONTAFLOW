@@ -988,6 +988,40 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 25,
+    name: 'aulas-recorrentes',
+    up(db) {
+      db.exec(`
+        -- Aula fixa semanal (ex.: professor particular): um "molde" que gera
+        -- automaticamente um agendamento normal a cada semana, no mesmo
+        -- espirito de contas fixas/assinaturas (gera as ocorrencias futuras
+        -- sem precisar recriar manualmente toda semana).
+        CREATE TABLE IF NOT EXISTS aulas_recorrentes (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          aluno_id        INTEGER REFERENCES clientes(id) ON DELETE SET NULL,
+          aluno_nome      TEXT,                          -- avulso, quando nao tem cadastro
+          profissional_id INTEGER REFERENCES profissionais(id) ON DELETE SET NULL,
+          produto_id      INTEGER REFERENCES produtos(id) ON DELETE SET NULL,  -- materia (servico do cadastro)
+          materia_nome    TEXT,
+          dia_semana      INTEGER NOT NULL,              -- 0=domingo .. 6=sabado
+          hora_inicio     TEXT NOT NULL,
+          hora_fim        TEXT,
+          valor           REAL NOT NULL DEFAULT 0,
+          telefone        TEXT,
+          data_inicio     TEXT NOT NULL,
+          data_fim        TEXT,                          -- opcional, ate quando repetir
+          ativa           INTEGER NOT NULL DEFAULT 1,
+          observacao      TEXT,
+          criado_em       TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_aulas_rec_ativa ON aulas_recorrentes(ativa);
+
+        ALTER TABLE agendamentos ADD COLUMN aula_recorrente_id INTEGER REFERENCES aulas_recorrentes(id) ON DELETE SET NULL;
+        CREATE INDEX IF NOT EXISTS idx_agenda_aula_rec ON agendamentos(aula_recorrente_id);
+      `);
+    },
+  },
 ];
 
 /**

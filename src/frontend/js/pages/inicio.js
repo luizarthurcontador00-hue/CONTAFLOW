@@ -107,7 +107,7 @@ window.PaginaInicio = (function () {
   async function carregarResumo() {
     const alvo = document.getElementById('central-resumo');
     if (!alvo) return;
-    const temProdutos = window.__perfilNegocio !== 'servico';
+    const temProdutos = window.__perfilNegocio !== 'servico' && window.__ramoServico !== 'professor';
     let r;
     try { r = await API.get('/api/dashboard/resumo'); } catch { alvo.innerHTML = ''; return; }
     alvo.innerHTML = `

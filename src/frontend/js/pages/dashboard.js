@@ -9,7 +9,7 @@ window.PaginaDashboard = (function () {
     const hoje = new Date().toISOString().slice(0, 10);
     const ini30 = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
     // Graficos e cartoes de produto/estoque so fazem sentido para quem vende produtos.
-    const temProdutos = window.__perfilNegocio !== 'servico';
+    const temProdutos = window.__perfilNegocio !== 'servico' && window.__ramoServico !== 'professor';
     container.innerHTML = `
       <div id="dash-cards" class="grid grid--cards mb-16"></div>
       <div class="barra-ferramentas">

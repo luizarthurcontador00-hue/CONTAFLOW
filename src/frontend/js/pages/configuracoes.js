@@ -27,6 +27,7 @@ window.PaginaConfiguracoes = (function () {
               <option value="salao" ${(cfg.ramo_servico || 'salao') === 'salao' ? 'selected' : ''}>💇 Salão / Barbearia / Estética</option>
               <option value="oficina" ${cfg.ramo_servico === 'oficina' ? 'selected' : ''}>🔧 Oficina / Assistência técnica</option>
               <option value="agencia_viagem" ${cfg.ramo_servico === 'agencia_viagem' ? 'selected' : ''}>✈️ Agência de viagem</option>
+              <option value="professor" ${cfg.ramo_servico === 'professor' ? 'selected' : ''}>🎓 Professor particular / Aulas</option>
               <option value="geral" ${cfg.ramo_servico === 'geral' ? 'selected' : ''}>💼 Outros serviços</option>
             </select>
             <span class="dica">Refina o que aparece no menu — ex.: "Ordens & Orçamentos" (Pátio/OS) fica escondido para Salão.</span>

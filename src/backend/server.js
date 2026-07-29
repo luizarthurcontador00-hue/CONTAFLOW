@@ -33,6 +33,16 @@ function createApp() {
     console.error('[financeiro] falha ao gerar contas fixas do mes:', e.message);
   }
 
+  // Gera as proximas ocorrencias das aulas recorrentes (aula fixa semanal), se houver.
+  try {
+    // eslint-disable-next-line global-require
+    const { gerarOcorrenciasPendentes } = require('./services/agendaService');
+    const r = gerarOcorrenciasPendentes();
+    if (r.geradas > 0) console.log(`[agenda] ${r.geradas} aula(s) recorrente(s) gerada(s).`);
+  } catch (e) {
+    console.error('[agenda] falha ao gerar aulas recorrentes:', e.message);
+  }
+
   const app = express();
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true }));

@@ -10,8 +10,9 @@ window.PaginaRelatorios = (function () {
   async function render(container) {
     const hoje = new Date().toISOString().slice(0, 10);
     const mesIni = hoje.slice(0, 8) + '01';
-    // "Estoque atual" e "Produtos parados" so fazem sentido para quem vende produtos.
-    const temProdutos = window.__perfilNegocio !== 'servico';
+    // "Estoque atual" e "Produtos parados" so fazem sentido para quem vende produtos
+    // (nunca para o ramo "professor", mesmo que o perfil esteja como "ambos").
+    const temProdutos = window.__perfilNegocio !== 'servico' && window.__ramoServico !== 'professor';
     const temCRM = window.__ramoServico === 'agencia_viagem';
     if (!temProdutos && (relatorio === 'estoque' || relatorio === 'parados')) relatorio = 'vendas';
     if (!temCRM && (relatorio === 'crm' || relatorio === 'viagens')) relatorio = 'vendas';

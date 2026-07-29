@@ -820,6 +820,14 @@ window.PaginaFinanceiro = (function () {
       ? d.despesas.map((c) => linha(c.nome, c.total, { recuo: true, sinal: '−', cor: 'var(--perigo)' })).join('')
       : '<tr><td class="muted" style="padding-left:24px">Nenhuma despesa no período</td><td></td></tr>';
 
+    // Comércio ve CMV, serviço ve CSP, e quem tem os dois ve as duas linhas.
+    const temComercio = window.__perfilNegocio !== 'servico';
+    const temServico = window.__perfilNegocio !== 'comercio';
+    const linhasCusto = [
+      temComercio ? linha('(−) CMV — custo da mercadoria vendida', d.cmv, { cor: 'var(--perigo)' }) : '',
+      temServico ? linha('(−) CSP — custo dos serviços prestados', d.csp, { cor: 'var(--perigo)' }) : '',
+    ].join('');
+
     alvo.innerHTML = `
       <div class="grid grid--cards mb-16">
         <div class="card stat"><span class="stat__label">Receita de vendas</span><span class="stat__value" style="color:var(--sucesso)">${UI.moeda(d.receita_bruta)}</span></div>
@@ -831,7 +839,7 @@ window.PaginaFinanceiro = (function () {
         <table class="tabela dre-tabela">
           <tbody>
             ${linha('Receita de vendas', d.receita_bruta, { sinal: '', cor: 'var(--sucesso)' })}
-            ${linha('(−) CMV — custo da mercadoria vendida', d.cmv, { cor: 'var(--perigo)' })}
+            ${linhasCusto}
             ${linha('= Lucro bruto', d.lucro_bruto, { forte: true })}
             <tr><td colspan="2" style="padding-top:12px"><strong>Despesas operacionais</strong></td></tr>
             ${despesasHTML}
@@ -839,7 +847,7 @@ window.PaginaFinanceiro = (function () {
             ${linha('= Resultado líquido do mês', d.resultado_liquido, { forte: true, cor: d.resultado_liquido >= 0 ? 'var(--sucesso)' : 'var(--perigo)' })}
           </tbody>
         </table>
-        <p class="dica mt-16">A receita vem das vendas concluídas no mês; o CMV usa o custo dos itens vendidos; as despesas vêm das contas a pagar do mês, agrupadas por categoria. Compras de mercadoria não entram como despesa (elas viram CMV ao vender). Margem líquida: <strong>${d.margem_liquida_pct}%</strong>.</p>
+        <p class="dica mt-16">A receita vem das vendas concluídas no mês; ${temComercio && temServico ? 'o CMV usa o custo dos produtos vendidos e o CSP o custo dos serviços prestados' : temServico ? 'o CSP usa o custo dos serviços prestados' : 'o CMV usa o custo dos itens vendidos'}; as despesas vêm das contas a pagar do mês, agrupadas por categoria. Compras de mercadoria não entram como despesa (elas viram CMV ao vender). Margem líquida: <strong>${d.margem_liquida_pct}%</strong>.</p>
       </div>`;
   }
 

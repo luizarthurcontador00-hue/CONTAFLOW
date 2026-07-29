@@ -12,6 +12,13 @@ router.post('/profissionais', asyncHandler((req, res) => res.status(201).json(ag
 router.put('/profissionais/:id', asyncHandler((req, res) => res.json(ag.atualizarProfissional(req.params.id, req.body || {}))));
 router.delete('/profissionais/:id', asyncHandler((req, res) => res.json(ag.excluirProfissional(req.params.id))));
 
+// Aulas recorrentes (aula fixa semanal)
+router.get('/aulas-recorrentes', asyncHandler((req, res) => res.json(ag.listarAulasRecorrentes())));
+router.post('/aulas-recorrentes', asyncHandler((req, res) => res.status(201).json(ag.criarAulaRecorrente(req.body || {}))));
+router.put('/aulas-recorrentes/:id', asyncHandler((req, res) => res.json(ag.atualizarAulaRecorrente(req.params.id, req.body || {}))));
+router.delete('/aulas-recorrentes/:id', asyncHandler((req, res) => res.json(ag.excluirAulaRecorrente(req.params.id))));
+router.post('/aulas-recorrentes/gerar-pendentes', asyncHandler((req, res) => res.json(ag.gerarOcorrenciasPendentes())));
+
 // Agendamentos
 router.get('/resumo', asyncHandler((req, res) => res.json(ag.resumoDia(req.query.data))));
 router.get('/', asyncHandler((req, res) => res.json(ag.listar(req.query))));

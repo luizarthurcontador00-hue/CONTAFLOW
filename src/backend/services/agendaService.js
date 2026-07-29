@@ -5,6 +5,7 @@ const { AppError } = require('../utils/errors');
 const { arred } = require('./precificacaoService');
 
 const STATUS = ['agendado', 'confirmado', 'atendido', 'cancelado', 'faltou'];
+const hoje = () => new Date().toISOString().slice(0, 10);
 
 // ----------------------------- Profissionais -----------------------------
 
@@ -219,8 +220,134 @@ function resumoDia(data) {
   return { ...r, previsto: arred(r.previsto) };
 }
 
+// ------------------------------ Aulas recorrentes ------------------------------
+
+function listarAulasRecorrentes() {
+  return getDb().prepare(`
+    SELECT r.*, c.nome AS aluno_cadastro_nome, p.nome AS profissional_nome
+    FROM aulas_recorrentes r
+    LEFT JOIN clientes c ON c.id = r.aluno_id
+    LEFT JOIN profissionais p ON p.id = r.profissional_id
+    ORDER BY (r.ativa = 0), r.dia_semana, r.hora_inicio
+  `).all();
+}
+
+function validarAulaRecorrente(dados) {
+  const diaSemana = Number(dados.dia_semana);
+  if (Number.isNaN(diaSemana) || diaSemana < 0 || diaSemana > 6) throw new AppError('Selecione o dia da semana.');
+  if (!dados.hora_inicio) throw new AppError('Informe o horário da aula.');
+  if (!dados.aluno_id && !(dados.aluno_nome || '').trim()) throw new AppError('Informe o aluno.');
+  if (dados.data_fim && dados.data_inicio && dados.data_fim < dados.data_inicio) {
+    throw new AppError('A data de encerramento não pode ser anterior ao início.');
+  }
+  return {
+    aluno_id: dados.aluno_id ? Number(dados.aluno_id) : null,
+    aluno_nome: (dados.aluno_nome || '').trim() || null,
+    profissional_id: dados.profissional_id ? Number(dados.profissional_id) : null,
+    produto_id: dados.produto_id ? Number(dados.produto_id) : null,
+    materia_nome: (dados.materia_nome || '').trim() || null,
+    dia_semana: diaSemana,
+    hora_inicio: dados.hora_inicio,
+    hora_fim: dados.hora_fim || null,
+    valor: arred(Number(dados.valor || 0)),
+    telefone: (dados.telefone || '').trim() || null,
+    data_inicio: dados.data_inicio || hoje(),
+    data_fim: dados.data_fim || null,
+    observacao: (dados.observacao || '').trim() || null,
+  };
+}
+
+function criarAulaRecorrente(dados) {
+  const db = getDb();
+  const d = validarAulaRecorrente(dados);
+  if (d.produto_id) {
+    const serv = db.prepare('SELECT nome, preco_venda, duracao_min FROM produtos WHERE id = ?').get(d.produto_id);
+    if (serv) {
+      if (!d.materia_nome) d.materia_nome = serv.nome;
+      if (!d.valor) d.valor = arred(Number(serv.preco_venda || 0));
+      if (!d.hora_fim && serv.duracao_min) d.hora_fim = somarMinutos(d.hora_inicio, serv.duracao_min);
+    }
+  }
+  const info = db.prepare(`
+    INSERT INTO aulas_recorrentes (aluno_id, aluno_nome, profissional_id, produto_id, materia_nome,
+      dia_semana, hora_inicio, hora_fim, valor, telefone, data_inicio, data_fim, observacao)
+    VALUES (@aluno_id, @aluno_nome, @profissional_id, @produto_id, @materia_nome,
+      @dia_semana, @hora_inicio, @hora_fim, @valor, @telefone, @data_inicio, @data_fim, @observacao)
+  `).run(d);
+  gerarOcorrenciasPendentes();
+  return getDb().prepare('SELECT * FROM aulas_recorrentes WHERE id = ?').get(info.lastInsertRowid);
+}
+
+function atualizarAulaRecorrente(id, dados) {
+  const db = getDb();
+  const atual = db.prepare('SELECT * FROM aulas_recorrentes WHERE id = ?').get(id);
+  if (!atual) throw new AppError('Aula recorrente não encontrada.', 404);
+  const d = validarAulaRecorrente({ ...atual, ...dados });
+  const ativa = dados.ativa !== undefined ? (dados.ativa ? 1 : 0) : atual.ativa;
+  db.prepare(`
+    UPDATE aulas_recorrentes SET aluno_id=@aluno_id, aluno_nome=@aluno_nome, profissional_id=@profissional_id,
+      produto_id=@produto_id, materia_nome=@materia_nome, dia_semana=@dia_semana, hora_inicio=@hora_inicio,
+      hora_fim=@hora_fim, valor=@valor, telefone=@telefone, data_inicio=@data_inicio, data_fim=@data_fim,
+      observacao=@observacao, ativa=@ativa
+    WHERE id=@id
+  `).run({ ...d, ativa, id });
+  if (ativa) gerarOcorrenciasPendentes();
+  return db.prepare('SELECT * FROM aulas_recorrentes WHERE id = ?').get(id);
+}
+
+/** Remove o "molde". As aulas (agendamentos) ja geradas nao sao apagadas — mesmo padrao de contas fixas/assinaturas. */
+function excluirAulaRecorrente(id) {
+  getDb().prepare('DELETE FROM aulas_recorrentes WHERE id = ?').run(id);
+  return { ok: true };
+}
+
+/**
+ * Gera os agendamentos das aulas recorrentes ativas para os proximos 60 dias
+ * (a partir de hoje, respeitando data_inicio/data_fim de cada uma). So cria
+ * o que ainda nao existe para aquele dia — idempotente, pode ser chamada
+ * varias vezes (na inicializacao do app e ao abrir a Agenda) sem duplicar.
+ */
+function gerarOcorrenciasPendentes() {
+  const db = getDb();
+  const aulas = db.prepare('SELECT * FROM aulas_recorrentes WHERE ativa = 1').all();
+  if (!aulas.length) return { geradas: 0 };
+
+  const HORIZONTE_DIAS = 60;
+  const hojeD = new Date(); hojeD.setHours(0, 0, 0, 0);
+  const limiteD = new Date(hojeD); limiteD.setDate(limiteD.getDate() + HORIZONTE_DIAS);
+
+  let geradas = 0;
+  const tx = db.transaction(() => {
+    const jaTem = db.prepare('SELECT 1 FROM agendamentos WHERE aula_recorrente_id = ? AND data = ?');
+    const inserir = db.prepare(`
+      INSERT INTO agendamentos (data, hora_inicio, hora_fim, cliente_id, cliente_nome, telefone,
+        profissional_id, produto_id, servico_nome, valor, status, aula_recorrente_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'agendado', ?)
+    `);
+    for (const a of aulas) {
+      const inicioD = new Date(Math.max(hojeD.getTime(), new Date(a.data_inicio + 'T00:00:00').getTime()));
+      const fimD = a.data_fim
+        ? new Date(Math.min(limiteD.getTime(), new Date(a.data_fim + 'T00:00:00').getTime()))
+        : limiteD;
+      for (let d = new Date(inicioD); d <= fimD; d.setDate(d.getDate() + 1)) {
+        if (d.getDay() !== a.dia_semana) continue;
+        const dataISO = d.toISOString().slice(0, 10);
+        if (jaTem.get(a.id, dataISO)) continue;
+        inserir.run(
+          dataISO, a.hora_inicio, a.hora_fim, a.aluno_id, a.aluno_nome, a.telefone,
+          a.profissional_id, a.produto_id, a.materia_nome, a.valor, a.id
+        );
+        geradas++;
+      }
+    }
+  });
+  tx();
+  return { geradas };
+}
+
 module.exports = {
   STATUS,
   listarProfissionais, criarProfissional, atualizarProfissional, excluirProfissional,
   listar, obter, criar, atualizar, mudarStatus, excluir, faturar, resumoDia,
+  listarAulasRecorrentes, criarAulaRecorrente, atualizarAulaRecorrente, excluirAulaRecorrente, gerarOcorrenciasPendentes,
 };

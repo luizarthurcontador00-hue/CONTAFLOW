@@ -768,7 +768,8 @@ function ultimoDiaMes() {
 /**
  * Demonstracao do Resultado (DRE) simplificada por periodo (competencia):
  *   Receita de vendas (vendas concluidas, pelo valor liquido)
- *   (-) CMV — custo da mercadoria vendida (custo dos itens vendidos)
+ *   (-) CMV — custo da mercadoria vendida (produtos) e/ou
+ *   (-) CSP — custo dos servicos prestados (servicos), conforme o negocio
  *   = Lucro bruto
  *   (-) Despesas operacionais (contas a pagar por categoria, no vencimento)
  *   = Resultado liquido
@@ -784,13 +785,23 @@ function dre({ inicio, fim } = {}) {
     "SELECT COALESCE(SUM(valor_total),0) t FROM vendas WHERE status='concluida' AND date(data) BETWEEN date(?) AND date(?)"
   ).get(ini, f).t;
 
-  const cmv = db.prepare(`
-    SELECT COALESCE(SUM(vi.custo_unitario * vi.quantidade),0) t
-    FROM vendas_itens vi JOIN vendas v ON v.id = vi.venda_id
+  // Separa o custo de produtos (CMV) do custo de servicos prestados (CSP):
+  // um prestador de servico nao vende "mercadoria", entao o nome certo do
+  // seu custo direto e outro. Quando o negocio tem os dois (produtos e
+  // servicos), o DRE mostra as duas linhas separadas.
+  const custos = db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN p.eh_servico = 1 THEN vi.custo_unitario * vi.quantidade ELSE 0 END),0) AS csp,
+      COALESCE(SUM(CASE WHEN p.eh_servico IS NULL OR p.eh_servico = 0 THEN vi.custo_unitario * vi.quantidade ELSE 0 END),0) AS cmv
+    FROM vendas_itens vi
+    JOIN vendas v ON v.id = vi.venda_id
+    LEFT JOIN produtos p ON p.id = vi.produto_id
     WHERE v.status='concluida' AND date(v.data) BETWEEN date(?) AND date(?)
-  `).get(ini, f).t;
+  `).get(ini, f);
+  const cmv = custos.cmv;
+  const csp = custos.csp;
 
-  const lucroBruto = arred(Number(receita) - Number(cmv));
+  const lucroBruto = arred(Number(receita) - Number(cmv) - Number(csp));
 
   // Despesas operacionais por categoria (considera_dre=1), pela competencia
   // (data de vencimento; se nula, usa a data de criacao).
@@ -818,6 +829,7 @@ function dre({ inicio, fim } = {}) {
     periodo: { inicio: ini, fim: f },
     receita_bruta: arred(receita),
     cmv: arred(cmv),
+    csp: arred(csp),
     lucro_bruto: lucroBruto,
     margem_bruta_pct: receita > 0 ? arred((lucroBruto / receita) * 100) : 0,
     despesas: despesasCat,

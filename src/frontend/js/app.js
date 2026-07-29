@@ -52,8 +52,9 @@
   const rotaRamo = { crm: 'agencia_viagem', viagens: 'agencia_viagem' };
 
   function rotaVisivel(nome) {
-    if (nome === 'ordens' && (perfil === 'servico' || perfil === 'ambos') && (ramo === 'salao' || ramo === 'agencia_viagem')) return false;
+    if (nome === 'ordens' && (perfil === 'servico' || perfil === 'ambos') && (ramo === 'salao' || ramo === 'agencia_viagem' || ramo === 'professor')) return false;
     if (nome === 'agenda' && (perfil === 'servico' || perfil === 'ambos') && ramo === 'agencia_viagem') return false;
+    if ((nome === 'pdv' || nome === 'vendas') && (perfil === 'servico' || perfil === 'ambos') && ramo === 'professor') return false;
     if (rotaRamo[nome] && ramo !== rotaRamo[nome]) return false;
     const p = rotaPerfil[nome];
     return !p || perfil === 'ambos' || perfil === p;
@@ -65,7 +66,7 @@
       a.style.display = mostra ? '' : 'none';
     });
     // Regras compostas (dependem tambem do ramo, nao so do perfil).
-    ['ordens', 'agenda', 'crm', 'viagens'].forEach((nome) => {
+    ['ordens', 'agenda', 'crm', 'viagens', 'pdv', 'vendas'].forEach((nome) => {
       const link = document.querySelector(`.nav-item[data-rota="${nome}"]`);
       if (link) link.style.display = rotaVisivel(nome) ? '' : 'none';
     });
@@ -135,11 +136,18 @@
     });
   }
 
+  function rotuloRota(nome, tituloPadrao) {
+    if (ramo !== 'professor') return tituloPadrao;
+    if (nome === 'clientes') return 'Alunos';
+    if (nome === 'agenda') return 'Aulas';
+    return tituloPadrao;
+  }
+
   async function navegar() {
     const nome = rotaAtual();
     const def = rotas[nome];
     marcarMenu(nome);
-    titulo().textContent = def.titulo;
+    titulo().textContent = rotuloRota(nome, def.titulo);
 
     const pagina = def.pagina && def.pagina();
     if (pagina && typeof pagina.render === 'function') {
@@ -194,12 +202,30 @@
     let cfg = {};
     try { cfg = await API.get('/api/config'); } catch (_) { cfg = {}; }
     perfil = ['comercio', 'servico', 'ambos'].includes(cfg.perfil_negocio) ? cfg.perfil_negocio : 'ambos';
-    ramo = ['salao', 'oficina', 'agencia_viagem', 'geral'].includes(cfg.ramo_servico) ? cfg.ramo_servico : 'geral';
+    ramo = ['salao', 'oficina', 'agencia_viagem', 'professor', 'geral'].includes(cfg.ramo_servico) ? cfg.ramo_servico : 'geral';
     window.__perfilNegocio = perfil;
     window.__ramoServico = ramo;
     aplicarPerfil();
+    aplicarRotulosRamo();
     aplicarAparencia(cfg);
     return cfg;
+  }
+
+  // Ajusta os rotulos do menu conforme o ramo (ex.: professor particular chama
+  // "Clientes" de "Alunos" e "Agenda" de "Aulas", que fala mais perto do dia a dia).
+  function aplicarRotulosRamo() {
+    const clientesTxt = document.querySelector('.nav-item[data-rota="clientes"] .nav-item__texto');
+    const clientesIc = document.querySelector('.nav-item[data-rota="clientes"] .nav-item__icone');
+    const agendaTxt = document.querySelector('.nav-item[data-rota="agenda"] .nav-item__texto');
+    if (ramo === 'professor') {
+      if (clientesTxt) clientesTxt.textContent = 'Alunos';
+      if (clientesIc) clientesIc.textContent = '🎓';
+      if (agendaTxt) agendaTxt.textContent = 'Aulas';
+    } else {
+      if (clientesTxt) clientesTxt.textContent = 'Clientes';
+      if (clientesIc) clientesIc.textContent = '👥';
+      if (agendaTxt) agendaTxt.textContent = 'Agenda';
+    }
   }
 
   // Escurece uma cor hex em ~12% para o estado :hover dos botões.
@@ -265,6 +291,7 @@
             <button type="button" class="ob-opcao ativa" data-r="salao"><span class="ob-opcao__ic">💇</span><strong>Salão / Barbearia / Estética</strong><span class="dica">Agenda e catálogo de serviços</span></button>
             <button type="button" class="ob-opcao" data-r="oficina"><span class="ob-opcao__ic">🔧</span><strong>Oficina / Assistência técnica</strong><span class="dica">Ordens de serviço, pátio e peças</span></button>
             <button type="button" class="ob-opcao" data-r="agencia_viagem"><span class="ob-opcao__ic">✈️</span><strong>Agência de viagem</strong><span class="dica">CRM de leads e calendário de viagens</span></button>
+            <button type="button" class="ob-opcao" data-r="professor"><span class="ob-opcao__ic">🎓</span><strong>Professor particular / Aulas</strong><span class="dica">Alunos, aula fixa recorrente e mensalidade</span></button>
             <button type="button" class="ob-opcao" data-r="geral"><span class="ob-opcao__ic">💼</span><strong>Outros serviços</strong><span class="dica">Consultoria, autônomo, geral</span></button>
           </div>
         </div>`;
