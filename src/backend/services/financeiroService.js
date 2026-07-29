@@ -46,13 +46,20 @@ function contaDaForma(db, forma) {
  * faz nada (permite chamar sempre, mesmo quando a forma nao mapeia conta).
  * DEVE ser chamada dentro de uma transacao quando junto de outras escritas.
  */
-function lancarMovimentoConta(db, { conta_id, tipo, valor, origem, referencia_id = null, descricao = null }) {
+function lancarMovimentoConta(db, { conta_id, tipo, valor, origem, referencia_id = null, descricao = null, data = null }) {
   if (!conta_id) return;
   if (tipo !== 'entrada' && tipo !== 'saida') throw new AppError('Tipo de movimento invalido.');
-  db.prepare(
-    `INSERT INTO contas_financeiras_mov (conta_id, tipo, valor, origem, referencia_id, descricao)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(conta_id, tipo, arred(Number(valor)), origem, referencia_id, descricao);
+  if (data) {
+    db.prepare(
+      `INSERT INTO contas_financeiras_mov (conta_id, tipo, valor, origem, referencia_id, descricao, data)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(conta_id, tipo, arred(Number(valor)), origem, referencia_id, descricao, data);
+  } else {
+    db.prepare(
+      `INSERT INTO contas_financeiras_mov (conta_id, tipo, valor, origem, referencia_id, descricao)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(conta_id, tipo, arred(Number(valor)), origem, referencia_id, descricao);
+  }
 }
 
 /** Saldo atual = saldo_inicial + entradas - saidas. */
@@ -134,6 +141,16 @@ function excluirContaFinanceira(id) {
   return { excluida: true };
 }
 
+/** Saldo da conta considerando so os movimentos ate uma data (para saber o saldo final de um periodo passado). */
+function saldoContaAte(db, contaId, dataLimite) {
+  const c = db.prepare('SELECT saldo_inicial FROM contas_financeiras WHERE id = ?').get(contaId);
+  if (!c) return 0;
+  const mov = db.prepare(
+    "SELECT COALESCE(SUM(CASE WHEN tipo='entrada' THEN valor ELSE -valor END),0) s FROM contas_financeiras_mov WHERE conta_id = ? AND date(data) <= date(?)"
+  ).get(contaId, dataLimite).s;
+  return arred(Number(c.saldo_inicial) + Number(mov));
+}
+
 function extratoConta(id, { inicio, fim } = {}) {
   const db = getDb();
   const conta = db.prepare('SELECT * FROM contas_financeiras WHERE id = ?').get(id);
@@ -143,9 +160,15 @@ function extratoConta(id, { inicio, fim } = {}) {
   if (inicio) { where.push('date(data) >= date(@inicio)'); params.inicio = inicio; }
   if (fim) { where.push('date(data) <= date(@fim)'); params.fim = fim; }
   const movimentos = db.prepare(
-    `SELECT * FROM contas_financeiras_mov WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT 300`
+    `SELECT * FROM contas_financeiras_mov WHERE ${where.join(' AND ')} ORDER BY date(data) DESC, id DESC LIMIT 300`
   ).all(params);
-  return { ...conta, saldo_atual: saldoConta(db, id), movimentos };
+  return {
+    ...conta,
+    saldo_atual: saldoConta(db, id),
+    saldo_inicio_periodo: inicio ? saldoContaAte(db, id, somarDias(inicio, -1)) : null,
+    saldo_fim_periodo: fim ? saldoContaAte(db, id, fim) : null,
+    movimentos,
+  };
 }
 
 // =========================== Contas a pagar ===========================
@@ -291,7 +314,7 @@ function baixarPagar(id, { data_pagamento, forma_pagamento, conta_financeira_id 
       .run(data_pagamento || hoje(), forma_pagamento || null, contaId || null, id);
     lancarMovimentoConta(db, {
       conta_id: contaId, tipo: 'saida', valor: c.valor, origem: 'pagamento',
-      referencia_id: id, descricao: c.descricao,
+      referencia_id: id, descricao: c.descricao, data: data_pagamento || hoje(),
     });
   });
   tx();
@@ -662,7 +685,7 @@ function baixarReceber(id, { data_recebimento, forma_recebimento, conta_financei
       .run(data_recebimento || hoje(), forma_recebimento || null, contaId || null, id);
     lancarMovimentoConta(db, {
       conta_id: contaId, tipo: 'entrada', valor: c.valor, origem: 'recebimento',
-      referencia_id: id, descricao: c.descricao,
+      referencia_id: id, descricao: c.descricao, data: data_recebimento || hoje(),
     });
   });
   tx();
@@ -717,10 +740,49 @@ function somarDias(dataISO, dias) {
  *              contas a receber recebidas (data de recebimento)
  *  - Saidas:   contas a pagar pagas (data de pagamento)
  */
-function fluxoCaixa({ inicio, fim } = {}) {
+function fluxoCaixa({ inicio, fim, conta_financeira_id } = {}) {
   const db = getDb();
   const ini = inicio || '0000-01-01';
   const f = fim || '9999-12-31';
+
+  // Com uma conta financeira selecionada, o fluxo vem direto do extrato dela
+  // (contas_financeiras_mov) — e da pra ver o saldo no inicio/fim do periodo,
+  // util pra bater com o saldo final do extrato do banco (conciliacao).
+  if (conta_financeira_id) {
+    const contaId = Number(conta_financeira_id);
+    const conta = db.prepare('SELECT * FROM contas_financeiras WHERE id = ?').get(contaId);
+    if (!conta) throw new AppError('Conta financeira nao encontrada.', 404);
+
+    const porOrigem = db.prepare(`
+      SELECT tipo, origem, COALESCE(SUM(valor),0) total
+      FROM contas_financeiras_mov
+      WHERE conta_id = ? AND date(data) BETWEEN date(?) AND date(?)
+      GROUP BY tipo, origem
+    `).all(contaId, ini, f);
+    const somaTipo = (tipo) => arred(porOrigem.filter((r) => r.tipo === tipo).reduce((s, r) => s + Number(r.total), 0));
+    const somaOrigem = (origem) => arred(porOrigem.filter((r) => r.origem === origem).reduce((s, r) => s + Number(r.total), 0));
+
+    const entradas = somaTipo('entrada');
+    const saidas = somaTipo('saida');
+    const saldoInicioPeriodo = inicio ? saldoContaAte(db, contaId, somarDias(inicio, -1)) : Number(conta.saldo_inicial);
+    const saldoFimPeriodo = fim ? saldoContaAte(db, contaId, fim) : saldoConta(db, contaId);
+
+    return {
+      entradas,
+      saidas,
+      saldo: arred(entradas - saidas),
+      detalhe: {
+        vendas_a_vista: somaOrigem('venda'),
+        recebimentos: somaOrigem('recebimento'),
+        pagamentos: somaOrigem('pagamento'),
+      },
+      conta_financeira: { ...conta, saldo_atual: saldoConta(db, contaId) },
+      saldo_inicio_periodo: arred(saldoInicioPeriodo),
+      saldo_fim_periodo: arred(saldoFimPeriodo),
+      contas: listarContasFinanceiras(),
+      saldo_total_contas: arred(listarContasFinanceiras().reduce((s, c) => s + Number(c.saldo_atual), 0)),
+    };
+  }
 
   const vendasVista = db.prepare(`
     SELECT COALESCE(SUM(vp.valor),0) AS total

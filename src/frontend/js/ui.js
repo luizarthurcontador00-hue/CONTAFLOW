@@ -40,11 +40,17 @@ const UI = (function () {
 
   function dataHora(iso) {
     if (!iso) return '';
+    const s = String(iso);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      // Só data, sem hora (ex.: movimento com a data real do pagamento/extrato):
+      // monta a data local direto, sem passar por Date() em UTC (evitaria trocar o dia).
+      const [a, m, d] = s.split('-').map(Number);
+      return new Date(a, m - 1, d).toLocaleDateString('pt-BR');
+    }
     // aceita 'YYYY-MM-DD HH:MM:SS' (localtime do SQLite)
-    const s = String(iso).replace(' ', 'T');
-    const d = new Date(s);
-    if (isNaN(d.getTime())) return iso;
-    return d.toLocaleString('pt-BR');
+    const d2 = new Date(s.replace(' ', 'T'));
+    if (isNaN(d2.getTime())) return iso;
+    return d2.toLocaleString('pt-BR');
   }
 
   function escapar(texto) {

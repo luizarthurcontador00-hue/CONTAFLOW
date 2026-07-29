@@ -40,7 +40,7 @@ window.PaginaRelatorios = (function () {
 
       <div class="card mt-16">
         <h3 style="margin-top:0">📊 Exportar para o contador</h3>
-        <p class="dica">Gera uma planilha Excel com Vendas, Compras, Contas Pagas e Contas Recebidas do período — pronta para mandar pro contador fechar o mês.</p>
+        <p class="dica">Gera uma planilha Excel com Vendas, Compras, Contas Pagas, Contas Recebidas e o <strong>Extrato Conciliado</strong> (transações do extrato bancário já batidas na aba Conciliação) do período — pronta para mandar pro contador fechar o mês.</p>
         <div class="barra-ferramentas" style="margin-bottom:0">
           <div class="campo"><label class="dica">De</label><input type="date" id="ec-inicio" value="${mesIni}"></div>
           <div class="campo"><label class="dica">Até</label><input type="date" id="ec-fim" value="${hoje}"></div>

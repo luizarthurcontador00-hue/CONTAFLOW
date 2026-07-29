@@ -68,7 +68,7 @@ window.PaginaInicio = (function () {
       </div>
       <div id="central-itens"></div>
       <div class="card mt-16">
-        <h3 style="margin-top:0">Resumo rápido</h3>
+        <h3 style="margin-top:0">${window.__ramoServico === 'professor' ? '📊 Painel do professor' : 'Resumo rápido'}</h3>
         <div class="grid grid--cards" id="central-resumo"></div>
       </div>`;
 
