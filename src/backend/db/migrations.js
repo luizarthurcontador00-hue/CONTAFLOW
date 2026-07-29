@@ -1050,6 +1050,34 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 27,
+    name: 'regras-conciliacao',
+    up(db) {
+      db.exec(`
+        -- Regras de conciliacao: quando a descricao da transacao do banco
+        -- bate com um termo, categoriza/lanca automaticamente (ex.: toda vez
+        -- que tiver "tarifa" no debito, lanca como categoria "Despesas
+        -- bancarias"). So se aplica quando a transacao nao bate com nenhuma
+        -- conta a pagar/receber pendente existente.
+        CREATE TABLE IF NOT EXISTS regras_conciliacao (
+          id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+          padrao               TEXT NOT NULL,     -- termo(s) separados por virgula, buscados na descricao
+          tipo                 TEXT NOT NULL,     -- pagar | receber
+          categoria_despesa_id INTEGER REFERENCES categorias_despesa(id) ON DELETE SET NULL,
+          fornecedor_id        INTEGER REFERENCES fornecedores(id) ON DELETE SET NULL,
+          cliente_id           INTEGER REFERENCES clientes(id) ON DELETE SET NULL,
+          descricao_lancamento TEXT,              -- opcional: renomeia o lancamento (senao usa a descricao do banco)
+          ativa                INTEGER NOT NULL DEFAULT 1,
+          ordem                INTEGER NOT NULL DEFAULT 0,
+          criado_em            TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_regras_conc_ativa ON regras_conciliacao(ativa);
+
+        ALTER TABLE extrato_ofx_transacoes ADD COLUMN regra_id INTEGER REFERENCES regras_conciliacao(id) ON DELETE SET NULL;
+      `);
+    },
+  },
 ];
 
 /**

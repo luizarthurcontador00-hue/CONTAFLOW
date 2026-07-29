@@ -7,6 +7,11 @@ const svc = require('../services/conciliacaoService');
 
 const router = express.Router();
 
+router.get('/regras', asyncHandler((req, res) => res.json(svc.listarRegras())));
+router.post('/regras', asyncHandler((req, res) => res.status(201).json(svc.criarRegra(req.body || {}))));
+router.put('/regras/:id', asyncHandler((req, res) => res.json(svc.atualizarRegra(req.params.id, req.body || {}))));
+router.delete('/regras/:id', asyncHandler((req, res) => res.json(svc.excluirRegra(req.params.id))));
+
 router.get('/', asyncHandler((req, res) => res.json(svc.listarTransacoes(req.query))));
 router.get('/:id/sugestoes', asyncHandler((req, res) => res.json(svc.sugestoes(req.params.id))));
 router.post('/:id/conciliar', asyncHandler((req, res) => res.json(svc.conciliarComExistente(req.params.id, req.body || {}))));
@@ -20,5 +25,7 @@ router.post('/importar', uploadOfx.single('ofx'), asyncHandler((req, res) => {
   if (!contaFinanceiraId) throw new AppError('Selecione a conta financeira deste extrato.');
   res.status(201).json(svc.importarExtrato(contaFinanceiraId, req.file.buffer));
 }));
+
+router.post('/:conta_financeira_id/aplicar-regras', asyncHandler((req, res) => res.json(svc.aplicarRegrasPendentes(req.params.conta_financeira_id))));
 
 module.exports = router;

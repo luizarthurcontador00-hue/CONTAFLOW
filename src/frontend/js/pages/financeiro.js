@@ -905,8 +905,11 @@ window.PaginaFinanceiro = (function () {
     }
     alvo.innerHTML = `
       <div class="card mb-16">
-        <h3 style="margin-top:0">Importar extrato (.ofx)</h3>
-        <p class="dica">Importe o extrato exportado do seu banco (formato OFX) para bater as transações com as contas a pagar/receber do sistema — e já dar baixa nelas.</p>
+        <div class="flex flex--between" style="align-items:flex-start">
+          <h3 style="margin-top:0">Importar extrato (.ofx)</h3>
+          <button class="btn btn--secundario" id="cc-regras">⚙️ Regras de conciliação</button>
+        </div>
+        <p class="dica">Importe o extrato exportado do seu banco (formato OFX) para bater as transações com as contas a pagar/receber do sistema — e já dar baixa nelas. Transações sem conta correspondente podem ser lançadas automaticamente por uma regra (ex.: "taxa" sempre vira despesa de tarifas bancárias).</p>
         <div class="form-grid">
           <div class="campo"><label>Conta financeira</label><select id="cc-conta">${contasFin.map((c) => `<option value="${c.id}">${UI.escapar(c.nome)}</option>`).join('')}</select></div>
           <div class="campo"><label>Arquivo OFX</label><input type="file" id="cc-arquivo" accept=".ofx" /></div>
@@ -926,6 +929,7 @@ window.PaginaFinanceiro = (function () {
       <div class="card"><div id="cc-lista">Carregando…</div></div>`;
 
     alvo.querySelector('#cc-importar').addEventListener('click', importarExtratoOfx);
+    alvo.querySelector('#cc-regras').addEventListener('click', gerenciarRegrasConciliacao);
     alvo.querySelector('#cc-filtro-conta').addEventListener('change', (e) => { conciliacaoFiltro.conta_financeira_id = e.target.value; listarConciliacao(); });
     alvo.querySelector('#cc-filtro-status').addEventListener('change', (e) => { conciliacaoFiltro.status = e.target.value; listarConciliacao(); });
     await listarConciliacao();
@@ -941,7 +945,7 @@ window.PaginaFinanceiro = (function () {
     fd.append('ofx', arquivo);
     try {
       const r = await API.post('/api/conciliacao/importar', fd);
-      UI.sucesso(`${r.importadas} transação(ões) importada(s)${r.duplicadas ? ` — ${r.duplicadas} já tinha(m) sido importada(s) antes` : ''}.`);
+      UI.sucesso(`${r.importadas} transação(ões) importada(s)${r.duplicadas ? ` — ${r.duplicadas} já tinha(m) sido importada(s) antes` : ''}${r.autoConciliadas ? ` — ${r.autoConciliadas} conciliada(s) automaticamente por regra` : ''}.`);
       document.getElementById('cc-arquivo').value = '';
       await listarConciliacao();
     } catch (e) { UI.erro(e.message); }
@@ -962,7 +966,7 @@ window.PaginaFinanceiro = (function () {
       <thead><tr><th>Data</th><th>Descrição</th><th>Tipo</th><th>Valor</th><th>Status</th><th></th></tr></thead>
       <tbody>${transacoes.map((t) => `<tr>
         <td>${t.data}</td>
-        <td>${UI.escapar(t.descricao)}${t.pagar_descricao ? `<div class="dica">↳ ${UI.escapar(t.pagar_descricao)}</div>` : ''}${t.receber_descricao ? `<div class="dica">↳ ${UI.escapar(t.receber_descricao)}</div>` : ''}</td>
+        <td>${UI.escapar(t.descricao)}${t.regra_padrao ? ` <span class="badge badge--muted" title="Conciliado automaticamente pela regra &quot;${UI.escapar(t.regra_padrao)}&quot;">🤖 automático</span>` : ''}${t.pagar_descricao ? `<div class="dica">↳ ${UI.escapar(t.pagar_descricao)}</div>` : ''}${t.receber_descricao ? `<div class="dica">↳ ${UI.escapar(t.receber_descricao)}</div>` : ''}</td>
         <td><span class="chip-forma">${t.tipo === 'credito' ? '🟢 Crédito' : '🔴 Débito'}</span></td>
         <td>${UI.moeda(t.valor)}</td>
         <td>${t.status === 'pendente' ? '<span class="badge badge--alerta">Pendente</span>' : t.status === 'conciliada' ? '<span class="badge badge--ok">Conciliada</span>' : '<span class="badge badge--muted">Ignorada</span>'}</td>
@@ -983,6 +987,126 @@ window.PaginaFinanceiro = (function () {
     alvo.querySelectorAll('[data-reabrir]').forEach((b) => b.addEventListener('click', async () => {
       try { await API.post(`/api/conciliacao/${b.dataset.reabrir}/reabrir`, {}); UI.sucesso('Transação reaberta.'); await listarConciliacao(); } catch (e) { UI.erro(e.message); }
     }));
+  }
+
+  async function gerenciarRegrasConciliacao() {
+    let regras = await API.get('/api/conciliacao/regras').catch(() => []);
+    let editandoId = null;
+
+    const corpo = `
+      <p class="dica mb-16">Quando uma transação do extrato não bater com nenhuma conta pendente, o sistema procura por esses termos na descrição e já lança automaticamente na categoria/fornecedor ou cliente escolhido (o que também aparece no DRE).</p>
+      <form id="rc-form">
+        <div class="form-grid">
+          <div class="campo"><label>Termo(s) na descrição</label><input id="rc-padrao" placeholder="ex.: taxa, tarifa" required /></div>
+          <div class="campo"><label>Lança como</label><select id="rc-tipo"><option value="pagar">Despesa (a pagar)</option><option value="receber">Receita (a receber)</option></select></div>
+        </div>
+        <div id="rc-campos-pagar" class="form-grid mt-16">
+          <div class="campo"><label>Categoria (DRE)</label><select id="rc-categoria"><option value="">— sem categoria —</option>${categoriasDespesa.map((c) => `<option value="${c.id}">${UI.escapar(c.nome)}</option>`).join('')}</select></div>
+          <div class="campo"><label>Fornecedor</label><select id="rc-fornecedor"><option value="">—</option>${fornecedores.map((f) => `<option value="${f.id}">${UI.escapar(f.nome)}</option>`).join('')}</select></div>
+        </div>
+        <div id="rc-campos-receber" class="campo mt-16" style="display:none"><label>Cliente</label><select id="rc-cliente"><option value="">—</option>${clientes.map((c) => `<option value="${c.id}">${UI.escapar(c.nome)}</option>`).join('')}</select></div>
+        <div class="campo mt-16"><label>Descrição do lançamento (opcional)</label><input id="rc-descricao" placeholder="Se vazio, usa a descrição do próprio banco" /></div>
+        <div class="flex gap-12 mt-16" style="align-items:center">
+          <button class="btn" type="submit" id="rc-salvar">Adicionar regra</button>
+          <button class="btn btn--secundario" type="button" id="rc-cancelar" style="display:none">Cancelar edição</button>
+        </div>
+      </form>
+      <hr class="mt-16 mb-16" />
+      <div id="rc-lista"></div>`;
+
+    Modal.abrir({
+      titulo: 'Regras de conciliação', tamanho: 'modal--grande', corpoHTML: corpo, mostrarConfirmar: false,
+      aoAbrir: (el) => {
+        const tipoSel = el.querySelector('#rc-tipo');
+        const alternarCampos = () => {
+          const pagar = tipoSel.value === 'pagar';
+          el.querySelector('#rc-campos-pagar').style.display = pagar ? '' : 'none';
+          el.querySelector('#rc-campos-receber').style.display = pagar ? 'none' : '';
+        };
+        tipoSel.addEventListener('change', alternarCampos);
+        alternarCampos();
+
+        const limparForm = () => {
+          editandoId = null;
+          el.querySelector('#rc-form').reset();
+          alternarCampos();
+          el.querySelector('#rc-salvar').textContent = 'Adicionar regra';
+          el.querySelector('#rc-cancelar').style.display = 'none';
+        };
+
+        const render = () => {
+          el.querySelector('#rc-lista').innerHTML = regras.length ? `<table class="tabela">
+            <thead><tr><th>Termo(s)</th><th>Lança como</th><th>Destino</th><th>Ativa?</th><th></th></tr></thead>
+            <tbody>${regras.map((r) => `<tr>
+              <td>${UI.escapar(r.padrao)}</td>
+              <td>${r.tipo === 'pagar' ? 'Despesa' : 'Receita'}</td>
+              <td>${UI.escapar(r.categoria_nome || r.fornecedor_nome || r.cliente_nome || '—')}</td>
+              <td>${r.ativa ? '<span class="badge badge--ok">Sim</span>' : '<span class="badge badge--muted">Pausada</span>'}</td>
+              <td style="text-align:right;white-space:nowrap">
+                <button class="btn btn--secundario" data-rc-editar="${r.id}">Editar</button>
+                <button class="btn btn--secundario" data-rc-pausar="${r.id}">${r.ativa ? 'Pausar' : 'Ativar'}</button>
+                <button class="btn btn--secundario" data-rc-del="${r.id}">✕</button>
+              </td>
+            </tr>`).join('')}</tbody></table>` : '<p class="muted">Nenhuma regra cadastrada.</p>';
+
+          el.querySelectorAll('[data-rc-editar]').forEach((b) => b.addEventListener('click', () => {
+            const r = regras.find((x) => x.id === Number(b.dataset.rcEditar));
+            if (!r) return;
+            editandoId = r.id;
+            el.querySelector('#rc-padrao').value = r.padrao;
+            el.querySelector('#rc-tipo').value = r.tipo;
+            alternarCampos();
+            el.querySelector('#rc-categoria').value = r.categoria_despesa_id || '';
+            el.querySelector('#rc-fornecedor').value = r.fornecedor_id || '';
+            el.querySelector('#rc-cliente').value = r.cliente_id || '';
+            el.querySelector('#rc-descricao').value = r.descricao_lancamento || '';
+            el.querySelector('#rc-salvar').textContent = 'Salvar edição';
+            el.querySelector('#rc-cancelar').style.display = '';
+            el.querySelector('#rc-padrao').focus();
+          }));
+          el.querySelectorAll('[data-rc-pausar]').forEach((b) => b.addEventListener('click', async () => {
+            const r = regras.find((x) => x.id === Number(b.dataset.rcPausar));
+            if (!r) return;
+            try { await API.put(`/api/conciliacao/regras/${r.id}`, { ativa: !r.ativa }); regras = await API.get('/api/conciliacao/regras'); render(); }
+            catch (e) { UI.erro(e.message); }
+          }));
+          el.querySelectorAll('[data-rc-del]').forEach((b) => b.addEventListener('click', async () => {
+            const ok = await UI.confirmar('Excluir esta regra?', { titulo: 'Excluir regra', textoConfirmar: 'Excluir' });
+            if (!ok) return;
+            try {
+              await API.del(`/api/conciliacao/regras/${b.dataset.rcDel}`);
+              regras = await API.get('/api/conciliacao/regras');
+              if (editandoId === Number(b.dataset.rcDel)) limparForm();
+              render();
+              UI.sucesso('Regra excluída.');
+            } catch (e) { UI.erro(e.message); }
+          }));
+        };
+        render();
+
+        el.querySelector('#rc-cancelar').addEventListener('click', limparForm);
+        el.querySelector('#rc-form').addEventListener('submit', async (ev) => {
+          ev.preventDefault();
+          const tipo = tipoSel.value;
+          const dados = {
+            padrao: el.querySelector('#rc-padrao').value,
+            tipo,
+            descricao_lancamento: el.querySelector('#rc-descricao').value || null,
+            categoria_despesa_id: tipo === 'pagar' ? (el.querySelector('#rc-categoria').value || null) : null,
+            fornecedor_id: tipo === 'pagar' ? (el.querySelector('#rc-fornecedor').value || null) : null,
+            cliente_id: tipo === 'receber' ? (el.querySelector('#rc-cliente').value || null) : null,
+          };
+          try {
+            if (editandoId) await API.put(`/api/conciliacao/regras/${editandoId}`, dados);
+            else await API.post('/api/conciliacao/regras', dados);
+            regras = await API.get('/api/conciliacao/regras');
+            limparForm();
+            render();
+            UI.sucesso('Regra salva.');
+          } catch (e) { UI.erro(e.message); }
+        });
+      },
+    });
   }
 
   async function formConciliar(t) {

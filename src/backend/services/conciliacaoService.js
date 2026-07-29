@@ -13,6 +13,108 @@ const { AppError } = require('../utils/errors');
 const { parseOFX } = require('./ofxParser');
 const { arred } = require('./precificacaoService');
 
+function normalizarTexto(s) {
+  return String(s == null ? '' : s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+}
+
+// ------------------------- Regras de conciliação -------------------------
+
+function listarRegras() {
+  const db = getDb();
+  return db.prepare(`
+    SELECT r.*, cd.nome AS categoria_nome, f.nome AS fornecedor_nome, c.nome AS cliente_nome
+    FROM regras_conciliacao r
+    LEFT JOIN categorias_despesa cd ON cd.id = r.categoria_despesa_id
+    LEFT JOIN fornecedores f ON f.id = r.fornecedor_id
+    LEFT JOIN clientes c ON c.id = r.cliente_id
+    ORDER BY (r.ativa = 0), r.ordem, r.id
+  `).all();
+}
+
+function validarRegra(dados) {
+  const padrao = (dados.padrao || '').trim();
+  if (!padrao) throw new AppError('Informe o termo que a regra deve procurar na descrição.');
+  const tipo = dados.tipo === 'receber' ? 'receber' : 'pagar';
+  return {
+    padrao,
+    tipo,
+    categoria_despesa_id: tipo === 'pagar' && dados.categoria_despesa_id ? Number(dados.categoria_despesa_id) : null,
+    fornecedor_id: tipo === 'pagar' && dados.fornecedor_id ? Number(dados.fornecedor_id) : null,
+    cliente_id: tipo === 'receber' && dados.cliente_id ? Number(dados.cliente_id) : null,
+    descricao_lancamento: (dados.descricao_lancamento || '').trim() || null,
+  };
+}
+
+function criarRegra(dados) {
+  const db = getDb();
+  const d = validarRegra(dados);
+  const ordem = db.prepare('SELECT COALESCE(MAX(ordem),-1)+1 o FROM regras_conciliacao').get().o;
+  const info = db.prepare(`
+    INSERT INTO regras_conciliacao (padrao, tipo, categoria_despesa_id, fornecedor_id, cliente_id, descricao_lancamento, ordem)
+    VALUES (@padrao, @tipo, @categoria_despesa_id, @fornecedor_id, @cliente_id, @descricao_lancamento, @ordem)
+  `).run({ ...d, ordem });
+  return db.prepare('SELECT * FROM regras_conciliacao WHERE id = ?').get(info.lastInsertRowid);
+}
+
+function atualizarRegra(id, dados) {
+  const db = getDb();
+  const atual = db.prepare('SELECT * FROM regras_conciliacao WHERE id = ?').get(id);
+  if (!atual) throw new AppError('Regra não encontrada.', 404);
+  const d = validarRegra({ ...atual, ...dados });
+  const ativa = dados.ativa !== undefined ? (dados.ativa ? 1 : 0) : atual.ativa;
+  db.prepare(`
+    UPDATE regras_conciliacao SET padrao=@padrao, tipo=@tipo, categoria_despesa_id=@categoria_despesa_id,
+      fornecedor_id=@fornecedor_id, cliente_id=@cliente_id, descricao_lancamento=@descricao_lancamento, ativa=@ativa
+    WHERE id=@id
+  `).run({ ...d, ativa, id });
+  return db.prepare('SELECT * FROM regras_conciliacao WHERE id = ?').get(id);
+}
+
+function excluirRegra(id) {
+  getDb().prepare('DELETE FROM regras_conciliacao WHERE id = ?').run(id);
+  return { ok: true };
+}
+
+/** Acha a primeira regra ativa (na ordem) cujo termo aparece na descricao, para o tipo certo. */
+function casarRegra(db, descricao, tipo) {
+  if (!descricao) return null;
+  const normalizada = normalizarTexto(descricao);
+  const regras = db.prepare('SELECT * FROM regras_conciliacao WHERE ativa = 1 AND tipo = ? ORDER BY ordem, id').all(tipo);
+  for (const r of regras) {
+    const termos = r.padrao.split(',').map((t) => normalizarTexto(t)).filter(Boolean);
+    if (termos.some((t) => normalizada.includes(t))) return r;
+  }
+  return null;
+}
+
+/**
+ * Aplica as regras cadastradas às transações ainda pendentes de uma conta
+ * financeira: para cada uma sem nenhuma conta a pagar/receber pendente
+ * correspondente (sem "sugestão"), tenta casar com uma regra e, se achar,
+ * já cria e baixa o lançamento automaticamente.
+ */
+function aplicarRegrasPendentes(contaFinanceiraId) {
+  const db = getDb();
+  const pendentes = db.prepare("SELECT * FROM extrato_ofx_transacoes WHERE conta_financeira_id = ? AND status = 'pendente'").all(contaFinanceiraId);
+  let aplicadas = 0;
+  for (const t of pendentes) {
+    const tipo = t.tipo === 'debito' ? 'pagar' : 'receber';
+    if (sugestoes(t.id).length > 0) continue; // ja tem conta pendente que bate melhor — deixa para conciliacao manual
+    const regra = casarRegra(db, t.descricao, tipo);
+    if (!regra) continue;
+    conciliarComNovo(t.id, {
+      tipo,
+      descricao: regra.descricao_lancamento || t.descricao,
+      categoria_despesa_id: regra.categoria_despesa_id,
+      fornecedor_id: regra.fornecedor_id,
+      cliente_id: regra.cliente_id,
+      regraId: regra.id,
+    });
+    aplicadas++;
+  }
+  return { aplicadas };
+}
+
 /** Importa um extrato OFX para dentro de uma conta financeira (ignora transacoes ja importadas, pelo FITID). */
 function importarExtrato(contaFinanceiraId, buffer) {
   const db = getDb();
@@ -38,7 +140,9 @@ function importarExtrato(contaFinanceiraId, buffer) {
   });
   tx();
 
-  return { total: transacoes.length, importadas, duplicadas };
+  const { aplicadas: autoConciliadas } = aplicarRegrasPendentes(contaFinanceiraId);
+
+  return { total: transacoes.length, importadas, duplicadas, autoConciliadas };
 }
 
 function listarTransacoes({ conta_financeira_id, status } = {}) {
@@ -49,10 +153,11 @@ function listarTransacoes({ conta_financeira_id, status } = {}) {
   if (status) { where.push('t.status = @status'); params.status = status; }
   return db.prepare(`
     SELECT t.*,
-      cp.descricao AS pagar_descricao, cr.descricao AS receber_descricao
+      cp.descricao AS pagar_descricao, cr.descricao AS receber_descricao, r.padrao AS regra_padrao
     FROM extrato_ofx_transacoes t
     LEFT JOIN contas_pagar cp ON cp.id = t.contas_pagar_id
     LEFT JOIN contas_receber cr ON cr.id = t.contas_receber_id
+    LEFT JOIN regras_conciliacao r ON r.id = t.regra_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY (t.status = 'pendente') DESC, t.data DESC
   `).all(params);
@@ -116,7 +221,7 @@ function conciliarComExistente(id, { tipo, conta_id, forma }) {
 }
 
 /** Cria um lancamento novo (despesa/receita) ja conciliado com a transacao — para o que nao tinha conta cadastrada antes. */
-function conciliarComNovo(id, { tipo, descricao, categoria_despesa_id, fornecedor_id, cliente_id }) {
+function conciliarComNovo(id, { tipo, descricao, categoria_despesa_id, fornecedor_id, cliente_id, regraId }) {
   const db = getDb();
   const t = obterTransacao(id);
   if (t.status !== 'pendente') throw new AppError('Esta transação já foi conciliada.');
@@ -129,11 +234,11 @@ function conciliarComNovo(id, { tipo, descricao, categoria_despesa_id, fornecedo
     if (tipo === 'pagar') {
       const cp = fin.criarPagar({ descricao: desc, valor: t.valor, primeiro_vencimento: t.data, fornecedor_id, categoria_despesa_id });
       fin.baixarPagar(cp.id, { data_pagamento: t.data, conta_financeira_id: t.conta_financeira_id });
-      db.prepare("UPDATE extrato_ofx_transacoes SET status='conciliada', contas_pagar_id=? WHERE id=?").run(cp.id, id);
+      db.prepare("UPDATE extrato_ofx_transacoes SET status='conciliada', contas_pagar_id=?, regra_id=? WHERE id=?").run(cp.id, regraId || null, id);
     } else {
       const cr = fin.criarReceber({ descricao: desc, valor: t.valor, primeiro_vencimento: t.data, cliente_id });
       fin.baixarReceber(cr.id, { data_recebimento: t.data, conta_financeira_id: t.conta_financeira_id });
-      db.prepare("UPDATE extrato_ofx_transacoes SET status='conciliada', contas_receber_id=? WHERE id=?").run(cr.id, id);
+      db.prepare("UPDATE extrato_ofx_transacoes SET status='conciliada', contas_receber_id=?, regra_id=? WHERE id=?").run(cr.id, regraId || null, id);
     }
   });
   tx();
@@ -153,11 +258,12 @@ function ignorar(id) {
 function reabrir(id) {
   const db = getDb();
   obterTransacao(id);
-  db.prepare("UPDATE extrato_ofx_transacoes SET status='pendente', contas_pagar_id=NULL, contas_receber_id=NULL WHERE id=?").run(id);
+  db.prepare("UPDATE extrato_ofx_transacoes SET status='pendente', contas_pagar_id=NULL, contas_receber_id=NULL, regra_id=NULL WHERE id=?").run(id);
   return obterTransacao(id);
 }
 
 module.exports = {
   importarExtrato, listarTransacoes, obterTransacao, sugestoes,
   conciliarComExistente, conciliarComNovo, ignorar, reabrir,
+  listarRegras, criarRegra, atualizarRegra, excluirRegra, aplicarRegrasPendentes,
 };
