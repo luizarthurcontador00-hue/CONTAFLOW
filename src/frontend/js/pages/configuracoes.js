@@ -55,6 +55,20 @@ window.PaginaConfiguracoes = (function () {
       </div>
 
       <div class="card mt-16" style="max-width:640px">
+        <h3 style="margin-top:0">💠 Recebimento via PIX</h3>
+        <p class="dica">Usado para gerar a cobrança com QR Code PIX em Financeiro → A Receber. O sistema não guarda dinheiro nem se conecta a banco nenhum — ele só monta o QR a partir da sua chave.</p>
+        <form id="form-pix" class="form-grid">
+          <div class="campo col-2"><label>Chave PIX</label>
+            <input name="pix_chave" value="${UI.escapar(cfg.pix_chave || '')}" placeholder="CPF/CNPJ, e-mail, celular ou chave aleatória" /></div>
+          <div class="campo"><label>Nome do recebedor</label>
+            <input name="pix_nome_recebedor" maxlength="25" value="${UI.escapar(cfg.pix_nome_recebedor || '')}" placeholder="Como aparece no banco (máx. 25 caracteres)" /></div>
+          <div class="campo"><label>Cidade</label>
+            <input name="pix_cidade" maxlength="15" value="${UI.escapar(cfg.pix_cidade || '')}" placeholder="Máx. 15 caracteres" /></div>
+          <div class="campo col-2"><button class="btn" type="submit">Salvar chave PIX</button></div>
+        </form>
+      </div>
+
+      <div class="card mt-16" style="max-width:640px">
         <div class="flex flex--between" style="align-items:center">
           <h3 style="margin:0">🧾 Módulo Fiscal</h3>
           <span id="fis-status" class="badge badge--muted">verificando…</span>
@@ -133,6 +147,16 @@ window.PaginaConfiguracoes = (function () {
         await API.put('/api/config', body);
         UI.sucesso('Configurações salvas.');
         if (window.__recarregarPerfil) await window.__recarregarPerfil();
+      } catch (e) { UI.erro(e.message); }
+    });
+
+    // ------------------------------ PIX ------------------------------
+    container.querySelector('#form-pix').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const body = Object.fromEntries(new FormData(ev.target).entries());
+      try {
+        await API.put('/api/config', body);
+        UI.sucesso('Chave PIX salva.');
       } catch (e) { UI.erro(e.message); }
     });
 

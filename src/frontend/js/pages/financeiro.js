@@ -505,6 +505,7 @@ window.PaginaFinanceiro = (function () {
           <td>${situacao(c)}</td>
           <td style="text-align:right;white-space:nowrap">
             ${!quitada && c.status !== 'cancelada' ? `<button class="btn" data-baixar="${c.id}">${tipo === 'pagar' ? 'Pagar' : 'Receber'}</button>` : ''}
+            ${tipo === 'receber' && c.status === 'pendente' ? `<button class="btn btn--secundario" data-cobranca="${c.id}">🧾 Cobrança</button>` : ''}
             ${quitada && !ehVista ? `<button class="btn btn--secundario" data-reabrir="${c.id}">Reabrir</button>` : ''}
             ${ehVista ? '' : `<button class="btn btn--secundario" data-editar="${c.id}">Editar</button>`}
             ${ehVista ? '' : `<button class="btn btn--secundario" data-excluir="${c.id}">✕</button>`}
@@ -518,6 +519,7 @@ window.PaginaFinanceiro = (function () {
     const recarregar = tipo === 'pagar' ? listarPagar : listarReceber;
     const formulario = tipo === 'pagar' ? formPagar : formReceber;
     alvo.querySelectorAll('[data-baixar]').forEach((b) => b.addEventListener('click', () => baixar(tipo, b.dataset.baixar)));
+    alvo.querySelectorAll('[data-cobranca]').forEach((b) => b.addEventListener('click', () => imprimirCobranca(b.dataset.cobranca)));
     alvo.querySelectorAll('[data-reabrir]').forEach((b) => b.addEventListener('click', async () => {
       try { await API.post(`${base}/${b.dataset.reabrir}/reabrir`, {}); await recarregar(); carregarAlertas(); } catch (e) { UI.erro(e.message); }
     }));
@@ -530,6 +532,56 @@ window.PaginaFinanceiro = (function () {
       if (!ok) return;
       try { await API.del(`${base}/${b.dataset.excluir}`); await recarregar(); carregarAlertas(); UI.sucesso('Conta excluída.'); } catch (e) { UI.erro(e.message); }
     }));
+  }
+
+  // ------------------------ Cobrança (PIX) ---------------------------
+  async function imprimirCobranca(id) {
+    let dados, cfg;
+    try {
+      [dados, cfg] = await Promise.all([
+        API.get(`/api/financeiro/contas-receber/${id}/cobranca`),
+        API.get('/api/config').catch(() => ({})),
+      ]);
+    } catch (e) { UI.erro(e.message); return; }
+
+    const c = dados.conta;
+    const itensHTML = dados.itens.length ? `
+      <table>
+        <thead><tr><th style="text-align:left">Item</th><th>Qtd</th><th style="text-align:right">Valor</th></tr></thead>
+        <tbody>${dados.itens.map((i) => `<tr>
+          <td>${UI.escapar(i.descricao || '')}</td>
+          <td style="text-align:center">${UI.numero(i.quantidade)}</td>
+          <td style="text-align:right">${UI.moeda(i.valor_total)}</td>
+        </tr>`).join('')}</tbody>
+      </table>` : '';
+
+    const html = `<html><head><meta charset="utf-8"><title>Cobrança #${c.id}</title>
+      <style>
+        * { font-family: Arial, Helvetica, sans-serif; }
+        body { max-width: 480px; margin: 0 auto; padding: 24px; color:#111; }
+        h2 { margin: 4px 0; }
+        table { width:100%; border-collapse:collapse; margin: 12px 0; }
+        td, th { padding:5px 0; border-bottom:1px solid #ddd; font-size:13px; }
+        .center { text-align:center; }
+        .tot { font-size:20px; font-weight:bold; margin-top:8px; }
+        .pix-box { text-align:center; margin-top:24px; padding:16px; border:1px dashed #999; border-radius:8px; }
+        .pix-copia { word-break: break-all; font-size:10px; background:#f4f4f4; padding:8px; border-radius:4px; margin-top:10px; }
+      </style></head><body>
+      ${cfg.loja_logo ? `<div class="center"><img src="${cfg.loja_logo}" style="max-width:120px;max-height:60px;object-fit:contain"></div>` : ''}
+      <h2 class="center">${UI.escapar(cfg.nome_loja || 'Cobrança')}</h2>
+      <p class="center" style="color:#555">Cobrança referente a: ${UI.escapar(c.descricao)}</p>
+      <div class="center">Cliente: <strong>${UI.escapar(c.cliente_nome || '—')}</strong></div>
+      <div class="center">Vencimento: <strong>${c.vencimento || '—'}</strong></div>
+      ${itensHTML}
+      <div class="center tot">Total: ${UI.moeda(c.valor)}</div>
+      <div class="pix-box">
+        <div>Pague com PIX — aponte a câmera do seu banco para o QR Code</div>
+        <img src="${dados.pix.qr_data_url}" style="width:220px;height:220px;margin-top:10px" />
+        <div class="dica" style="margin-top:8px">Ou copie o código:</div>
+        <div class="pix-copia">${UI.escapar(dados.pix.payload)}</div>
+      </div>
+      </body></html>`;
+    UI.imprimir(html);
   }
 
   async function baixar(tipo, id) {

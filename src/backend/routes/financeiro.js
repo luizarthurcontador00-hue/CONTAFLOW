@@ -35,6 +35,7 @@ router.put('/contas-receber/:id', asyncHandler((req, res) => res.json(fin.atuali
 router.post('/contas-receber/:id/baixar', asyncHandler((req, res) => res.json(fin.baixarReceber(req.params.id, req.body || {}))));
 router.post('/contas-receber/:id/reabrir', asyncHandler((req, res) => res.json(fin.reabrirReceber(req.params.id))));
 router.delete('/contas-receber/:id', asyncHandler((req, res) => res.json(fin.excluirReceber(req.params.id))));
+router.get('/contas-receber/:id/cobranca', asyncHandler(async (req, res) => res.json(await fin.gerarCobranca(req.params.id))));
 
 // ------------------- Contas financeiras (saldos) --------------------
 router.get('/contas-financeiras', asyncHandler((req, res) => res.json(fin.listarContasFinanceiras({ incluir_inativas: req.query.incluir_inativas === '1' }))));

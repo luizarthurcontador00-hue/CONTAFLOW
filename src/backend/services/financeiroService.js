@@ -610,6 +610,46 @@ function atualizarReceber(id, dados) {
   return db.prepare('SELECT * FROM contas_receber WHERE id = ?').get(id);
 }
 
+/**
+ * Monta os dados de uma cobrança para enviar ao cliente: a conta, os itens
+ * da venda (se a conta veio de uma venda a prazo) e um QR Code PIX com o
+ * valor ja preenchido, usando a chave PIX cadastrada em Configurações.
+ */
+async function gerarCobranca(id) {
+  const db = getDb();
+  const cr = db.prepare(
+    `SELECT cr.*, c.nome AS cliente_nome, c.telefone AS cliente_telefone
+     FROM contas_receber cr LEFT JOIN clientes c ON c.id = cr.cliente_id
+     WHERE cr.id = ?`
+  ).get(id);
+  if (!cr) throw new AppError('Conta nao encontrada.', 404);
+  if (cr.status !== 'pendente') throw new AppError('Esta conta já foi quitada ou cancelada.');
+
+  const itens = cr.venda_id
+    ? db.prepare('SELECT descricao, quantidade, preco_unitario, valor_total FROM vendas_itens WHERE venda_id = ?').all(cr.venda_id)
+    : [];
+
+  const cfgLinhas = db.prepare(
+    "SELECT chave, valor FROM config WHERE chave IN ('pix_chave','pix_nome_recebedor','pix_cidade','nome_loja')"
+  ).all();
+  const cfg = {};
+  cfgLinhas.forEach((l) => { cfg[l.chave] = l.valor; });
+
+  // eslint-disable-next-line global-require
+  const pix = require('./pixService');
+  const payload = pix.montarPayloadPix({
+    chave: cfg.pix_chave,
+    nome: cfg.pix_nome_recebedor || cfg.nome_loja,
+    cidade: cfg.pix_cidade,
+    valor: cr.valor,
+    descricao: cr.descricao,
+    txid: 'CR' + cr.id,
+  });
+  const qrDataUrl = await pix.gerarQrCodeDataUrl(payload);
+
+  return { conta: cr, itens, pix: { payload, qr_data_url: qrDataUrl } };
+}
+
 function baixarReceber(id, { data_recebimento, forma_recebimento, conta_financeira_id } = {}) {
   const db = getDb();
   const c = db.prepare('SELECT * FROM contas_receber WHERE id = ?').get(id);
@@ -791,7 +831,7 @@ module.exports = {
   listarPagar, criarPagar, atualizarPagar, baixarPagar, reabrirPagar, excluirPagar,
   listarCategoriasDespesa, criarCategoriaDespesa, atualizarCategoriaDespesa, excluirCategoriaDespesa,
   dre,
-  listarReceber, criarReceber, atualizarReceber, baixarReceber, reabrirReceber, excluirReceber,
+  listarReceber, criarReceber, atualizarReceber, baixarReceber, reabrirReceber, excluirReceber, gerarCobranca,
   alertas, fluxoCaixa,
   listarContasFixas, criarContaFixa, atualizarContaFixa, excluirContaFixa, gerarContasFixasPendentes,
   listarAssinaturas, criarAssinatura, atualizarAssinatura, excluirAssinatura, gerarAssinaturasPendentes,
