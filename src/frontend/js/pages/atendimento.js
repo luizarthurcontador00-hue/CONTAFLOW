@@ -576,6 +576,7 @@ window.PaginaAtendimento = (function () {
       // WhatsApp as vezes ainda esta sincronizando a midia no celular).
       corpo = `<div class="dica" style="display:flex;flex-direction:column;gap:6px">
         <span>⚠️ Arquivo não baixado — ${UI.escapar(ROTULO_TIPO[m.tipo] || m.tipo)}</span>
+        ${m.erro_midia ? `<span style="color:var(--perigo)">${UI.escapar(m.erro_midia)}</span>` : ''}
         <button class="btn btn--secundario" type="button" data-baixar-midia="${m.id}">⬇️ Tentar baixar de novo</button>
       </div>`;
     }

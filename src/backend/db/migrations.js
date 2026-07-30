@@ -1125,6 +1125,17 @@ const migrations = [
       db.exec(`ALTER TABLE agendamentos ADD COLUMN google_event_id TEXT;`);
     },
   },
+  {
+    version: 30,
+    name: 'whatsapp-motivo-falha-midia',
+    up(db) {
+      // Guarda o motivo real de a midia nao ter sido baixada (estagio interno
+      // do WhatsApp Web: FETCHING, ERROR..., REUPLOADING, etc). Antes a falha
+      // era silenciosa e a mensagem so aparecia como "[imagem]", sem nenhuma
+      // pista do que aconteceu nem para o usuario nem para o suporte.
+      db.exec(`ALTER TABLE mensagens_whatsapp ADD COLUMN erro_midia TEXT;`);
+    },
+  },
 ];
 
 /**

@@ -212,44 +212,124 @@ function salvarMidia(media) {
 }
 
 /**
- * Baixa a midia com novas tentativas e espera crescente: fotos/videos
- * grandes as vezes ainda estao sincronizando quando o evento chega (audio
- * pequeno quase sempre funciona de primeira).
+ * Baixa a midia falando direto com o WhatsApp Web dentro da pagina, em vez de
+ * usar msg.downloadMedia() da biblioteca.
  *
- * A partir da 2a tentativa, RECARREGA a mensagem pelo id
- * (client.getMessageById) em vez de insistir no mesmo objeto: o
- * whatsapp-web.js so consegue baixar quando o "mediaStage" interno chega em
- * RESOLVED, e esse estado nao se atualiza no objeto antigo que ja estava em
- * maos — sem recarregar, as tentativas seguintes repetiam o mesmo estado
- * (FETCHING/REUPLOADING) e a midia nunca vinha.
+ * MOTIVO: o downloadMedia() do whatsapp-web.js dispara a resolucao da midia
+ * (msg.downloadMedia({downloadEvenIfExpensive, rmrReason})) e checa o
+ * "mediaStage" IMEDIATAMENTE depois — como a resolucao e assincrona, o
+ * estagio quase sempre ainda esta em FETCHING nesse instante, e a biblioteca
+ * desiste devolvendo vazio. Era por isso que nenhuma midia era baixada: nao
+ * era mídia "grande demorando pra sincronizar", era a biblioteca nao
+ * esperando o estagio assentar. Aqui a gente espera de verdade (com limite),
+ * e so entao descriptografa.
+ *
+ * Devolve { media } no sucesso ou { erro, estagio } quando nao deu, pra
+ * mensagem ficar com o motivo salvo em vez de falhar em silencio.
  */
-async function baixarMidiaComRetry(msg, tentativas = 6) {
-  const espera = [1000, 2000, 3500, 5000, 8000];
+async function baixarMidiaDaPagina(wamid, timeoutMs = 45000) {
+  if (!client || !client.pupPage) return { erro: 'WhatsApp não está conectado.' };
+
+  return client.pupPage.evaluate(async (msgId, limite) => {
+    const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
+    const Collections = window.require('WAWebCollections');
+
+    let msg = Collections.Msg.get(msgId);
+    if (!msg) {
+      const r = await Collections.Msg.getMessagesById([msgId]);
+      msg = r && r.messages && r.messages[0];
+    }
+    if (!msg) return { erro: 'Mensagem não encontrada no WhatsApp (pode ter sido apagada).' };
+    if (!msg.mediaData) return { erro: 'Esta mensagem não tem mídia anexada.' };
+
+    const estagio = () => msg.mediaData && msg.mediaData.mediaStage;
+    const inicio = Date.now();
+    let jaPediuReupload = false;
+
+    // Espera o estagio assentar em RESOLVED, pedindo a resolucao quando preciso.
+    while (Date.now() - inicio < limite) {
+      const st = String(estagio() || '');
+      if (st === 'RESOLVED') break;
+
+      // FETCHING/REUPLOADING = ja esta trabalhando nisso, so aguardar.
+      if (st === 'FETCHING' || st === 'REUPLOADING') { await dormir(1000); continue; }
+
+      // ERROR ou qualquer outro estagio: pede a re-subida ao celular (uma vez).
+      if (jaPediuReupload && st.includes('ERROR')) {
+        return { erro: 'O WhatsApp não conseguiu recuperar este arquivo.', estagio: st };
+      }
+      try {
+        jaPediuReupload = true;
+        await msg.downloadMedia({ downloadEvenIfExpensive: true, rmrReason: 1 });
+      } catch (e) {
+        return { erro: String((e && e.message) || e), estagio: st };
+      }
+      await dormir(1000);
+    }
+
+    const stFinal = String(estagio() || '');
+    if (stFinal !== 'RESOLVED') {
+      return { erro: 'Tempo esgotado esperando o WhatsApp liberar o arquivo.', estagio: stFinal };
+    }
+
+    try {
+      const mockQpl = { addAnnotations() { return this; }, addPoint() { return this; } };
+      const bytes = await window.require('WAWebDownloadManager').downloadManager.downloadAndMaybeDecrypt({
+        directPath: msg.directPath,
+        encFilehash: msg.encFilehash,
+        filehash: msg.filehash,
+        mediaKey: msg.mediaKey,
+        mediaKeyTimestamp: msg.mediaKeyTimestamp,
+        type: msg.type,
+        signal: new AbortController().signal,
+        downloadQpl: mockQpl,
+      });
+      const data = await window.WWebJS.arrayBufferToBase64Async(bytes);
+      return { media: { data, mimetype: msg.mimetype, filename: msg.filename, filesize: msg.size } };
+    } catch (e) {
+      return { erro: 'Falha ao baixar/descriptografar: ' + String((e && e.message) || e), estagio: stFinal };
+    }
+  }, wamid, timeoutMs);
+}
+
+/**
+ * Baixa a midia de uma mensagem. Tenta primeiro pelo caminho proprio (que
+ * espera o estagio assentar) e, se falhar, ainda tenta o metodo da
+ * biblioteca — assim, se um dia o WhatsApp Web mudar os modulos internos que
+ * usamos acima, o caminho antigo ainda cobre.
+ *
+ * Retorna { media } ou { erro } (nunca lanca).
+ */
+async function baixarMidiaComRetry(msg, tentativas = 3) {
   const wamid = msg && msg.id && msg.id._serialized;
-  let atual = msg;
+  let ultimoErro = 'Não foi possível baixar o arquivo.';
 
   for (let i = 1; i <= tentativas; i++) {
-    try {
-      const media = await atual.downloadMedia();
-      if (media && media.data) return media;
-      console.error(`[whatsapp] tentativa ${i}/${tentativas}: midia ainda nao disponivel (o WhatsApp ainda esta sincronizando ou expirou no celular).`);
-    } catch (e) {
-      console.error(`[whatsapp] tentativa ${i}/${tentativas} de baixar midia falhou:`, descreverErro(e));
-    }
-
-    if (i >= tentativas) break;
-    await new Promise((r) => setTimeout(r, espera[i - 1] || 8000));
-
-    if (wamid && client) {
+    if (wamid) {
       try {
-        const recarregada = await client.getMessageById(wamid);
-        if (recarregada) atual = recarregada;
+        const r = await baixarMidiaDaPagina(wamid);
+        if (r && r.media && r.media.data) return { media: r.media };
+        if (r && r.erro) {
+          ultimoErro = r.estagio ? `${r.erro} (estágio: ${r.estagio})` : r.erro;
+          console.error(`[whatsapp] tentativa ${i}/${tentativas} de baixar midia:`, ultimoErro);
+        }
       } catch (e) {
-        console.error('[whatsapp] nao foi possivel recarregar a mensagem para baixar a midia:', descreverErro(e));
+        ultimoErro = descreverErro(e);
+        console.error(`[whatsapp] tentativa ${i}/${tentativas} (caminho proprio) falhou:`, ultimoErro);
       }
     }
+
+    // Reserva: metodo da propria biblioteca.
+    try {
+      const media = await msg.downloadMedia();
+      if (media && media.data) return { media };
+    } catch (e) {
+      console.error(`[whatsapp] tentativa ${i}/${tentativas} (metodo da biblioteca) falhou:`, descreverErro(e));
+    }
+
+    if (i < tentativas) await new Promise((r) => setTimeout(r, 3000));
   }
-  return null;
+  return { erro: ultimoErro };
 }
 
 /**
@@ -273,13 +353,17 @@ async function rebaixarMidia(mensagemId) {
   }
   if (!original) throw new AppError('Essa mensagem não está mais disponível no WhatsApp (pode ter sido apagada ou expirado no celular).');
 
-  const media = await baixarMidiaComRetry(original);
+  const { media, erro } = await baixarMidiaComRetry(original);
   if (!media) {
-    throw new AppError('A mídia ainda não pôde ser baixada. Abra a conversa no celular para o WhatsApp sincronizar o arquivo e tente de novo.');
+    db.prepare('UPDATE mensagens_whatsapp SET erro_midia = ? WHERE id = ?').run(erro || null, mensagemId);
+    throw new AppError(
+      (erro ? erro + ' ' : '')
+      + 'Abra a conversa no celular para o WhatsApp sincronizar o arquivo e tente de novo.'
+    );
   }
 
   const arquivo = salvarMidia(media);
-  db.prepare('UPDATE mensagens_whatsapp SET arquivo = ?, arquivo_nome_original = COALESCE(?, arquivo_nome_original) WHERE id = ?')
+  db.prepare('UPDATE mensagens_whatsapp SET arquivo = ?, arquivo_nome_original = COALESCE(?, arquivo_nome_original), erro_midia = NULL WHERE id = ?')
     .run(arquivo, media.filename || null, mensagemId);
   return obterConversa(msgRow.conversa_id);
 }
@@ -517,13 +601,15 @@ async function tratarMensagemRecebida(msg) {
   let arquivoOriginal = null;
   let texto = msg.body || null;
 
+  let erroMidia = null;
   if (msg.hasMedia) {
-    const media = await baixarMidiaComRetry(msg);
-    if (media) {
-      arquivo = salvarMidia(media);
-      arquivoOriginal = media.filename || null;
+    const r = await baixarMidiaComRetry(msg);
+    if (r.media) {
+      arquivo = salvarMidia(r.media);
+      arquivoOriginal = r.media.filename || null;
     } else {
-      console.error(`[whatsapp] midia do tipo "${msg.type}" nao pode ser baixada apos varias tentativas (conversa ${conversa.id})`);
+      erroMidia = r.erro || 'Não foi possível baixar o arquivo.';
+      console.error(`[whatsapp] midia do tipo "${msg.type}" nao pode ser baixada (conversa ${conversa.id}): ${erroMidia}`);
     }
   }
   if (!MAPA_TIPOS[msg.type] && !texto) {
@@ -531,9 +617,9 @@ async function tratarMensagemRecebida(msg) {
   }
 
   db.prepare(`
-    INSERT OR IGNORE INTO mensagens_whatsapp (conversa_id, wa_message_id, direcao, tipo, texto, arquivo, arquivo_nome_original, status)
-    VALUES (?, ?, 'recebida', ?, ?, ?, ?, 'recebida')
-  `).run(conversa.id, wamid, tipo, texto, arquivo, arquivoOriginal);
+    INSERT OR IGNORE INTO mensagens_whatsapp (conversa_id, wa_message_id, direcao, tipo, texto, arquivo, arquivo_nome_original, status, erro_midia)
+    VALUES (?, ?, 'recebida', ?, ?, ?, ?, 'recebida', ?)
+  `).run(conversa.id, wamid, tipo, texto, arquivo, arquivoOriginal, erroMidia);
 
   // Decide o bot ANTES de calcular o status final (pode transferir para humano).
   let resultadoBot = null;
