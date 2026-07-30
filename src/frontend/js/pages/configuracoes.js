@@ -1,15 +1,51 @@
 'use strict';
 
 /**
- * Configuracoes da loja: dados que aparecem no cupom e nos relatorios, e o
- * markup padrao usado na precificacao.
+ * Configuracoes da loja: dados que aparecem no cupom e nos relatorios, o
+ * markup padrao usado na precificacao, modulo fiscal, aparencia e
+ * integracoes. Organizado em abas (a tela crescia demais numa rolagem so).
  */
 window.PaginaConfiguracoes = (function () {
+  let abaAtual = 'loja';
+  const ABAS = [
+    ['loja', 'Loja'],
+    ['pix', '💠 PIX'],
+    ['fiscal', '🧾 Fiscal'],
+    ['aparencia', '🎨 Aparência'],
+    ['google', '📅 Google Agenda'],
+  ];
+
   async function render(container) {
     let cfg = {};
     try { cfg = await API.get('/api/config'); } catch (e) { /* usa vazio */ }
 
     container.innerHTML = `
+      <div class="tabs">
+        ${ABAS.map(([id, rotulo]) => `<div class="tab ${abaAtual === id ? 'ativo' : ''}" data-aba="${id}">${rotulo}</div>`).join('')}
+      </div>
+      <div id="cfg-conteudo"></div>`;
+
+    container.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
+      abaAtual = t.dataset.aba;
+      container.querySelectorAll('.tab').forEach((x) => x.classList.toggle('ativo', x === t));
+      trocarAba(container, cfg);
+    }));
+
+    trocarAba(container, cfg);
+  }
+
+  function trocarAba(container, cfg) {
+    const alvo = container.querySelector('#cfg-conteudo');
+    if (abaAtual === 'pix') renderPix(alvo, cfg);
+    else if (abaAtual === 'fiscal') renderFiscal(alvo, cfg);
+    else if (abaAtual === 'aparencia') renderAparencia(alvo, cfg, container);
+    else if (abaAtual === 'google') renderGoogleAgenda(alvo);
+    else renderLoja(alvo, cfg, container);
+  }
+
+  // ------------------------------ Loja ------------------------------
+  function renderLoja(alvo, cfg, container) {
+    alvo.innerHTML = `
       <div class="card" style="max-width:640px">
         <h3 style="margin-top:0">Dados da loja</h3>
         <p class="dica">Aparecem no cupom de venda e nos relatórios impressos.</p>
@@ -53,9 +89,31 @@ window.PaginaConfiguracoes = (function () {
           </div>
           <div class="campo col-2"><button class="btn" type="submit">Salvar configurações</button></div>
         </form>
-      </div>
+      </div>`;
 
-      <div class="card mt-16" style="max-width:640px">
+    alvo.querySelector('select[name="perfil_negocio"]').addEventListener('change', (e) => {
+      const wrap = alvo.querySelector('#cfg-ramo-wrap');
+      wrap.style.display = (e.target.value === 'servico' || e.target.value === 'ambos') ? '' : 'none';
+    });
+
+    alvo.querySelector('#form-cfg').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const body = Object.fromEntries(new FormData(ev.target).entries());
+      // Checkbox nao marcado nao entra no FormData: normaliza para '0'/'1'.
+      body.gerar_codigo_auto = ev.target.querySelector('#cfg-cod-auto').checked ? '1' : '0';
+      try {
+        await API.put('/api/config', body);
+        Object.assign(cfg, body);
+        UI.sucesso('Configurações salvas.');
+        if (window.__recarregarPerfil) await window.__recarregarPerfil();
+      } catch (e) { UI.erro(e.message); }
+    });
+  }
+
+  // ------------------------------ PIX ------------------------------
+  function renderPix(alvo, cfg) {
+    alvo.innerHTML = `
+      <div class="card" style="max-width:640px">
         <h3 style="margin-top:0">💠 Recebimento via PIX</h3>
         <p class="dica">Usado para gerar a cobrança com QR Code PIX em Financeiro → A Receber. O sistema não guarda dinheiro nem se conecta a banco nenhum — ele só monta o QR a partir da sua chave.</p>
         <form id="form-pix" class="form-grid">
@@ -67,9 +125,23 @@ window.PaginaConfiguracoes = (function () {
             <input name="pix_cidade" maxlength="15" value="${UI.escapar(cfg.pix_cidade || '')}" placeholder="Máx. 15 caracteres" /></div>
           <div class="campo col-2"><button class="btn" type="submit">Salvar chave PIX</button></div>
         </form>
-      </div>
+      </div>`;
 
-      <div class="card mt-16" style="max-width:640px">
+    alvo.querySelector('#form-pix').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const body = Object.fromEntries(new FormData(ev.target).entries());
+      try {
+        await API.put('/api/config', body);
+        Object.assign(cfg, body);
+        UI.sucesso('Chave PIX salva.');
+      } catch (e) { UI.erro(e.message); }
+    });
+  }
+
+  // --------------------------- Módulo Fiscal ---------------------------
+  function renderFiscal(alvo, cfg) {
+    alvo.innerHTML = `
+      <div class="card" style="max-width:640px">
         <div class="flex flex--between" style="align-items:center">
           <h3 style="margin:0">🧾 Módulo Fiscal</h3>
           <span id="fis-status" class="badge badge--muted">verificando…</span>
@@ -99,9 +171,34 @@ window.PaginaConfiguracoes = (function () {
           <div class="campo col-2"><label>Token de acesso (Focus NFe)</label><input name="fiscal_token" type="password" value="${UI.escapar(cfg.fiscal_token || '')}" placeholder="Copie do painel do Focus NFe" /></div>
           <div class="campo col-2"><button class="btn" type="submit">Salvar módulo fiscal</button></div>
         </form>
-      </div>
+      </div>`;
 
-      <div class="card mt-16" style="max-width:640px">
+    alvo.querySelector('#form-fiscal').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const body = Object.fromEntries(new FormData(ev.target).entries());
+      try {
+        await API.put('/api/config', body);
+        Object.assign(cfg, body);
+        UI.sucesso('Módulo fiscal salvo.');
+        atualizarStatusFiscal();
+      } catch (e) { UI.erro(e.message); }
+    });
+    async function atualizarStatusFiscal() {
+      const badge = alvo.querySelector('#fis-status');
+      if (!badge) return;
+      try {
+        const r = await API.get('/api/fiscal/status');
+        badge.textContent = r.configurado ? '✅ Configurado' : '⚠️ Não configurado';
+        badge.className = 'badge ' + (r.configurado ? 'badge--ok' : 'badge--muted');
+      } catch (e) { badge.textContent = '—'; }
+    }
+    atualizarStatusFiscal();
+  }
+
+  // ------------------------------ Aparência ------------------------------
+  function renderAparencia(alvo, cfg, container) {
+    alvo.innerHTML = `
+      <div class="card" style="max-width:640px">
         <h3 style="margin-top:0">🎨 Aparência</h3>
         <p class="dica">Deixe o sistema com a cara da sua loja: logo, cor e tamanho da fonte.</p>
         <form id="form-aparencia" class="form-grid">
@@ -132,9 +229,54 @@ window.PaginaConfiguracoes = (function () {
             <button class="btn btn--secundario" type="button" id="ap-restaurar">Restaurar padrão</button>
           </div>
         </form>
-      </div>
+      </div>`;
 
-      <div class="card mt-16" style="max-width:640px">
+    let logoNovo = null; // dataURL do logo escolhido nesta sessão
+    const fileInput = alvo.querySelector('#ap-logo-file');
+    fileInput.addEventListener('change', () => {
+      const arq = fileInput.files[0];
+      if (!arq) return;
+      if (arq.size > 2 * 1024 * 1024) { UI.erro('Imagem muito grande (máx. 2 MB).'); fileInput.value = ''; return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        logoNovo = reader.result;
+        alvo.querySelector('#ap-logo-prev').innerHTML = `<img src="${logoNovo}">`;
+        alvo.querySelector('#ap-logo-remover').checked = false;
+      };
+      reader.readAsDataURL(arq);
+    });
+
+    alvo.querySelector('#form-aparencia').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const remover = alvo.querySelector('#ap-logo-remover').checked;
+      const body = {
+        cor_primaria: alvo.querySelector('#ap-cor').value,
+        fonte_escala: alvo.querySelector('#ap-fonte').value,
+        tema: alvo.querySelector('#ap-tema').value,
+      };
+      if (remover) body.loja_logo = '';
+      else if (logoNovo) body.loja_logo = logoNovo;
+      try {
+        await API.put('/api/config', body);
+        UI.sucesso('Aparência salva.');
+        if (window.__recarregarPerfil) await window.__recarregarPerfil();
+      } catch (e) { UI.erro(e.message); }
+    });
+
+    alvo.querySelector('#ap-restaurar').addEventListener('click', async () => {
+      try {
+        await API.put('/api/config', { cor_primaria: '#2563eb', fonte_escala: 'normal', tema: 'claro', loja_logo: '' });
+        UI.sucesso('Aparência restaurada.');
+        if (window.__recarregarPerfil) await window.__recarregarPerfil();
+        render(container);
+      } catch (e) { UI.erro(e.message); }
+    });
+  }
+
+  // ------------------------ Google Agenda ------------------------
+  function renderGoogleAgenda(alvo) {
+    alvo.innerHTML = `
+      <div class="card" style="max-width:640px">
         <div class="flex flex--between" style="align-items:center">
           <h3 style="margin:0">📅 Google Agenda</h3>
           <span id="ga-status" class="badge badge--muted">verificando…</span>
@@ -162,100 +304,9 @@ window.PaginaConfiguracoes = (function () {
         <p class="dica" id="ga-erro" style="display:none;color:#dc2626"></p>
       </div>`;
 
-    container.querySelector('select[name="perfil_negocio"]').addEventListener('change', (e) => {
-      const wrap = container.querySelector('#cfg-ramo-wrap');
-      wrap.style.display = (e.target.value === 'servico' || e.target.value === 'ambos') ? '' : 'none';
-    });
-
-    container.querySelector('#form-cfg').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const body = Object.fromEntries(new FormData(ev.target).entries());
-      // Checkbox nao marcado nao entra no FormData: normaliza para '0'/'1'.
-      body.gerar_codigo_auto = ev.target.querySelector('#cfg-cod-auto').checked ? '1' : '0';
-      try {
-        await API.put('/api/config', body);
-        UI.sucesso('Configurações salvas.');
-        if (window.__recarregarPerfil) await window.__recarregarPerfil();
-      } catch (e) { UI.erro(e.message); }
-    });
-
-    // ------------------------------ PIX ------------------------------
-    container.querySelector('#form-pix').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const body = Object.fromEntries(new FormData(ev.target).entries());
-      try {
-        await API.put('/api/config', body);
-        UI.sucesso('Chave PIX salva.');
-      } catch (e) { UI.erro(e.message); }
-    });
-
-    // --------------------------- Módulo Fiscal ---------------------------
-    container.querySelector('#form-fiscal').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const body = Object.fromEntries(new FormData(ev.target).entries());
-      try {
-        await API.put('/api/config', body);
-        UI.sucesso('Módulo fiscal salvo.');
-        atualizarStatusFiscal();
-      } catch (e) { UI.erro(e.message); }
-    });
-    async function atualizarStatusFiscal() {
-      const badge = container.querySelector('#fis-status');
-      if (!badge) return;
-      try {
-        const r = await API.get('/api/fiscal/status');
-        badge.textContent = r.configurado ? '✅ Configurado' : '⚠️ Não configurado';
-        badge.className = 'badge ' + (r.configurado ? 'badge--ok' : 'badge--muted');
-      } catch (e) { badge.textContent = '—'; }
-    }
-    atualizarStatusFiscal();
-
-    // ------------------------------ Aparência ------------------------------
-    let logoNovo = null; // dataURL do logo escolhido nesta sessão
-    const fileInput = container.querySelector('#ap-logo-file');
-    fileInput.addEventListener('change', () => {
-      const arq = fileInput.files[0];
-      if (!arq) return;
-      if (arq.size > 2 * 1024 * 1024) { UI.erro('Imagem muito grande (máx. 2 MB).'); fileInput.value = ''; return; }
-      const reader = new FileReader();
-      reader.onload = () => {
-        logoNovo = reader.result;
-        container.querySelector('#ap-logo-prev').innerHTML = `<img src="${logoNovo}">`;
-        container.querySelector('#ap-logo-remover').checked = false;
-      };
-      reader.readAsDataURL(arq);
-    });
-
-    container.querySelector('#form-aparencia').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const remover = container.querySelector('#ap-logo-remover').checked;
-      const body = {
-        cor_primaria: container.querySelector('#ap-cor').value,
-        fonte_escala: container.querySelector('#ap-fonte').value,
-        tema: container.querySelector('#ap-tema').value,
-      };
-      if (remover) body.loja_logo = '';
-      else if (logoNovo) body.loja_logo = logoNovo;
-      try {
-        await API.put('/api/config', body);
-        UI.sucesso('Aparência salva.');
-        if (window.__recarregarPerfil) await window.__recarregarPerfil();
-      } catch (e) { UI.erro(e.message); }
-    });
-
-    container.querySelector('#ap-restaurar').addEventListener('click', async () => {
-      try {
-        await API.put('/api/config', { cor_primaria: '#2563eb', fonte_escala: 'normal', tema: 'claro', loja_logo: '' });
-        UI.sucesso('Aparência restaurada.');
-        if (window.__recarregarPerfil) await window.__recarregarPerfil();
-        render(container);
-      } catch (e) { UI.erro(e.message); }
-    });
-
-    // ------------------------ Google Agenda ------------------------
     async function atualizarStatusGoogle() {
-      const badge = container.querySelector('#ga-status');
-      const erroEl = container.querySelector('#ga-erro');
+      const badge = alvo.querySelector('#ga-status');
+      const erroEl = alvo.querySelector('#ga-erro');
       if (!badge) return;
       let st;
       try { st = await API.get('/api/google-agenda/status'); } catch (e) { badge.textContent = '—'; return; }
@@ -263,10 +314,10 @@ window.PaginaConfiguracoes = (function () {
       badge.textContent = st.conectado ? `✅ ${st.email || 'Conectado'}` : (st.configurado ? '⚠️ Não conectado' : '⚪ Não configurado');
       badge.className = 'badge ' + (st.conectado ? 'badge--ok' : 'badge--muted');
 
-      container.querySelector('#ga-desconectar').style.display = st.conectado ? '' : 'none';
-      container.querySelector('#ga-ativo-wrap').style.display = st.conectado ? '' : 'none';
-      container.querySelector('#ga-ativo').checked = !!st.ativo;
-      container.querySelector('#ga-conectar').textContent = st.conectado ? 'Reconectar conta Google' : 'Conectar conta Google';
+      alvo.querySelector('#ga-desconectar').style.display = st.conectado ? '' : 'none';
+      alvo.querySelector('#ga-ativo-wrap').style.display = st.conectado ? '' : 'none';
+      alvo.querySelector('#ga-ativo').checked = !!st.ativo;
+      alvo.querySelector('#ga-conectar').textContent = st.conectado ? 'Reconectar conta Google' : 'Conectar conta Google';
 
       if (st.ultimoErro) {
         erroEl.style.display = '';
@@ -276,7 +327,7 @@ window.PaginaConfiguracoes = (function () {
       }
     }
 
-    container.querySelector('#form-ga-cred').addEventListener('submit', async (ev) => {
+    alvo.querySelector('#form-ga-cred').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const body = Object.fromEntries(new FormData(ev.target).entries());
       try {
@@ -286,8 +337,8 @@ window.PaginaConfiguracoes = (function () {
       } catch (e) { UI.erro(e.message); }
     });
 
-    container.querySelector('#ga-conectar').addEventListener('click', async () => {
-      const btn = container.querySelector('#ga-conectar');
+    alvo.querySelector('#ga-conectar').addEventListener('click', async () => {
+      const btn = alvo.querySelector('#ga-conectar');
       btn.disabled = true;
       const textoOriginal = btn.textContent;
       btn.textContent = 'Aguardando login no navegador…';
@@ -303,7 +354,7 @@ window.PaginaConfiguracoes = (function () {
       }
     });
 
-    container.querySelector('#ga-desconectar').addEventListener('click', async () => {
+    alvo.querySelector('#ga-desconectar').addEventListener('click', async () => {
       const ok = await UI.confirmar('Desconectar a conta Google? A sincronização será desligada.');
       if (!ok) return;
       try {
@@ -313,7 +364,7 @@ window.PaginaConfiguracoes = (function () {
       } catch (e) { UI.erro(e.message); }
     });
 
-    container.querySelector('#ga-ativo').addEventListener('change', async (ev) => {
+    alvo.querySelector('#ga-ativo').addEventListener('change', async (ev) => {
       try {
         await API.post('/api/google-agenda/ativo', { ativo: ev.target.checked });
         UI.sucesso(ev.target.checked ? 'Sincronização automática ativada.' : 'Sincronização automática desativada.');
