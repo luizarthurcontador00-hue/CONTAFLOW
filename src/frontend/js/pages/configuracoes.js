@@ -132,6 +132,34 @@ window.PaginaConfiguracoes = (function () {
             <button class="btn btn--secundario" type="button" id="ap-restaurar">Restaurar padrão</button>
           </div>
         </form>
+      </div>
+
+      <div class="card mt-16" style="max-width:640px">
+        <div class="flex flex--between" style="align-items:center">
+          <h3 style="margin:0">📅 Google Agenda</h3>
+          <span id="ga-status" class="badge badge--muted">verificando…</span>
+        </div>
+        <p class="dica">Envia automaticamente para o Google Agenda tudo que for criado, editado ou cancelado na Agenda do sistema — assim os compromissos também aparecem no celular, com o lembrete do próprio Google. É uma via só: o que for criado direto no Google não volta para o sistema.</p>
+
+        <div id="ga-cred-wrap">
+          <form id="form-ga-cred" class="form-grid">
+            <div class="campo col-2"><label>Client ID (Google Cloud Console)</label>
+              <input name="client_id" placeholder="xxxxxxxxxxxx.apps.googleusercontent.com" /></div>
+            <div class="campo col-2"><label>Client Secret</label>
+              <input name="client_secret" type="password" placeholder="Gerado junto com o Client ID" /></div>
+            <div class="campo col-2"><button class="btn btn--secundario" type="submit">Salvar credenciais</button></div>
+          </form>
+          <p class="dica">Credenciais criadas uma única vez, gratuitamente, no Google Cloud Console (console.cloud.google.com): habilite a "Google Calendar API" e crie um "ID do cliente OAuth" do tipo "App para computador". Fale com seu contador ou suporte técnico se tiver dúvida nesse passo.</p>
+        </div>
+
+        <div class="flex gap-12 mt-16" style="align-items:center;flex-wrap:wrap">
+          <button class="btn" id="ga-conectar" type="button">Conectar conta Google</button>
+          <button class="btn btn--secundario" id="ga-desconectar" type="button" style="display:none">Desconectar</button>
+          <label class="flex gap-12" id="ga-ativo-wrap" style="align-items:center;display:none">
+            <input type="checkbox" id="ga-ativo" /> Sincronizar automaticamente
+          </label>
+        </div>
+        <p class="dica" id="ga-erro" style="display:none;color:#dc2626"></p>
       </div>`;
 
     container.querySelector('select[name="perfil_negocio"]').addEventListener('change', (e) => {
@@ -223,6 +251,79 @@ window.PaginaConfiguracoes = (function () {
         render(container);
       } catch (e) { UI.erro(e.message); }
     });
+
+    // ------------------------ Google Agenda ------------------------
+    async function atualizarStatusGoogle() {
+      const badge = container.querySelector('#ga-status');
+      const erroEl = container.querySelector('#ga-erro');
+      if (!badge) return;
+      let st;
+      try { st = await API.get('/api/google-agenda/status'); } catch (e) { badge.textContent = '—'; return; }
+
+      badge.textContent = st.conectado ? `✅ ${st.email || 'Conectado'}` : (st.configurado ? '⚠️ Não conectado' : '⚪ Não configurado');
+      badge.className = 'badge ' + (st.conectado ? 'badge--ok' : 'badge--muted');
+
+      container.querySelector('#ga-desconectar').style.display = st.conectado ? '' : 'none';
+      container.querySelector('#ga-ativo-wrap').style.display = st.conectado ? '' : 'none';
+      container.querySelector('#ga-ativo').checked = !!st.ativo;
+      container.querySelector('#ga-conectar').textContent = st.conectado ? 'Reconectar conta Google' : 'Conectar conta Google';
+
+      if (st.ultimoErro) {
+        erroEl.style.display = '';
+        erroEl.textContent = st.ultimoErro;
+      } else {
+        erroEl.style.display = 'none';
+      }
+    }
+
+    container.querySelector('#form-ga-cred').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const body = Object.fromEntries(new FormData(ev.target).entries());
+      try {
+        await API.post('/api/google-agenda/credenciais', body);
+        UI.sucesso('Credenciais salvas.');
+        await atualizarStatusGoogle();
+      } catch (e) { UI.erro(e.message); }
+    });
+
+    container.querySelector('#ga-conectar').addEventListener('click', async () => {
+      const btn = container.querySelector('#ga-conectar');
+      btn.disabled = true;
+      const textoOriginal = btn.textContent;
+      btn.textContent = 'Aguardando login no navegador…';
+      try {
+        await API.post('/api/google-agenda/conectar');
+        UI.sucesso('Conta Google conectada!');
+      } catch (e) {
+        UI.erro(e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = textoOriginal;
+        await atualizarStatusGoogle();
+      }
+    });
+
+    container.querySelector('#ga-desconectar').addEventListener('click', async () => {
+      const ok = await UI.confirmar('Desconectar a conta Google? A sincronização será desligada.');
+      if (!ok) return;
+      try {
+        await API.post('/api/google-agenda/desconectar');
+        UI.sucesso('Conta Google desconectada.');
+        await atualizarStatusGoogle();
+      } catch (e) { UI.erro(e.message); }
+    });
+
+    container.querySelector('#ga-ativo').addEventListener('change', async (ev) => {
+      try {
+        await API.post('/api/google-agenda/ativo', { ativo: ev.target.checked });
+        UI.sucesso(ev.target.checked ? 'Sincronização automática ativada.' : 'Sincronização automática desativada.');
+      } catch (e) {
+        UI.erro(e.message);
+        ev.target.checked = !ev.target.checked;
+      }
+    });
+
+    atualizarStatusGoogle();
   }
 
   return { titulo: 'Configurações', render };

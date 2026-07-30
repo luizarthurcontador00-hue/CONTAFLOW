@@ -147,6 +147,8 @@ function criar(dados) {
     VALUES (@data, @hora_inicio, @hora_fim, @cliente_id, @cliente_nome, @telefone, @profissional_id,
        @produto_id, @servico_nome, @valor, 'agendado', @observacao)
   `).run(d);
+  // eslint-disable-next-line global-require
+  require('./googleAgendaService').sincronizarAsync(info.lastInsertRowid);
   return obter(info.lastInsertRowid);
 }
 
@@ -162,6 +164,8 @@ function atualizar(id, dados) {
       valor=@valor, observacao=@observacao
     WHERE id=@id
   `).run({ ...d, id });
+  // eslint-disable-next-line global-require
+  require('./googleAgendaService').sincronizarAsync(id);
   return obter(id);
 }
 
@@ -170,6 +174,8 @@ function mudarStatus(id, status) {
   obter(id);
   if (!STATUS.includes(status)) throw new AppError('Status invalido.');
   db.prepare('UPDATE agendamentos SET status=? WHERE id=?').run(status, id);
+  // eslint-disable-next-line global-require
+  require('./googleAgendaService').sincronizarAsync(id);
   return obter(id);
 }
 
@@ -178,6 +184,8 @@ function excluir(id) {
   const a = obter(id);
   if (a.venda_id) throw new AppError('Este agendamento ja foi faturado; cancele a venda no modulo de Vendas.');
   db.prepare('DELETE FROM agendamentos WHERE id = ?').run(id);
+  // eslint-disable-next-line global-require
+  require('./googleAgendaService').excluirEventoAsync(id, a.google_event_id);
   return { ok: true };
 }
 
@@ -204,6 +212,8 @@ function faturar(id, { forma_pagamento = 'dinheiro', vencimento_prazo } = {}) {
   });
 
   db.prepare("UPDATE agendamentos SET venda_id=?, status='atendido' WHERE id=?").run(venda.id, id);
+  // eslint-disable-next-line global-require
+  require('./googleAgendaService').sincronizarAsync(id);
   return { agendamento: obter(id), venda };
 }
 

@@ -1114,6 +1114,17 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 29,
+    name: 'integracao-google-agenda',
+    up(db) {
+      // Guarda o id do evento espelhado no Google Agenda do usuario, para
+      // saber se deve criar (INSERT) ou atualizar/excluir (PATCH/DELETE) na
+      // API do Google quando o agendamento mudar. NULL = ainda nao
+      // sincronizado (ou integracao desligada).
+      db.exec(`ALTER TABLE agendamentos ADD COLUMN google_event_id TEXT;`);
+    },
+  },
 ];
 
 /**
