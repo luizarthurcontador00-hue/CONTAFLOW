@@ -50,6 +50,22 @@ window.PaginaClientes = (function () {
         <div class="campo"><label>CPF</label><input name="cpf" value="${UI.escapar(c.cpf || '')}" /></div>
         <div class="campo"><label>E-mail</label><input name="email" type="email" value="${UI.escapar(c.email || '')}" /></div>
         <div class="campo"><label>Limite de crédito (fiado) R$</label><input name="limite_credito" type="number" step="0.01" min="0" value="${c.limite_credito != null ? c.limite_credito : 0}" /></div>
+        ${window.__ramoServico === 'instituto' ? `
+        <div class="campo"><label>Natureza do cadastro</label>
+          <select name="natureza">
+            <option value="aluno" ${(c.natureza || 'aluno') === 'aluno' ? 'selected' : ''}>Aluno</option>
+            <option value="mantenedor" ${c.natureza === 'mantenedor' ? 'selected' : ''}>Mantenedor</option>
+            <option value="ambos" ${c.natureza === 'ambos' ? 'selected' : ''}>Aluno e mantenedor</option>
+          </select>
+          <span class="dica">Mantenedores aparecem em Arrecadação.</span></div>
+        <div class="campo"><label>Data de nascimento</label>
+          <input name="data_nascimento" type="date" value="${UI.escapar(c.data_nascimento || '')}" /></div>
+        <div class="campo"><label>Nome do responsável</label>
+          <input name="responsavel_nome" value="${UI.escapar(c.responsavel_nome || '')}" />
+          <span class="dica">Obrigatório na prática para alunos menores de idade.</span></div>
+        <div class="campo"><label>Telefone do responsável</label>
+          <input name="responsavel_telefone" value="${UI.escapar(c.responsavel_telefone || '')}" /></div>
+        ` : ''}
         <div class="campo col-2"><label>Endereço</label><input name="endereco" value="${UI.escapar(c.endereco || '')}" /></div>
         <div class="campo col-2"><label>Observação</label><textarea name="observacao">${UI.escapar(c.observacao || '')}</textarea></div>
       </form>`,

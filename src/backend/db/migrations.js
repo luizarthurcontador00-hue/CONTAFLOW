@@ -1136,6 +1136,186 @@ const migrations = [
       db.exec(`ALTER TABLE mensagens_whatsapp ADD COLUMN erro_midia TEXT;`);
     },
   },
+  {
+    version: 31,
+    name: 'instituto-educacao-e-musica',
+    up(db) {
+      db.exec(`
+        -- ============================ ENSINO ============================
+
+        -- Curso / modalidade oferecida (Violão, Teclado, Informática básica,
+        -- Reforço de matemática...). E o "molde"; quem tem dia, hora e alunos
+        -- e a turma.
+        CREATE TABLE IF NOT EXISTS cursos (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          nome          TEXT NOT NULL,
+          categoria     TEXT NOT NULL DEFAULT 'musica', -- musica | informatica | reforco | outro
+          descricao     TEXT,
+          carga_horaria REAL,
+          ativo         INTEGER NOT NULL DEFAULT 1,
+          criado_em     TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_cursos_ativo ON cursos(ativo);
+
+        -- Instrumentos disponiveis no instituto. A quantidade limita quantos
+        -- alunos cabem numa turma que dependa daquele instrumento (nao adianta
+        -- abrir turma de violao com 12 vagas se so existem 8 violoes).
+        CREATE TABLE IF NOT EXISTS instrumentos (
+          id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          nome              TEXT NOT NULL,
+          quantidade_total  INTEGER NOT NULL DEFAULT 0,
+          observacao        TEXT,
+          ativo             INTEGER NOT NULL DEFAULT 1,
+          criado_em         TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+
+        -- Turma: uma oferta concreta do curso, com periodo, sala e vagas.
+        -- instrumento_id (opcional) amarra a turma ao instrumento que ela
+        -- consome — informatica e reforco normalmente ficam sem.
+        CREATE TABLE IF NOT EXISTS turmas (
+          id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+          curso_id               INTEGER NOT NULL REFERENCES cursos(id) ON DELETE RESTRICT,
+          nome                   TEXT NOT NULL,
+          instrumento_id         INTEGER REFERENCES instrumentos(id) ON DELETE SET NULL,
+          instrumentos_por_aluno INTEGER NOT NULL DEFAULT 1,
+          vagas                  INTEGER NOT NULL DEFAULT 0,
+          sala                   TEXT,
+          periodo_inicio         TEXT NOT NULL,
+          periodo_fim            TEXT,
+          status                 TEXT NOT NULL DEFAULT 'aberta', -- planejada | aberta | encerrada | cancelada
+          observacao             TEXT,
+          criado_em              TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_turmas_curso ON turmas(curso_id);
+        CREATE INDEX IF NOT EXISTS idx_turmas_status ON turmas(status);
+
+        -- Uma turma pode ter mais de um encontro por semana (ex.: ter e qui).
+        CREATE TABLE IF NOT EXISTS turmas_horarios (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          turma_id    INTEGER NOT NULL REFERENCES turmas(id) ON DELETE CASCADE,
+          dia_semana  INTEGER NOT NULL,       -- 0=domingo .. 6=sabado
+          hora_inicio TEXT NOT NULL,          -- HH:MM
+          hora_fim    TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_turmas_horarios_turma ON turmas_horarios(turma_id);
+
+        -- Quem conduz a turma (titular e auxiliares).
+        CREATE TABLE IF NOT EXISTS turmas_instrutores (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          turma_id        INTEGER NOT NULL REFERENCES turmas(id) ON DELETE CASCADE,
+          profissional_id INTEGER NOT NULL REFERENCES profissionais(id) ON DELETE CASCADE,
+          papel           TEXT NOT NULL DEFAULT 'titular' -- titular | auxiliar | suplente
+        );
+        CREATE INDEX IF NOT EXISTS idx_turmas_instrutores_turma ON turmas_instrutores(turma_id);
+
+        -- Aluno dentro da turma. "espera" = fila quando a turma lotou.
+        CREATE TABLE IF NOT EXISTS matriculas (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          turma_id       INTEGER NOT NULL REFERENCES turmas(id) ON DELETE CASCADE,
+          aluno_id       INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+          data_matricula TEXT NOT NULL DEFAULT (date('now','localtime')),
+          data_saida     TEXT,
+          status         TEXT NOT NULL DEFAULT 'ativa', -- ativa | espera | trancada | concluida | desistente
+          observacao     TEXT,
+          criado_em      TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_matriculas_turma ON matriculas(turma_id);
+        CREATE INDEX IF NOT EXISTS idx_matriculas_aluno ON matriculas(aluno_id);
+
+        -- Chamada: um registro por aluno em cada encontro (o encontro e um
+        -- agendamento com turma_id preenchido).
+        CREATE TABLE IF NOT EXISTS presencas (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          agendamento_id INTEGER NOT NULL REFERENCES agendamentos(id) ON DELETE CASCADE,
+          aluno_id       INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+          situacao       TEXT NOT NULL DEFAULT 'presente', -- presente | falta | justificada
+          observacao     TEXT,
+          registrado_em  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+          UNIQUE (agendamento_id, aluno_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_presencas_aluno ON presencas(aluno_id);
+
+        -- O encontro da turma reaproveita a agenda que ja existe: assim turma
+        -- e aula individual aparecem no mesmo calendario.
+        ALTER TABLE agendamentos ADD COLUMN turma_id INTEGER REFERENCES turmas(id) ON DELETE CASCADE;
+        CREATE INDEX IF NOT EXISTS idx_agenda_turma ON agendamentos(turma_id);
+
+        -- ========================== PESSOAS ==========================
+
+        -- Voluntarios: mesma tabela dos profissionais, com o que faltava.
+        ALTER TABLE profissionais ADD COLUMN tipo TEXT NOT NULL DEFAULT 'contratado'; -- voluntario | contratado
+        ALTER TABLE profissionais ADD COLUMN email TEXT;
+        ALTER TABLE profissionais ADD COLUMN documento TEXT;
+        ALTER TABLE profissionais ADD COLUMN observacao TEXT;
+
+        -- Em que dias/horarios o voluntario pode ajudar.
+        CREATE TABLE IF NOT EXISTS voluntarios_disponibilidade (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          profissional_id INTEGER NOT NULL REFERENCES profissionais(id) ON DELETE CASCADE,
+          dia_semana      INTEGER NOT NULL,
+          hora_inicio     TEXT NOT NULL,
+          hora_fim        TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_voluntarios_disp ON voluntarios_disponibilidade(profissional_id);
+
+        -- Alunos e mantenedores dividem o cadastro de pessoas (o pai de um
+        -- aluno pode virar mantenedor sem virar cadastro duplicado).
+        ALTER TABLE clientes ADD COLUMN natureza TEXT NOT NULL DEFAULT 'aluno'; -- aluno | mantenedor | ambos
+        ALTER TABLE clientes ADD COLUMN data_nascimento TEXT;
+        ALTER TABLE clientes ADD COLUMN responsavel_nome TEXT;
+        ALTER TABLE clientes ADD COLUMN responsavel_telefone TEXT;
+
+        -- ======================== ARRECADACAO ========================
+
+        -- Projeto/edital com verba carimbada. Amarrar entrada e despesa a um
+        -- projeto desde o inicio e o que torna a prestacao de contas possivel.
+        CREATE TABLE IF NOT EXISTS projetos (
+          id        INTEGER PRIMARY KEY AUTOINCREMENT,
+          nome      TEXT NOT NULL,
+          descricao TEXT,
+          ativo     INTEGER NOT NULL DEFAULT 1,
+          criado_em TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+
+        -- Oferta/doacao em dinheiro (pontual ou contribuicao do mantenedor
+        -- daquele mes, quando registrada).
+        CREATE TABLE IF NOT EXISTS ofertas (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          cliente_id     INTEGER REFERENCES clientes(id) ON DELETE SET NULL, -- mantenedor cadastrado
+          doador_nome    TEXT,                                               -- doacao avulsa/anonima
+          valor          REAL NOT NULL DEFAULT 0,
+          data           TEXT NOT NULL DEFAULT (date('now','localtime')),
+          forma          TEXT,                                               -- pix | dinheiro | transferencia | outro
+          projeto_id     INTEGER REFERENCES projetos(id) ON DELETE SET NULL,
+          observacao     TEXT,
+          recibo_emitido INTEGER NOT NULL DEFAULT 0,
+          criado_em      TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_ofertas_data ON ofertas(data);
+
+        -- Doacao em especie: um violao doado nao entra no caixa, mas precisa
+        -- ser registrado (para agradecer, prestar contas e saber o que se tem).
+        -- Quando for instrumento, pode somar ao acervo em instrumentos.
+        CREATE TABLE IF NOT EXISTS doacoes_especie (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          cliente_id      INTEGER REFERENCES clientes(id) ON DELETE SET NULL,
+          doador_nome     TEXT,
+          descricao       TEXT NOT NULL,
+          quantidade      REAL NOT NULL DEFAULT 1,
+          valor_estimado  REAL,
+          data            TEXT NOT NULL DEFAULT (date('now','localtime')),
+          projeto_id      INTEGER REFERENCES projetos(id) ON DELETE SET NULL,
+          instrumento_id  INTEGER REFERENCES instrumentos(id) ON DELETE SET NULL,
+          observacao      TEXT,
+          criado_em       TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_doacoes_especie_data ON doacoes_especie(data);
+
+        -- Despesa tambem aponta para o projeto (verba carimbada).
+        ALTER TABLE contas_pagar ADD COLUMN projeto_id INTEGER REFERENCES projetos(id) ON DELETE SET NULL;
+      `);
+    },
+  },
 ];
 
 /**

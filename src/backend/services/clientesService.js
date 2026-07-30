@@ -53,6 +53,11 @@ function dados(body) {
     endereco: body.endereco || null,
     limite_credito: Number(body.limite_credito || 0),
     observacao: body.observacao || null,
+    // Instituto: a mesma pessoa pode ser aluno, mantenedor ou os dois.
+    natureza: ['aluno', 'mantenedor', 'ambos'].includes(body.natureza) ? body.natureza : 'aluno',
+    data_nascimento: body.data_nascimento || null,
+    responsavel_nome: body.responsavel_nome || null,
+    responsavel_telefone: body.responsavel_telefone || null,
   };
 }
 
@@ -60,8 +65,10 @@ function criar(body) {
   const db = getDb();
   const d = dados(body);
   const info = db.prepare(
-    `INSERT INTO clientes (nome, cpf, telefone, email, endereco, limite_credito, observacao)
-     VALUES (@nome, @cpf, @telefone, @email, @endereco, @limite_credito, @observacao)`
+    `INSERT INTO clientes (nome, cpf, telefone, email, endereco, limite_credito, observacao,
+       natureza, data_nascimento, responsavel_nome, responsavel_telefone)
+     VALUES (@nome, @cpf, @telefone, @email, @endereco, @limite_credito, @observacao,
+       @natureza, @data_nascimento, @responsavel_nome, @responsavel_telefone)`
   ).run(d);
   return obter(info.lastInsertRowid);
 }
@@ -73,7 +80,9 @@ function atualizar(id, body) {
   const d = dados({ ...atual, ...body });
   db.prepare(
     `UPDATE clientes SET nome=@nome, cpf=@cpf, telefone=@telefone, email=@email,
-      endereco=@endereco, limite_credito=@limite_credito, observacao=@observacao WHERE id=@id`
+      endereco=@endereco, limite_credito=@limite_credito, observacao=@observacao,
+      natureza=@natureza, data_nascimento=@data_nascimento,
+      responsavel_nome=@responsavel_nome, responsavel_telefone=@responsavel_telefone WHERE id=@id`
   ).run({ ...d, id });
   return obter(id);
 }

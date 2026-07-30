@@ -20,9 +20,44 @@ function criarProfissional(dados) {
   const nome = (dados.nome || '').trim();
   if (!nome) throw new AppError('Informe o nome do profissional.');
   const info = db.prepare(
-    'INSERT INTO profissionais (nome, telefone, cor, comissao_pct) VALUES (?, ?, ?, ?)'
-  ).run(nome, dados.telefone || null, dados.cor || '#2563eb', Number(dados.comissao_pct || 0));
-  return db.prepare('SELECT * FROM profissionais WHERE id = ?').get(info.lastInsertRowid);
+    'INSERT INTO profissionais (nome, telefone, cor, comissao_pct, tipo, email, documento, observacao) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(nome, dados.telefone || null, dados.cor || '#2563eb', Number(dados.comissao_pct || 0),
+    dados.tipo === 'voluntario' ? 'voluntario' : 'contratado',
+    dados.email || null, dados.documento || null, dados.observacao || null);
+  const id = info.lastInsertRowid;
+  if (dados.disponibilidade) salvarDisponibilidade(db, id, dados.disponibilidade);
+  return obterProfissional(id);
+}
+
+/** Em que dias/horarios o voluntario pode ajudar (usado para escalar turmas). */
+function salvarDisponibilidade(db, profissionalId, faixas) {
+  db.prepare('DELETE FROM voluntarios_disponibilidade WHERE profissional_id = ?').run(profissionalId);
+  const ins = db.prepare('INSERT INTO voluntarios_disponibilidade (profissional_id, dia_semana, hora_inicio, hora_fim) VALUES (?, ?, ?, ?)');
+  (faixas || []).forEach((f) => {
+    const dia = Number(f.dia_semana);
+    if (!Number.isInteger(dia) || dia < 0 || dia > 6) return;
+    const ini = String(f.hora_inicio || '').trim();
+    const fim = String(f.hora_fim || '').trim();
+    if (!/^\d{2}:\d{2}$/.test(ini) || !/^\d{2}:\d{2}$/.test(fim) || fim <= ini) {
+      throw new AppError('Informe um intervalo de disponibilidade válido (início antes do fim).');
+    }
+    ins.run(profissionalId, dia, ini, fim);
+  });
+}
+
+function obterProfissional(id) {
+  const db = getDb();
+  const p = db.prepare('SELECT * FROM profissionais WHERE id = ?').get(id);
+  if (!p) throw new AppError('Profissional nao encontrado.', 404);
+  p.disponibilidade = db.prepare('SELECT * FROM voluntarios_disponibilidade WHERE profissional_id = ? ORDER BY dia_semana, hora_inicio').all(id);
+  p.turmas = db.prepare(`
+    SELECT t.id, t.nome, ti.papel, c.nome AS curso_nome
+    FROM turmas_instrutores ti JOIN turmas t ON t.id = ti.turma_id
+    JOIN cursos c ON c.id = t.curso_id
+    WHERE ti.profissional_id = ? AND t.status IN ('aberta','planejada')
+    ORDER BY t.nome
+  `).all(id);
+  return p;
 }
 
 function atualizarProfissional(id, dados) {
@@ -31,15 +66,20 @@ function atualizarProfissional(id, dados) {
   if (!atual) throw new AppError('Profissional nao encontrado.', 404);
   const nome = dados.nome !== undefined ? (dados.nome || '').trim() : atual.nome;
   if (!nome) throw new AppError('Informe o nome do profissional.');
-  db.prepare('UPDATE profissionais SET nome=?, telefone=?, cor=?, comissao_pct=?, ativo=? WHERE id=?').run(
+  db.prepare('UPDATE profissionais SET nome=?, telefone=?, cor=?, comissao_pct=?, ativo=?, tipo=?, email=?, documento=?, observacao=? WHERE id=?').run(
     nome,
     dados.telefone !== undefined ? dados.telefone : atual.telefone,
     dados.cor !== undefined ? dados.cor : atual.cor,
     dados.comissao_pct !== undefined ? Number(dados.comissao_pct || 0) : atual.comissao_pct,
     dados.ativo !== undefined ? (dados.ativo ? 1 : 0) : atual.ativo,
+    dados.tipo !== undefined ? (dados.tipo === 'voluntario' ? 'voluntario' : 'contratado') : atual.tipo,
+    dados.email !== undefined ? dados.email : atual.email,
+    dados.documento !== undefined ? dados.documento : atual.documento,
+    dados.observacao !== undefined ? dados.observacao : atual.observacao,
     id
   );
-  return db.prepare('SELECT * FROM profissionais WHERE id = ?').get(id);
+  if (dados.disponibilidade) salvarDisponibilidade(db, Number(id), dados.disponibilidade);
+  return obterProfissional(id);
 }
 
 function excluirProfissional(id) {
@@ -357,7 +397,7 @@ function gerarOcorrenciasPendentes() {
 
 module.exports = {
   STATUS,
-  listarProfissionais, criarProfissional, atualizarProfissional, excluirProfissional,
+  listarProfissionais, obterProfissional, criarProfissional, atualizarProfissional, excluirProfissional,
   listar, obter, criar, atualizar, mudarStatus, excluir, faturar, resumoDia,
   listarAulasRecorrentes, criarAulaRecorrente, atualizarAulaRecorrente, excluirAulaRecorrente, gerarOcorrenciasPendentes,
 };

@@ -10,6 +10,12 @@
     produtos: { titulo: 'Produtos', pagina: () => window.PaginaProdutos },
     servicos: { titulo: 'Serviços', pagina: () => window.PaginaServicos },
     agenda: { titulo: 'Agenda', pagina: () => window.PaginaAgenda },
+    cursos: { titulo: 'Cursos', pagina: () => window.PaginaCursos },
+    instrumentos: { titulo: 'Instrumentos', pagina: () => window.PaginaInstrumentos },
+    voluntarios: { titulo: 'Voluntários', pagina: () => window.PaginaVoluntarios },
+    turmas: { titulo: 'Turmas', pagina: () => window.PaginaTurmas },
+    chamada: { titulo: 'Chamada', pagina: () => window.PaginaChamada },
+    arrecadacao: { titulo: 'Arrecadação', pagina: () => window.PaginaArrecadacao },
     ordens: { titulo: 'Ordens & Orçamentos', pagina: () => window.PaginaOrdens },
     lote: { titulo: 'Cadastro em Lote', pagina: () => window.PaginaLote },
     clientes: { titulo: 'Clientes', pagina: () => window.PaginaClientes },
@@ -47,11 +53,21 @@
   const rotaPerfil = {
     produtos: 'comercio', compras: 'comercio', fornecedores: 'comercio', precificacao: 'comercio', sacolas: 'comercio',
     servicos: 'servico', agenda: 'servico', ordens: 'servico', comissoes: 'servico', crm: 'servico', viagens: 'servico',
+    cursos: 'servico', instrumentos: 'servico', voluntarios: 'servico', turmas: 'servico', chamada: 'servico',
+    arrecadacao: 'servico',
   };
   // Rotas exclusivas de um ramo especifico (so aparecem alem do filtro de perfil).
-  const rotaRamo = { crm: 'agencia_viagem', viagens: 'agencia_viagem' };
+  const rotaRamo = {
+    crm: 'agencia_viagem', viagens: 'agencia_viagem',
+    cursos: 'instituto', instrumentos: 'instituto', voluntarios: 'instituto',
+    turmas: 'instituto', chamada: 'instituto', arrecadacao: 'instituto',
+  };
+  // Num instituto sem fins lucrativos nao existe venda: o que entra e oferta,
+  // e o que sai e despesa. Estes modulos saem do menu por completo.
+  const ESCONDIDAS_NO_INSTITUTO = ['pdv', 'vendas', 'sacolas', 'precificacao', 'comissoes', 'ordens', 'compras', 'produtos', 'catalogo', 'etiquetas', 'lote'];
 
   function rotaVisivel(nome) {
+    if (ramo === 'instituto' && ESCONDIDAS_NO_INSTITUTO.includes(nome)) return false;
     if (nome === 'ordens' && (perfil === 'servico' || perfil === 'ambos') && (ramo === 'salao' || ramo === 'agencia_viagem' || ramo === 'professor')) return false;
     if (nome === 'agenda' && (perfil === 'servico' || perfil === 'ambos') && ramo === 'agencia_viagem') return false;
     if ((nome === 'pdv' || nome === 'vendas' || nome === 'comissoes' || nome === 'dashboard') && (perfil === 'servico' || perfil === 'ambos') && ramo === 'professor') return false;
@@ -66,7 +82,9 @@
       a.style.display = mostra ? '' : 'none';
     });
     // Regras compostas (dependem tambem do ramo, nao so do perfil).
-    ['ordens', 'agenda', 'crm', 'viagens', 'pdv', 'vendas', 'comissoes', 'dashboard'].forEach((nome) => {
+    ['ordens', 'agenda', 'crm', 'viagens', 'pdv', 'vendas', 'comissoes', 'dashboard',
+      'cursos', 'instrumentos', 'voluntarios', 'turmas', 'chamada', 'arrecadacao',
+      'produtos', 'sacolas', 'precificacao', 'compras', 'fornecedores'].forEach((nome) => {
       const link = document.querySelector(`.nav-item[data-rota="${nome}"]`);
       if (link) link.style.display = rotaVisivel(nome) ? '' : 'none';
     });
@@ -137,6 +155,11 @@
   }
 
   function rotuloRota(nome, tituloPadrao) {
+    if (ramo === 'instituto') {
+      if (nome === 'clientes') return 'Alunos e mantenedores';
+      if (nome === 'financeiro') return 'Financeiro do instituto';
+      return tituloPadrao;
+    }
     if (ramo !== 'professor') return tituloPadrao;
     if (nome === 'clientes') return 'Alunos';
     if (nome === 'agenda') return 'Aulas';
@@ -202,7 +225,7 @@
     let cfg = {};
     try { cfg = await API.get('/api/config'); } catch (_) { cfg = {}; }
     perfil = ['comercio', 'servico', 'ambos'].includes(cfg.perfil_negocio) ? cfg.perfil_negocio : 'ambos';
-    ramo = ['salao', 'oficina', 'agencia_viagem', 'professor', 'geral'].includes(cfg.ramo_servico) ? cfg.ramo_servico : 'geral';
+    ramo = ['salao', 'oficina', 'agencia_viagem', 'professor', 'instituto', 'geral'].includes(cfg.ramo_servico) ? cfg.ramo_servico : 'geral';
     window.__perfilNegocio = perfil;
     window.__ramoServico = ramo;
     aplicarPerfil();
@@ -217,7 +240,11 @@
     const clientesTxt = document.querySelector('.nav-item[data-rota="clientes"] .nav-item__texto');
     const clientesIc = document.querySelector('.nav-item[data-rota="clientes"] .nav-item__icone');
     const agendaTxt = document.querySelector('.nav-item[data-rota="agenda"] .nav-item__texto');
-    if (ramo === 'professor') {
+    if (ramo === 'instituto') {
+      if (clientesTxt) clientesTxt.textContent = 'Pessoas';
+      if (clientesIc) clientesIc.textContent = '🧑‍🤝‍🧑';
+      if (agendaTxt) agendaTxt.textContent = 'Calendário';
+    } else if (ramo === 'professor') {
       if (clientesTxt) clientesTxt.textContent = 'Alunos';
       if (clientesIc) clientesIc.textContent = '🎓';
       if (agendaTxt) agendaTxt.textContent = 'Aulas';
@@ -292,6 +319,7 @@
             <button type="button" class="ob-opcao" data-r="oficina"><span class="ob-opcao__ic">🔧</span><strong>Oficina / Assistência técnica</strong><span class="dica">Ordens de serviço, pátio e peças</span></button>
             <button type="button" class="ob-opcao" data-r="agencia_viagem"><span class="ob-opcao__ic">✈️</span><strong>Agência de viagem</strong><span class="dica">CRM de leads e calendário de viagens</span></button>
             <button type="button" class="ob-opcao" data-r="professor"><span class="ob-opcao__ic">🎓</span><strong>Professor particular / Aulas</strong><span class="dica">Alunos, aula fixa recorrente e mensalidade</span></button>
+            <button type="button" class="ob-opcao" data-r="instituto"><span class="ob-opcao__ic">🎼</span><strong>Instituto / ONG (sem fins lucrativos)</strong><span class="dica">Turmas, voluntários, chamada e arrecadação</span></button>
             <button type="button" class="ob-opcao" data-r="geral"><span class="ob-opcao__ic">💼</span><strong>Outros serviços</strong><span class="dica">Consultoria, autônomo, geral</span></button>
           </div>
         </div>`;

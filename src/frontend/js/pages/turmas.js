@@ -1,0 +1,457 @@
+'use strict';
+
+/**
+ * Turmas do instituto: a oferta concreta de um curso, com dias, horarios,
+ * instrutores e alunos matriculados.
+ *
+ * O detalhe que faz diferenca aqui: ao escolher instrumento e horarios, a
+ * tela ja consulta o acervo e mostra quantas vagas cabem — em vez de deixar
+ * o usuario descobrir o limite so na hora de salvar.
+ */
+window.PaginaTurmas = (function () {
+  const DIAS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+  const DIAS_CURTO = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+  const STATUS = {
+    planejada: ['Planejada', 'muted'], aberta: ['Aberta', 'ok'],
+    encerrada: ['Encerrada', 'muted'], cancelada: ['Cancelada', 'muted'],
+  };
+  const STATUS_MATRICULA = {
+    ativa: ['Ativa', 'ok'], espera: ['Fila de espera', 'alerta'],
+    trancada: ['Trancada', 'muted'], concluida: ['Concluída', 'muted'], desistente: ['Desistente', 'muted'],
+  };
+
+  let cursos = [];
+  let instrumentos = [];
+  let equipe = [];
+  const filtro = { curso_id: '', status: '' };
+
+  async function render(container) {
+    container.innerHTML = `
+      <div class="barra-ferramentas">
+        <div class="campo"><label>Curso</label><select id="tu-curso"><option value="">Todos</option></select></div>
+        <div class="campo"><label>Situação</label>
+          <select id="tu-status">
+            <option value="">Todas</option>
+            ${Object.entries(STATUS).map(([v, [t]]) => `<option value="${v}">${t}</option>`).join('')}
+          </select></div>
+        <div class="cresce"></div>
+        <button class="btn" id="tu-nova">+ Nova turma</button>
+      </div>
+      <div class="card"><div id="tu-lista">Carregando…</div></div>`;
+
+    [cursos, instrumentos, equipe] = await Promise.all([
+      API.get('/api/cursos').catch(() => []),
+      API.get('/api/instrumentos').catch(() => []),
+      API.get('/api/agenda/profissionais').catch(() => []),
+    ]);
+
+    const selCurso = container.querySelector('#tu-curso');
+    cursos.forEach((c) => selCurso.insertAdjacentHTML('beforeend', `<option value="${c.id}">${UI.escapar(c.nome)}</option>`));
+
+    selCurso.addEventListener('change', (e) => { filtro.curso_id = e.target.value; listar(); });
+    container.querySelector('#tu-status').addEventListener('change', (e) => { filtro.status = e.target.value; listar(); });
+    container.querySelector('#tu-nova').addEventListener('click', () => {
+      if (!cursos.length) { UI.erro('Cadastre ao menos um curso antes de criar turmas.'); return; }
+      formulario(null);
+    });
+
+    listar();
+  }
+
+  function resumoHorarios(horarios) {
+    if (!horarios || !horarios.length) return '—';
+    return horarios.map((h) => `${DIAS_CURTO[h.dia_semana]} ${h.hora_inicio}`).join(' · ');
+  }
+
+  async function listar() {
+    const alvo = document.getElementById('tu-lista');
+    if (!alvo) return;
+    let turmas = [];
+    try {
+      const q = new URLSearchParams();
+      if (filtro.curso_id) q.set('curso_id', filtro.curso_id);
+      if (filtro.status) q.set('status', filtro.status);
+      turmas = await API.get('/api/turmas?' + q.toString());
+    } catch (e) { alvo.innerHTML = `<p class="dica">${UI.escapar(e.message)}</p>`; return; }
+
+    if (!turmas.length) {
+      alvo.innerHTML = `<div class="vazio"><h3>Nenhuma turma</h3>
+        <p class="dica">Crie uma turma para começar a matricular alunos e fazer chamada.</p></div>`;
+      return;
+    }
+
+    alvo.innerHTML = `
+      <div class="rolagem"><table class="tabela">
+        <thead><tr>
+          <th>Turma</th><th>Dias</th><th>Ocupação</th><th>Instrumento</th><th>Situação</th><th></th>
+        </tr></thead>
+        <tbody>
+          ${turmas.map((t) => {
+            const [rot, cor] = STATUS[t.status] || [t.status, 'muted'];
+            const lotada = t.matriculados >= t.vagas && t.vagas > 0;
+            return `
+            <tr>
+              <td>
+                <strong>${UI.escapar(t.nome)}</strong>
+                <div class="dica">${UI.escapar(t.curso_nome)}${t.sala ? ' · Sala ' + UI.escapar(t.sala) : ''}</div>
+              </td>
+              <td class="dica">${UI.escapar(resumoHorarios(t.horarios))}</td>
+              <td>
+                <span class="badge ${lotada ? 'badge--alerta' : 'badge--ok'}">${t.matriculados}/${t.vagas}</span>
+                ${t.na_espera ? `<div class="dica">${t.na_espera} na espera</div>` : ''}
+              </td>
+              <td class="dica">${UI.escapar(t.instrumento_nome || '—')}</td>
+              <td><span class="badge badge--${cor}">${rot}</span></td>
+              <td style="text-align:right;white-space:nowrap">
+                <button class="btn btn--secundario" data-ver="${t.id}">Abrir</button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table></div>`;
+
+    alvo.querySelectorAll('[data-ver]').forEach((b) => b.addEventListener('click', () => abrirTurma(Number(b.dataset.ver))));
+  }
+
+  // ---------------------------- Detalhe da turma ----------------------------
+
+  async function abrirTurma(id) {
+    let t;
+    try { t = await API.get(`/api/turmas/${id}`); } catch (e) { UI.erro(e.message); return; }
+    const [rot, cor] = STATUS[t.status] || [t.status, 'muted'];
+
+    Modal.abrir({
+      titulo: t.nome,
+      tamanho: 'modal--grande',
+      mostrarConfirmar: false,
+      corpoHTML: `
+        <p class="dica" style="margin-top:0">
+          ${UI.escapar(t.curso_nome)} · <span class="badge badge--${cor}">${rot}</span>
+          ${t.sala ? ' · Sala ' + UI.escapar(t.sala) : ''}
+          ${t.instrumento_nome ? ' · Usa ' + UI.escapar(t.instrumento_nome) : ''}
+        </p>
+        <p class="dica">
+          ${UI.escapar(resumoHorarios(t.horarios))} ·
+          Período: ${UI.escapar(t.periodo_inicio)}${t.periodo_fim ? ' até ' + UI.escapar(t.periodo_fim) : ''}
+        </p>
+
+        <div class="flex gap-12 mt-16" style="flex-wrap:wrap">
+          <span class="badge ${t.matriculados >= t.vagas ? 'badge--alerta' : 'badge--ok'}">${t.matriculados} de ${t.vagas} vagas</span>
+          ${t.na_espera ? `<span class="badge badge--alerta">${t.na_espera} na fila de espera</span>` : ''}
+        </div>
+
+        <h4 class="mt-16">Instrutores</h4>
+        ${t.instrutores.length
+          ? `<p class="dica">${t.instrutores.map((i) => `${UI.escapar(i.nome)} (${UI.escapar(i.papel)})`).join(' · ')}</p>`
+          : '<p class="dica">Nenhum instrutor escalado ainda.</p>'}
+
+        <h4 class="mt-16">Alunos</h4>
+        <div id="tu-alunos"></div>
+
+        <div class="flex gap-12 mt-16" style="flex-wrap:wrap">
+          <button class="btn" type="button" id="tu-matricular">+ Matricular aluno</button>
+          <button class="btn btn--secundario" type="button" id="tu-frequencia">📊 Frequência</button>
+          <button class="btn btn--secundario" type="button" id="tu-editar">Editar turma</button>
+        </div>`,
+      aoAbrir: (el) => {
+        desenharAlunos(el, t);
+        el.querySelector('#tu-matricular').addEventListener('click', () => matricular(t, el));
+        el.querySelector('#tu-frequencia').addEventListener('click', () => verFrequencia(t.id));
+        el.querySelector('#tu-editar').addEventListener('click', () => {
+          el.querySelector('[data-fechar]').click();
+          formulario(t);
+        });
+      },
+    });
+  }
+
+  function desenharAlunos(el, turma) {
+    const alvo = el.querySelector('#tu-alunos');
+    if (!turma.matriculas.length) {
+      alvo.innerHTML = '<p class="dica">Nenhum aluno matriculado.</p>';
+      return;
+    }
+    alvo.innerHTML = `
+      <div class="rolagem"><table class="tabela">
+        <thead><tr><th>Aluno</th><th>Situação</th><th>Contato</th><th></th></tr></thead>
+        <tbody>
+          ${turma.matriculas.map((m) => {
+            const [rot, cor] = STATUS_MATRICULA[m.status] || [m.status, 'muted'];
+            const menor = ehMenor(m.data_nascimento);
+            return `
+            <tr>
+              <td>
+                ${UI.escapar(m.aluno_nome)}
+                ${menor ? ' <span class="badge badge--muted" title="Menor de idade">menor</span>' : ''}
+                ${menor && m.responsavel_nome ? `<div class="dica">Resp.: ${UI.escapar(m.responsavel_nome)}</div>` : ''}
+              </td>
+              <td><span class="badge badge--${cor}">${rot}</span></td>
+              <td class="dica">${UI.escapar(m.responsavel_telefone || m.telefone || '—')}</td>
+              <td style="text-align:right;white-space:nowrap">
+                <select data-status="${m.id}" style="max-width:150px">
+                  ${Object.entries(STATUS_MATRICULA).map(([v, [rotulo]]) => `<option value="${v}" ${m.status === v ? 'selected' : ''}>${rotulo}</option>`).join('')}
+                </select>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table></div>`;
+
+    alvo.querySelectorAll('[data-status]').forEach((s) => s.addEventListener('change', async () => {
+      try {
+        const r = await API.put(`/api/turmas/matriculas/${s.dataset.status}`, { status: s.value });
+        UI.sucesso(r.promovido
+          ? `Situação atualizada. ${r.promovido.aluno_nome} saiu da fila de espera e assumiu a vaga.`
+          : 'Situação atualizada.');
+        desenharAlunos(el, r.turma);
+        listar();
+      } catch (e) { UI.erro(e.message); }
+    }));
+  }
+
+  function ehMenor(dataNascimento) {
+    if (!dataNascimento) return false;
+    const nasc = new Date(dataNascimento + 'T12:00:00');
+    if (Number.isNaN(nasc.getTime())) return false;
+    const idade = (Date.now() - nasc.getTime()) / (365.25 * 24 * 3600 * 1000);
+    return idade < 18;
+  }
+
+  function matricular(turma, elPai) {
+    let alunos = [];
+    Modal.abrir({
+      titulo: 'Matricular aluno',
+      textoConfirmar: 'Matricular',
+      corpoHTML: `
+        <div class="campo"><label>Buscar aluno</label>
+          <input type="search" id="ma-busca" placeholder="Digite o nome do aluno" /></div>
+        <div id="ma-resultados" class="mt-16"><p class="dica">Digite para buscar.</p></div>
+        ${turma.matriculados >= turma.vagas
+          ? '<p class="dica mt-16">⚠️ A turma está lotada. Quem for matriculado agora entra na <strong>fila de espera</strong> e assume assim que abrir vaga.</p>'
+          : ''}`,
+      aoAbrir: (el) => {
+        const busca = el.querySelector('#ma-busca');
+        let timer = null;
+        busca.addEventListener('input', () => {
+          clearTimeout(timer);
+          timer = setTimeout(async () => {
+            const termo = busca.value.trim();
+            const alvo = el.querySelector('#ma-resultados');
+            if (!termo) { alvo.innerHTML = '<p class="dica">Digite para buscar.</p>'; return; }
+            try {
+              alunos = await API.get('/api/clientes?busca=' + encodeURIComponent(termo));
+            } catch (e) { alvo.innerHTML = `<p class="dica">${UI.escapar(e.message)}</p>`; return; }
+            if (!alunos.length) { alvo.innerHTML = '<p class="dica">Nenhum aluno encontrado.</p>'; return; }
+            alvo.innerHTML = alunos.slice(0, 20).map((a) => `
+              <label class="flex gap-12" style="align-items:center;padding:6px 0;cursor:pointer">
+                <input type="radio" name="ma-aluno" value="${a.id}" />
+                <span>${UI.escapar(a.nome)}${a.telefone ? ` <span class="dica">${UI.escapar(a.telefone)}</span>` : ''}</span>
+              </label>`).join('');
+          }, 300);
+        });
+      },
+      aoConfirmar: async (el) => {
+        const escolhido = el.querySelector('input[name="ma-aluno"]:checked');
+        if (!escolhido) { UI.erro('Selecione um aluno.'); return false; }
+        try {
+          const r = await API.post(`/api/turmas/${turma.id}/matriculas`, { aluno_id: escolhido.value });
+          UI.sucesso(r.entrou_na_espera
+            ? 'Turma lotada: o aluno entrou na fila de espera.'
+            : 'Aluno matriculado.');
+          desenharAlunos(elPai, r.turma);
+          listar();
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
+  async function verFrequencia(turmaId) {
+    let dados;
+    try { dados = await API.get(`/api/turmas/${turmaId}/frequencia`); } catch (e) { UI.erro(e.message); return; }
+    Modal.abrir({
+      titulo: 'Frequência — ' + dados.turma.nome,
+      tamanho: 'modal--grande',
+      mostrarConfirmar: false,
+      corpoHTML: !dados.alunos.length
+        ? '<p class="dica">Nenhum aluno com chamada registrada ainda.</p>'
+        : `<div class="rolagem"><table class="tabela">
+            <thead><tr><th>Aluno</th><th>Presenças</th><th>Faltas</th><th>Justificadas</th><th>Frequência</th><th>Faltas seguidas</th></tr></thead>
+            <tbody>
+              ${dados.alunos.map((a) => `
+                <tr>
+                  <td>${UI.escapar(a.aluno_nome)}</td>
+                  <td>${a.presencas || 0}</td>
+                  <td>${a.faltas || 0}</td>
+                  <td>${a.justificadas || 0}</td>
+                  <td>${a.percentual == null ? '—' : `<span class="badge ${a.percentual >= 75 ? 'badge--ok' : 'badge--alerta'}">${a.percentual}%</span>`}</td>
+                  <td>${a.faltas_seguidas >= 3 ? `<span class="badge badge--erro">${a.faltas_seguidas}</span>` : (a.faltas_seguidas || 0)}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table></div>`,
+    });
+  }
+
+  // ------------------------------ Formulário ------------------------------
+
+  function formulario(turma) {
+    const ed = !!turma;
+    const horarios = ed ? turma.horarios.map((h) => ({ ...h })) : [{ dia_semana: 2, hora_inicio: '19:00', hora_fim: '20:00' }];
+    const instrutores = ed ? turma.instrutores.map((i) => ({ profissional_id: i.profissional_id, papel: i.papel })) : [];
+
+    Modal.abrir({
+      titulo: ed ? 'Editar turma' : 'Nova turma',
+      tamanho: 'modal--grande',
+      textoConfirmar: 'Salvar',
+      corpoHTML: `
+        <div class="form-grid">
+          <div class="campo"><label>Curso *</label>
+            <select id="tf-curso">
+              ${cursos.map((c) => `<option value="${c.id}" ${ed && turma.curso_id === c.id ? 'selected' : ''}>${UI.escapar(c.nome)}</option>`).join('')}
+            </select></div>
+          <div class="campo"><label>Nome da turma *</label>
+            <input id="tf-nome" value="${ed ? UI.escapar(turma.nome) : ''}" placeholder="Ex.: Violão Iniciante — Turma A" /></div>
+
+          <div class="campo"><label>Instrumento usado</label>
+            <select id="tf-instrumento">
+              <option value="">Nenhum (não depende de instrumento)</option>
+              ${instrumentos.map((i) => `<option value="${i.id}" ${ed && turma.instrumento_id === i.id ? 'selected' : ''}>${UI.escapar(i.nome)} (${i.quantidade_total})</option>`).join('')}
+            </select>
+            <span class="dica">Informática e reforço normalmente ficam sem.</span></div>
+          <div class="campo"><label>Instrumentos por aluno</label>
+            <input id="tf-por-aluno" type="number" min="1" step="1" value="${ed ? turma.instrumentos_por_aluno : 1}" /></div>
+
+          <div class="campo"><label>Vagas *</label>
+            <input id="tf-vagas" type="number" min="0" step="1" value="${ed ? turma.vagas : ''}" />
+            <span class="dica" id="tf-aviso-vagas"></span></div>
+          <div class="campo"><label>Sala / local</label>
+            <input id="tf-sala" value="${ed ? UI.escapar(turma.sala || '') : ''}" /></div>
+
+          <div class="campo"><label>Início do período *</label>
+            <input id="tf-inicio" type="date" value="${ed ? UI.escapar(turma.periodo_inicio) : ''}" /></div>
+          <div class="campo"><label>Fim do período</label>
+            <input id="tf-fim" type="date" value="${ed ? UI.escapar(turma.periodo_fim || '') : ''}" />
+            <span class="dica">Deixe vazio para turma sem data de término.</span></div>
+
+          ${ed ? `<div class="campo"><label>Situação</label>
+            <select id="tf-status">
+              ${Object.entries(STATUS).map(([v, [t]]) => `<option value="${v}" ${turma.status === v ? 'selected' : ''}>${t}</option>`).join('')}
+            </select></div>` : ''}
+
+          <div class="campo col-2" style="border-top:1px solid var(--borda);padding-top:14px">
+            <label>Dias e horários *</label>
+            <div id="tf-horarios"></div>
+            <button class="btn btn--secundario mt-16" type="button" id="tf-add-horario">+ Adicionar dia</button>
+          </div>
+
+          <div class="campo col-2" style="border-top:1px solid var(--borda);padding-top:14px">
+            <label>Instrutores</label>
+            <div id="tf-instrutores"></div>
+            <button class="btn btn--secundario mt-16" type="button" id="tf-add-instrutor">+ Adicionar instrutor</button>
+          </div>
+
+          <div class="campo col-2"><label>Observação</label>
+            <textarea id="tf-obs" rows="2">${ed ? UI.escapar(turma.observacao || '') : ''}</textarea></div>
+        </div>`,
+      aoAbrir: (el) => {
+        function desenharHorarios() {
+          const alvo = el.querySelector('#tf-horarios');
+          alvo.innerHTML = horarios.map((h, i) => `
+            <div class="flex gap-12 mt-16" style="align-items:center;flex-wrap:wrap">
+              <select data-dia="${i}" style="max-width:150px">
+                ${DIAS.map((d, n) => `<option value="${n}" ${Number(h.dia_semana) === n ? 'selected' : ''}>${d}</option>`).join('')}
+              </select>
+              <input type="time" data-ini="${i}" value="${UI.escapar(h.hora_inicio || '')}" style="max-width:120px" />
+              <span class="dica">às</span>
+              <input type="time" data-fim="${i}" value="${UI.escapar(h.hora_fim || '')}" style="max-width:120px" />
+              ${horarios.length > 1 ? `<button class="btn btn--perigo" type="button" data-rm-h="${i}">Remover</button>` : ''}
+            </div>`).join('');
+
+          alvo.querySelectorAll('[data-dia]').forEach((s) => s.addEventListener('change', () => { horarios[Number(s.dataset.dia)].dia_semana = Number(s.value); conferirVagas(); }));
+          alvo.querySelectorAll('[data-ini]').forEach((s) => s.addEventListener('change', () => { horarios[Number(s.dataset.ini)].hora_inicio = s.value; conferirVagas(); }));
+          alvo.querySelectorAll('[data-fim]').forEach((s) => s.addEventListener('change', () => { horarios[Number(s.dataset.fim)].hora_fim = s.value; conferirVagas(); }));
+          alvo.querySelectorAll('[data-rm-h]').forEach((b) => b.addEventListener('click', () => { horarios.splice(Number(b.dataset.rmH), 1); desenharHorarios(); conferirVagas(); }));
+        }
+
+        function desenharInstrutores() {
+          const alvo = el.querySelector('#tf-instrutores');
+          if (!instrutores.length) { alvo.innerHTML = '<p class="dica">Nenhum instrutor escalado.</p>'; return; }
+          alvo.innerHTML = instrutores.map((ins, i) => `
+            <div class="flex gap-12 mt-16" style="align-items:center;flex-wrap:wrap">
+              <select data-prof="${i}" style="max-width:220px">
+                ${equipe.map((p) => `<option value="${p.id}" ${Number(ins.profissional_id) === p.id ? 'selected' : ''}>${UI.escapar(p.nome)}${p.tipo === 'voluntario' ? ' (voluntário)' : ''}</option>`).join('')}
+              </select>
+              <select data-papel="${i}" style="max-width:150px">
+                ${['titular', 'auxiliar', 'suplente'].map((pp) => `<option value="${pp}" ${ins.papel === pp ? 'selected' : ''}>${pp}</option>`).join('')}
+              </select>
+              <button class="btn btn--perigo" type="button" data-rm-i="${i}">Remover</button>
+            </div>`).join('');
+
+          alvo.querySelectorAll('[data-prof]').forEach((s) => s.addEventListener('change', () => { instrutores[Number(s.dataset.prof)].profissional_id = Number(s.value); }));
+          alvo.querySelectorAll('[data-papel]').forEach((s) => s.addEventListener('change', () => { instrutores[Number(s.dataset.papel)].papel = s.value; }));
+          alvo.querySelectorAll('[data-rm-i]').forEach((b) => b.addEventListener('click', () => { instrutores.splice(Number(b.dataset.rmI), 1); desenharInstrutores(); }));
+        }
+
+        /** Consulta o acervo e avisa quantas vagas cabem, antes de tentar salvar. */
+        async function conferirVagas() {
+          const aviso = el.querySelector('#tf-aviso-vagas');
+          const instId = el.querySelector('#tf-instrumento').value;
+          if (!instId) { aviso.textContent = 'Sem instrumento: as vagas não são limitadas pelo acervo.'; aviso.style.color = ''; return; }
+          try {
+            const r = await API.post(`/api/instrumentos/${instId}/vagas-disponiveis`, {
+              horarios,
+              turma_id: ed ? turma.id : null,
+              instrumentos_por_aluno: el.querySelector('#tf-por-aluno').value,
+            });
+            const ocupando = r.turmas_no_mesmo_horario.map((t) => t.nome).join(', ');
+            aviso.innerHTML = `O instituto tem <strong>${r.quantidade_total} ${UI.escapar(r.instrumento)}(s)</strong>. `
+              + (r.em_uso_no_horario ? `Neste horário, ${r.em_uso_no_horario} já em uso${ocupando ? ` (${UI.escapar(ocupando)})` : ''}. ` : '')
+              + `Cabem até <strong>${r.vagas_maximas}</strong> aluno(s).`;
+            const vagas = Number(el.querySelector('#tf-vagas').value || 0);
+            aviso.style.color = vagas > r.vagas_maximas ? 'var(--perigo)' : '';
+          } catch (e) { aviso.textContent = e.message; }
+        }
+
+        el.querySelector('#tf-add-horario').addEventListener('click', () => {
+          horarios.push({ dia_semana: 4, hora_inicio: '19:00', hora_fim: '20:00' });
+          desenharHorarios(); conferirVagas();
+        });
+        el.querySelector('#tf-add-instrutor').addEventListener('click', () => {
+          if (!equipe.length) { UI.erro('Cadastre voluntários antes de escalar instrutores.'); return; }
+          instrutores.push({ profissional_id: equipe[0].id, papel: instrutores.length ? 'auxiliar' : 'titular' });
+          desenharInstrutores();
+        });
+        el.querySelector('#tf-instrumento').addEventListener('change', conferirVagas);
+        el.querySelector('#tf-por-aluno').addEventListener('change', conferirVagas);
+        el.querySelector('#tf-vagas').addEventListener('input', conferirVagas);
+
+        desenharHorarios();
+        desenharInstrutores();
+        conferirVagas();
+      },
+      aoConfirmar: async (el) => {
+        const corpo = {
+          curso_id: el.querySelector('#tf-curso').value,
+          nome: el.querySelector('#tf-nome').value,
+          instrumento_id: el.querySelector('#tf-instrumento').value || null,
+          instrumentos_por_aluno: el.querySelector('#tf-por-aluno').value,
+          vagas: el.querySelector('#tf-vagas').value,
+          sala: el.querySelector('#tf-sala').value,
+          periodo_inicio: el.querySelector('#tf-inicio').value,
+          periodo_fim: el.querySelector('#tf-fim').value,
+          observacao: el.querySelector('#tf-obs').value,
+          horarios,
+          instrutores,
+        };
+        if (ed) corpo.status = el.querySelector('#tf-status').value;
+        try {
+          if (ed) await API.put(`/api/turmas/${turma.id}`, corpo);
+          else await API.post('/api/turmas', corpo);
+          UI.sucesso(ed ? 'Turma atualizada.' : 'Turma criada e encontros lançados no calendário.');
+          listar();
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
+  return { titulo: 'Turmas', render };
+})();

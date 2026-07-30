@@ -8,6 +8,7 @@ const router = express.Router();
 
 // Profissionais / equipe
 router.get('/profissionais', asyncHandler((req, res) => res.json(ag.listarProfissionais({ incluir_inativos: req.query.incluir_inativos === '1' }))));
+router.get('/profissionais/:id', asyncHandler((req, res) => res.json(ag.obterProfissional(req.params.id))));
 router.post('/profissionais', asyncHandler((req, res) => res.status(201).json(ag.criarProfissional(req.body || {}))));
 router.put('/profissionais/:id', asyncHandler((req, res) => res.json(ag.atualizarProfissional(req.params.id, req.body || {}))));
 router.delete('/profissionais/:id', asyncHandler((req, res) => res.json(ag.excluirProfissional(req.params.id))));

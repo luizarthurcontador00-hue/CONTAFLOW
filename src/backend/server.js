@@ -43,6 +43,17 @@ function createApp() {
     console.error('[agenda] falha ao gerar aulas recorrentes:', e.message);
   }
 
+  // Gera os encontros das turmas do instituto no calendario (mesmo espirito
+  // das aulas recorrentes: cria so o que falta, sem duplicar).
+  try {
+    // eslint-disable-next-line global-require
+    const { gerarEncontrosPendentes } = require('./services/turmasService');
+    const r = gerarEncontrosPendentes();
+    if (r.geradas > 0) console.log(`[turmas] ${r.geradas} encontro(s) de turma gerado(s).`);
+  } catch (e) {
+    console.error('[turmas] falha ao gerar encontros das turmas:', e.message);
+  }
+
   // Reconecta o WhatsApp sozinho ao ligar o sistema, se ja tinha sido
   // conectado antes (sessao salva) — sem isso, o atendimento ficava sempre
   // desconectado ate alguem entrar em Atendimento e clicar em "Conectar".
@@ -126,6 +137,10 @@ function createApp() {
   montarRota(app, '/api/ordens', './routes/ordens');
   montarRota(app, '/api/agenda', './routes/agenda');
   montarRota(app, '/api/google-agenda', './routes/googleAgenda');
+  montarRota(app, '/api/cursos', './routes/cursos');
+  montarRota(app, '/api/instrumentos', './routes/instrumentos');
+  montarRota(app, '/api/turmas', './routes/turmas');
+  montarRota(app, '/api/arrecadacao', './routes/arrecadacao');
   montarRota(app, '/api/dashboard', './routes/dashboard');
   montarRota(app, '/api/relatorios', './routes/relatorios');
   montarRota(app, '/api/backup', './routes/backup');
