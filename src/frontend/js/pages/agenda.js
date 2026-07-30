@@ -209,7 +209,11 @@ window.PaginaAgenda = (function () {
     catch (e) { cal.innerHTML = `<div class="card"><span class="badge badge--erro">Erro</span> ${UI.escapar(e.message)}</div>`; return; }
 
     const porDia = new Map();
-    itens.forEach((a) => { if (!porDia.has(a.data)) porDia.set(a.data, []); porDia.get(a.data).push(a); });
+    itens.forEach((a) => {
+      if (a.status === 'atendido') return; // ja concluido: some do calendario do mes pra nao poluir (continua no dia e nos relatorios)
+      if (!porDia.has(a.data)) porDia.set(a.data, []);
+      porDia.get(a.data).push(a);
+    });
 
     const primeiroDiaSemana = new Date(ano, mes - 1, 1).getDay(); // 0 = domingo
     const diasNomes = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
