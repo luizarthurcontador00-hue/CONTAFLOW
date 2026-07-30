@@ -215,19 +215,73 @@ function salvarMidia(media) {
  * Baixa a midia com novas tentativas e espera crescente: fotos/videos
  * grandes as vezes ainda estao sincronizando quando o evento chega (audio
  * pequeno quase sempre funciona de primeira).
+ *
+ * A partir da 2a tentativa, RECARREGA a mensagem pelo id
+ * (client.getMessageById) em vez de insistir no mesmo objeto: o
+ * whatsapp-web.js so consegue baixar quando o "mediaStage" interno chega em
+ * RESOLVED, e esse estado nao se atualiza no objeto antigo que ja estava em
+ * maos — sem recarregar, as tentativas seguintes repetiam o mesmo estado
+ * (FETCHING/REUPLOADING) e a midia nunca vinha.
  */
-async function baixarMidiaComRetry(msg, tentativas = 5) {
-  const espera = [800, 1500, 2500, 4000];
+async function baixarMidiaComRetry(msg, tentativas = 6) {
+  const espera = [1000, 2000, 3500, 5000, 8000];
+  const wamid = msg && msg.id && msg.id._serialized;
+  let atual = msg;
+
   for (let i = 1; i <= tentativas; i++) {
     try {
-      const media = await msg.downloadMedia();
+      const media = await atual.downloadMedia();
       if (media && media.data) return media;
+      console.error(`[whatsapp] tentativa ${i}/${tentativas}: midia ainda nao disponivel (o WhatsApp ainda esta sincronizando ou expirou no celular).`);
     } catch (e) {
       console.error(`[whatsapp] tentativa ${i}/${tentativas} de baixar midia falhou:`, descreverErro(e));
     }
-    if (i < tentativas) await new Promise((r) => setTimeout(r, espera[i - 1] || 4000));
+
+    if (i >= tentativas) break;
+    await new Promise((r) => setTimeout(r, espera[i - 1] || 8000));
+
+    if (wamid && client) {
+      try {
+        const recarregada = await client.getMessageById(wamid);
+        if (recarregada) atual = recarregada;
+      } catch (e) {
+        console.error('[whatsapp] nao foi possivel recarregar a mensagem para baixar a midia:', descreverErro(e));
+      }
+    }
   }
   return null;
+}
+
+/**
+ * Nova tentativa de baixar a midia de uma mensagem que ficou sem arquivo
+ * (botao "tentar de novo" na conversa). Util quando a midia ainda estava
+ * sincronizando no celular na hora que a mensagem chegou.
+ */
+async function rebaixarMidia(mensagemId) {
+  if (!client || estado !== 'conectado') throw new AppError('WhatsApp não está conectado. Conecte em Atendimento antes de baixar a mídia.');
+  const db = getDb();
+  const msgRow = db.prepare('SELECT * FROM mensagens_whatsapp WHERE id = ?').get(mensagemId);
+  if (!msgRow) throw new AppError('Mensagem nao encontrada.', 404);
+  if (msgRow.arquivo) return obterConversa(msgRow.conversa_id); // ja tem o arquivo, nada a fazer
+  if (!msgRow.wa_message_id) throw new AppError('Esta mensagem não tem identificador do WhatsApp, não dá para baixar de novo.');
+
+  let original;
+  try {
+    original = await client.getMessageById(msgRow.wa_message_id);
+  } catch (e) {
+    throw new AppError('Não foi possível localizar a mensagem no WhatsApp: ' + descreverErro(e));
+  }
+  if (!original) throw new AppError('Essa mensagem não está mais disponível no WhatsApp (pode ter sido apagada ou expirado no celular).');
+
+  const media = await baixarMidiaComRetry(original);
+  if (!media) {
+    throw new AppError('A mídia ainda não pôde ser baixada. Abra a conversa no celular para o WhatsApp sincronizar o arquivo e tente de novo.');
+  }
+
+  const arquivo = salvarMidia(media);
+  db.prepare('UPDATE mensagens_whatsapp SET arquivo = ?, arquivo_nome_original = COALESCE(?, arquivo_nome_original) WHERE id = ?')
+    .run(arquivo, media.filename || null, mensagemId);
+  return obterConversa(msgRow.conversa_id);
 }
 
 /** Extrai o id serializado do retorno de sendMessage (pode vir vazio em contas @lid). */
@@ -936,7 +990,7 @@ function _definirClienteParaTeste(fakeClient, fakeEstado) {
 iniciarAgendador();
 
 module.exports = {
-  iniciar, desconectar, status, temSessaoSalva,
+  iniciar, desconectar, status, temSessaoSalva, rebaixarMidia,
   listarConversas, obterConversa, atualizarStatusConversa, atribuirAtendente, marcarLida, enviarTexto, iniciarConversa,
   iniciarAtendimento, alternarModoConversa, finalizarConversa, enviarMidia, enviarDigitando,
   listarContatos, obterContato, atualizarContato, criarLeadDaConversa,

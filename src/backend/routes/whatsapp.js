@@ -36,6 +36,8 @@ router.post('/conversas/:id/midia', uploadWhatsappMidia.single('arquivo'), async
   res.status(201).json(resultado);
 }));
 
+router.post('/mensagens/:id/baixar-midia', asyncHandler(async (req, res) => res.json(await svc.rebaixarMidia(req.params.id))));
+
 // ------------------------------- Contatos -------------------------------
 router.get('/contatos', asyncHandler((req, res) => res.json(svc.listarContatos(req.query))));
 router.get('/contatos/:id', asyncHandler((req, res) => res.json(svc.obterContato(req.params.id))));

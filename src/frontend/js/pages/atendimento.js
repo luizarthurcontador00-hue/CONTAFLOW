@@ -453,6 +453,25 @@ window.PaginaAtendimento = (function () {
       } catch (e) { UI.erro(e.message); }
     });
 
+    // Nova tentativa de baixar uma midia que nao veio junto com a mensagem.
+    // Delegacao no container: a thread e reconstruida a cada atualizacao.
+    document.getElementById('wa-thread').addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('[data-baixar-midia]');
+      if (!btn) return;
+      btn.disabled = true;
+      const textoOriginal = btn.textContent;
+      btn.textContent = 'Baixando…';
+      try {
+        conversaAberta = await API.post(`/api/whatsapp/mensagens/${btn.dataset.baixarMidia}/baixar-midia`, {});
+        UI.sucesso('Mídia baixada.');
+        renderThread(true);
+      } catch (e) {
+        UI.erro(e.message);
+        btn.disabled = false;
+        btn.textContent = textoOriginal;
+      }
+    });
+
     document.getElementById('wa-finalizar-atendimento').addEventListener('click', abrirFinalizarAtendimento);
     const btnAgendar = document.getElementById('wa-agendar-horario');
     if (btnAgendar) btnAgendar.addEventListener('click', abrirAgendarHorario);
@@ -546,11 +565,20 @@ window.PaginaAtendimento = (function () {
     const minha = m.direcao === 'enviada';
     const url = m.arquivo ? `/uploads/whatsapp/${encodeURIComponent(m.arquivo)}` : null;
     let corpo = '';
+    const TIPOS_MIDIA = ['imagem', 'sticker', 'video', 'audio', 'documento'];
     if (m.tipo === 'imagem' && url) corpo = `<img src="${url}" style="max-width:220px;border-radius:8px;display:block">`;
     else if (m.tipo === 'sticker' && url) corpo = `<img src="${url}" style="width:96px;display:block">`;
     else if (m.tipo === 'video' && url) corpo = `<video src="${url}" controls style="max-width:240px;border-radius:8px;display:block"></video>`;
     else if (m.tipo === 'audio' && url) corpo = `<audio src="${url}" controls></audio>`;
     else if (m.tipo === 'documento' && url) corpo = `<a href="${url}" target="_blank" rel="noopener" class="btn btn--secundario">📄 baixar ${UI.escapar(ROTULO_TIPO.documento)}</a>`;
+    else if (TIPOS_MIDIA.includes(m.tipo) && !url) {
+      // Chegou a mensagem, mas o arquivo nao pode ser baixado na hora (o
+      // WhatsApp as vezes ainda esta sincronizando a midia no celular).
+      corpo = `<div class="dica" style="display:flex;flex-direction:column;gap:6px">
+        <span>⚠️ Arquivo não baixado — ${UI.escapar(ROTULO_TIPO[m.tipo] || m.tipo)}</span>
+        <button class="btn btn--secundario" type="button" data-baixar-midia="${m.id}">⬇️ Tentar baixar de novo</button>
+      </div>`;
+    }
     if (m.texto) corpo += `<div>${UI.escapar(m.texto)}</div>`;
     if (!corpo) corpo = `<div class="dica">[${UI.escapar(m.tipo)}]</div>`;
 
