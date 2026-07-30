@@ -217,24 +217,43 @@ table.tabela th { color: var(--texto-suave); font-weight: 600; font-size: 12.5px
 .form-grid .col-2 { grid-column: span 2; }
 .campo { display: flex; flex-direction: column; gap: 6px; }
 .campo label { font-size: 13px; font-weight: 600; color: var(--texto); }
-.campo input, .campo select, .campo textarea {
-  padding: 9px 11px; border: 1px solid var(--borda); border-radius: 8px;
+.campo input, .campo select, .campo textarea,
+.barra-ferramentas input, .barra-ferramentas select {
+  padding: 9px 12px; border: 1px solid var(--borda); border-radius: 8px;
   font-size: 14px; font-family: inherit; background: var(--fundo-input); color: var(--texto);
+  height: 38px; transition: border-color .15s, box-shadow .15s;
 }
-.campo input:focus, .campo select:focus, .campo textarea:focus {
+.campo input:focus, .campo select:focus, .campo textarea:focus,
+.barra-ferramentas input:focus, .barra-ferramentas select:focus {
   outline: none; border-color: var(--primaria); box-shadow: 0 0 0 3px rgba(37,99,235,.12);
 }
-.campo textarea { resize: vertical; min-height: 64px; }
+.campo textarea { resize: vertical; min-height: 64px; height: auto; }
 .campo .dica { font-size: 12px; color: var(--texto-suave); }
 
+/* Barra de filtros/pesquisa: agrupada visualmente como um cartao (em vez de
+   inputs soltos direto no fundo da pagina), com labels compactas em
+   maiuscula — o mesmo visual em qualquer tela (filtros, datas, busca...). */
 .barra-ferramentas {
-  display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px;
+  display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 16px;
+  background: var(--fundo-card); border: 1px solid var(--borda); border-radius: 12px;
+  padding: 14px 16px; box-shadow: var(--sombra);
 }
-.barra-ferramentas input[type="search"], .barra-ferramentas select {
-  padding: 9px 11px; border: 1px solid var(--borda); border-radius: 8px; font-size: 14px;
-  background: var(--fundo-input); color: var(--texto);
+.barra-ferramentas > select,
+.barra-ferramentas > input {
+  align-self: center;
+}
+.barra-ferramentas .campo { gap: 4px; }
+.barra-ferramentas .campo label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--texto-suave);
+}
+.barra-ferramentas input[type="search"] {
+  padding-left: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%236b7280' stroke-width='2' viewBox='0 0 24 24'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: 10px center;
 }
 .barra-ferramentas .cresce { flex: 1; min-width: 180px; }
+.barra-ferramentas .btn, .barra-ferramentas .btn--secundario { height: 38px; }
 
 /* ===================== Modal ===================== */
 .modal-overlay {

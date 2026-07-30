@@ -281,7 +281,7 @@ window.PrecAvancada = (function () {
           </div>
         </div>
         <div class="barra-ferramentas mt-16" style="margin-bottom:0">
-          <input type="search" id="prec-busca" class="cresce" placeholder="🔍 Filtrar produtos na planilha por nome ou referência…" value="${esc(filtroProd)}" />
+          <input type="search" id="prec-busca" class="cresce" placeholder="Filtrar produtos na planilha por nome ou referência…" value="${esc(filtroProd)}" />
           ${termo ? `<button class="btn btn--secundario" id="prec-busca-limpar">Limpar</button>` : ''}
         </div>
         <p class="dica mt-16" style="margin-bottom:0">Produtos importados (cadastro em lote ou NF-e) aparecem agrupados por importação. Você também pode <strong>buscar um produto do cadastro</strong> para precificar sob demanda. Depois use <strong>"Aplicar preços"</strong> para atualizar o preço de venda.</p>

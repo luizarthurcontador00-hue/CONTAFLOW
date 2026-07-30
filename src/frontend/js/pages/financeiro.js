@@ -1179,7 +1179,7 @@ window.PaginaFinanceiro = (function () {
 
       <div class="campo mt-16"><label>🔍 Buscar outra conta ${tipo === 'pagar' ? 'a pagar' : 'a receber'}</label></div>
       <div class="barra-ferramentas" style="margin-bottom:8px">
-        <input id="cc-busca-termo" class="cresce" placeholder="Buscar por descrição…" />
+        <input type="search" id="cc-busca-termo" class="cresce" placeholder="Buscar por descrição…" />
         <select id="cc-busca-status">
           <option value="">Pendentes e pagas</option>
           <option value="pendente">Só pendentes</option>

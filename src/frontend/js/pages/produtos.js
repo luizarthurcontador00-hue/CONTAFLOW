@@ -774,7 +774,7 @@ window.PaginaProdutos = (function () {
         Produtos deixados em branco não são alterados. Você também pode <strong>bipar o código de barras</strong> para somar +1 à contagem.</p>
       </div>
       <div class="barra-ferramentas">
-        <input type="search" id="cf-scan" class="cresce" placeholder="🔍 Bipe o código de barras (soma +1) ou digite o nome e tecle Enter…" autocomplete="off" />
+        <input type="search" id="cf-scan" class="cresce" placeholder="Bipe o código de barras (soma +1) ou digite o nome e tecle Enter…" autocomplete="off" />
         <select id="cf-categoria"><option value="">Todas as categorias</option></select>
         <button class="btn btn--secundario" id="cf-preencher" title="Marca como conferidos, com o saldo atual, os produtos ainda não contados">✓ Não contados = saldo atual</button>
       </div>
