@@ -35,6 +35,33 @@ let client = null;
 let estado = 'desconectado'; // desconectado | gerando_qr | aguardando_leitura | conectado | erro
 let qrDataUrl = null;
 let ultimoErro = null;
+let desconectandoManualmente = false; // true quando foi o proprio usuario que clicou em "Desconectar"
+let timerReconexao = null;
+
+/**
+ * Ja existe uma sessao do WhatsApp salva em disco (LocalAuth) de uma conexao
+ * anterior? Usado para decidir se vale a pena conectar sozinho ao ligar o
+ * sistema (sem isso, todo mundo que nunca usou o WhatsApp veria uma tentativa
+ * de conexao/QR do nada).
+ */
+function temSessaoSalva() {
+  try {
+    const itens = fs.readdirSync(paths.whatsappAuthDir);
+    return itens.some((nome) => nome.startsWith('session'));
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Tenta reconectar sozinho apos uma queda inesperada (nao foi o usuario que desconectou). */
+function agendarReconexao() {
+  if (timerReconexao) return;
+  timerReconexao = setTimeout(() => {
+    timerReconexao = null;
+    iniciar().catch((e) => console.error('[whatsapp] falha ao tentar reconectar automaticamente:', descreverErro(e)));
+  }, 20000);
+  if (timerReconexao.unref) timerReconexao.unref();
+}
 
 /**
  * Onde fica o Chromium baixado para o Puppeteer (whatsapp-web.js) usar.
@@ -86,9 +113,29 @@ function status() {
   return { estado, qr: qrDataUrl, erro: ultimoErro };
 }
 
+/**
+ * Arquivos de "lock" que o Chrome cria dentro do perfil (userDataDir) pra
+ * impedir dois Chromes usando a mesma pasta ao mesmo tempo. Se o programa
+ * fechar sem chamar client.destroy() (queda de energia, "Finalizar tarefa"
+ * no Gerenciador de Tarefas, crash), esse arquivo fica orfao e todo QUE
+ * TENTAR CONECTAR DEPOIS esbarra em "The browser is already running for
+ * ...\whatsapp-auth\session" mesmo com nenhum Chrome de verdade aberto.
+ * Como so existe um Client por processo aqui, e seguro limpar antes de
+ * cada tentativa de conexao nova.
+ */
+const ARQUIVOS_LOCK_CHROME = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+function limparLockDeSessaoAntiga() {
+  const dirSessao = path.join(paths.whatsappAuthDir, 'session');
+  ARQUIVOS_LOCK_CHROME.forEach((nome) => {
+    try { fs.rmSync(path.join(dirSessao, nome), { force: true }); } catch (_) { /* nao existia - segue */ }
+  });
+}
+
 /** Inicia a conexao (idempotente: se ja estiver iniciando/conectado, so retorna o status). */
 async function iniciar() {
   if (client) return status();
+
+  limparLockDeSessaoAntiga();
 
   if (!process.env.PUPPETEER_CACHE_DIR) {
     process.env.PUPPETEER_CACHE_DIR = resolverDiretorioCachePuppeteer();
@@ -113,7 +160,11 @@ async function iniciar() {
     estado = 'aguardando_leitura';
   });
   novoClient.on('ready', () => { estado = 'conectado'; qrDataUrl = null; ultimoErro = null; });
-  novoClient.on('disconnected', () => { estado = 'desconectado'; qrDataUrl = null; client = null; });
+  novoClient.on('disconnected', () => {
+    estado = 'desconectado'; qrDataUrl = null; client = null;
+    if (!desconectandoManualmente) agendarReconexao();
+    desconectandoManualmente = false;
+  });
   novoClient.on('auth_failure', (msg) => { estado = 'erro'; ultimoErro = String(msg); client = null; });
   novoClient.on('message', (msg) => {
     tratarMensagemRecebida(msg).catch((e) => console.error('[whatsapp] erro ao tratar mensagem recebida:', descreverErro(e)));
@@ -127,14 +178,19 @@ async function iniciar() {
     estado = 'erro';
     ultimoErro = e.message;
     client = null;
+    if (!desconectandoManualmente) agendarReconexao();
+    desconectandoManualmente = false;
   });
 
   return status();
 }
 
 async function desconectar() {
+  if (timerReconexao) { clearTimeout(timerReconexao); timerReconexao = null; }
   if (client) {
+    desconectandoManualmente = true;
     try { await client.destroy(); } catch (_) { /* segue mesmo se falhar */ }
+    desconectandoManualmente = false; // client.destroy() nem sempre dispara o evento "disconnected" pra resetar sozinho
   }
   client = null;
   estado = 'desconectado';
@@ -880,7 +936,7 @@ function _definirClienteParaTeste(fakeClient, fakeEstado) {
 iniciarAgendador();
 
 module.exports = {
-  iniciar, desconectar, status,
+  iniciar, desconectar, status, temSessaoSalva,
   listarConversas, obterConversa, atualizarStatusConversa, atribuirAtendente, marcarLida, enviarTexto, iniciarConversa,
   iniciarAtendimento, alternarModoConversa, finalizarConversa, enviarMidia, enviarDigitando,
   listarContatos, obterContato, atualizarContato, criarLeadDaConversa,

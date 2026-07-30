@@ -189,8 +189,22 @@ app.whenReady().then(criarJanela).catch((err) => {
   app.quit();
 });
 
-app.on('window-all-closed', () => {
+// Desconecta o WhatsApp antes de fechar (com prazo maximo de 5s) para o
+// Chrome interno liberar o "lock" do perfil direitinho — sem isso, a proxima
+// abertura do programa pode falhar com "The browser is already running for
+// ...\whatsapp-auth\session" mesmo sem nenhum Chrome de verdade aberto.
+app.on('window-all-closed', async () => {
   if (timerBackup) clearInterval(timerBackup);
+  try {
+    const whatsapp = require('../backend/services/whatsappService');
+    await Promise.race([
+      whatsapp.desconectar(),
+      new Promise((resolve) => setTimeout(resolve, 5000)),
+    ]);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[whatsapp] falha ao desconectar ao fechar o programa:', e && e.message);
+  }
   if (backend && backend.server) backend.server.close();
   if (process.platform !== 'darwin') app.quit();
 });

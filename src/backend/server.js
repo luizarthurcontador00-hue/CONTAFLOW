@@ -43,6 +43,21 @@ function createApp() {
     console.error('[agenda] falha ao gerar aulas recorrentes:', e.message);
   }
 
+  // Reconecta o WhatsApp sozinho ao ligar o sistema, se ja tinha sido
+  // conectado antes (sessao salva) — sem isso, o atendimento ficava sempre
+  // desconectado ate alguem entrar em Atendimento e clicar em "Conectar".
+  // So tenta quando ja existe uma sessao anterior, pra nao forcar QR Code em
+  // quem nunca usou o WhatsApp.
+  try {
+    // eslint-disable-next-line global-require
+    const whatsapp = require('./services/whatsappService');
+    if (whatsapp.temSessaoSalva()) {
+      whatsapp.iniciar().catch((e) => console.error('[whatsapp] falha ao conectar automaticamente:', e.message));
+    }
+  } catch (e) {
+    console.error('[whatsapp] falha ao verificar sessao salva:', e.message);
+  }
+
   const app = express();
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true }));
