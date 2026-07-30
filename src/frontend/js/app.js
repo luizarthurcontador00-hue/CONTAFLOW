@@ -13,6 +13,7 @@
     cursos: { titulo: 'Cursos', pagina: () => window.PaginaCursos },
     instrumentos: { titulo: 'Instrumentos', pagina: () => window.PaginaInstrumentos },
     voluntarios: { titulo: 'Voluntários', pagina: () => window.PaginaVoluntarios },
+    membros: { titulo: 'Diretoria', pagina: () => window.PaginaMembros },
     turmas: { titulo: 'Turmas', pagina: () => window.PaginaTurmas },
     chamada: { titulo: 'Chamada', pagina: () => window.PaginaChamada },
     arrecadacao: { titulo: 'Arrecadação', pagina: () => window.PaginaArrecadacao },
@@ -54,13 +55,14 @@
     produtos: 'comercio', compras: 'comercio', fornecedores: 'comercio', precificacao: 'comercio', sacolas: 'comercio',
     servicos: 'servico', agenda: 'servico', ordens: 'servico', comissoes: 'servico', crm: 'servico', viagens: 'servico',
     cursos: 'servico', instrumentos: 'servico', voluntarios: 'servico', turmas: 'servico', chamada: 'servico',
+    membros: 'servico',
     arrecadacao: 'servico',
   };
   // Rotas exclusivas de um ramo especifico (so aparecem alem do filtro de perfil).
   const rotaRamo = {
     crm: 'agencia_viagem', viagens: 'agencia_viagem',
     cursos: 'instituto', instrumentos: 'instituto', voluntarios: 'instituto',
-    turmas: 'instituto', chamada: 'instituto', arrecadacao: 'instituto',
+    turmas: 'instituto', chamada: 'instituto', arrecadacao: 'instituto', membros: 'instituto',
   };
   // Num instituto sem fins lucrativos nao existe venda: o que entra e oferta,
   // e o que sai e despesa. Estes modulos saem do menu por completo.
@@ -83,7 +85,7 @@
     });
     // Regras compostas (dependem tambem do ramo, nao so do perfil).
     ['ordens', 'agenda', 'crm', 'viagens', 'pdv', 'vendas', 'comissoes', 'dashboard',
-      'cursos', 'instrumentos', 'voluntarios', 'turmas', 'chamada', 'arrecadacao',
+      'cursos', 'instrumentos', 'voluntarios', 'turmas', 'chamada', 'arrecadacao', 'membros',
       'produtos', 'sacolas', 'precificacao', 'compras', 'fornecedores'].forEach((nome) => {
       const link = document.querySelector(`.nav-item[data-rota="${nome}"]`);
       if (link) link.style.display = rotaVisivel(nome) ? '' : 'none';

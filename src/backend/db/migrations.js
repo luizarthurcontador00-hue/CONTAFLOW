@@ -1316,6 +1316,75 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 32,
+    name: 'instituto-patrimonio-emprestimo-e-diretoria',
+    up(db) {
+      db.exec(`
+        -- Unidade fisica do instrumento ("violao nº 3"). O cadastro por
+        -- unidade e opcional: quem so quer contar quantidade continua usando
+        -- instrumentos.quantidade_total. Registrar unidades e o que permite
+        -- emprestar um instrumento especifico e saber com quem ele esta.
+        CREATE TABLE IF NOT EXISTS instrumentos_unidades (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          instrumento_id INTEGER NOT NULL REFERENCES instrumentos(id) ON DELETE CASCADE,
+          numero         TEXT NOT NULL,                  -- "03", "Violao 3", tombo...
+          estado         TEXT NOT NULL DEFAULT 'disponivel', -- disponivel | emprestado | manutencao | baixado
+          observacao     TEXT,
+          criado_em      TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+          UNIQUE (instrumento_id, numero)
+        );
+        CREATE INDEX IF NOT EXISTS idx_unidades_instrumento ON instrumentos_unidades(instrumento_id);
+
+        -- Emprestimo de uma unidade para um aluno levar para casa.
+        CREATE TABLE IF NOT EXISTS emprestimos_instrumento (
+          id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+          unidade_id          INTEGER NOT NULL REFERENCES instrumentos_unidades(id) ON DELETE CASCADE,
+          aluno_id            INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+          data_emprestimo     TEXT NOT NULL DEFAULT (date('now','localtime')),
+          previsao_devolucao  TEXT,
+          data_devolucao      TEXT,
+          observacao_saida    TEXT,
+          observacao_retorno  TEXT,
+          criado_em           TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_emprestimos_unidade ON emprestimos_instrumento(unidade_id);
+        CREATE INDEX IF NOT EXISTS idx_emprestimos_aluno ON emprestimos_instrumento(aluno_id);
+        CREATE INDEX IF NOT EXISTS idx_emprestimos_abertos ON emprestimos_instrumento(data_devolucao);
+
+        -- Aluno que TEM o proprio instrumento nao ocupa vaga do acervo: e o
+        -- que permite abrir turma maior do que a quantidade de instrumentos.
+        -- E por tipo de instrumento (ter violao proprio nao ajuda em teclado).
+        CREATE TABLE IF NOT EXISTS alunos_instrumentos_proprios (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          aluno_id       INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+          instrumento_id INTEGER NOT NULL REFERENCES instrumentos(id) ON DELETE CASCADE,
+          observacao     TEXT,
+          UNIQUE (aluno_id, instrumento_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_aluno_instr_proprio ON alunos_instrumentos_proprios(aluno_id);
+
+        -- Diretoria e equipe administrativa do instituto (presidente,
+        -- tesoureiro, secretario...). Guarda o mandato, porque em entidade
+        -- sem fins lucrativos o cargo tem prazo e quem assina documento muda.
+        CREATE TABLE IF NOT EXISTS membros_instituto (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          nome          TEXT NOT NULL,
+          cargo         TEXT NOT NULL DEFAULT 'outro',
+          documento     TEXT,
+          telefone      TEXT,
+          email         TEXT,
+          mandato_inicio TEXT,
+          mandato_fim   TEXT,
+          assina_documentos INTEGER NOT NULL DEFAULT 0, -- aparece como assinatura em recibos/declaracoes
+          ativo         INTEGER NOT NULL DEFAULT 1,
+          observacao    TEXT,
+          criado_em     TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_membros_ativo ON membros_instituto(ativo);
+      `);
+    },
+  },
 ];
 
 /**

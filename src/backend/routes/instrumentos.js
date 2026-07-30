@@ -17,6 +17,26 @@ router.post('/:id/vagas-disponiveis', asyncHandler((req, res) => {
   }));
 }));
 
+// ---------------------------- Emprestimos ----------------------------
+router.get('/emprestimos', asyncHandler((req, res) => res.json(instrumentos.listarEmprestimos({
+  abertos: req.query.abertos === '1', aluno_id: req.query.aluno_id, instrumento_id: req.query.instrumento_id,
+}))));
+router.post('/emprestimos', asyncHandler((req, res) => res.status(201).json(instrumentos.emprestar(req.body || {}))));
+router.post('/emprestimos/:id/devolver', asyncHandler((req, res) => res.json(instrumentos.devolver(req.params.id, req.body || {}))));
+
+// --------------------- Instrumento proprio do aluno ---------------------
+router.get('/proprios/:alunoId', asyncHandler((req, res) => res.json(instrumentos.instrumentosProprios(req.params.alunoId))));
+router.put('/proprios/:alunoId', asyncHandler((req, res) => res.json(
+  instrumentos.definirInstrumentosProprios(Number(req.params.alunoId), (req.body || {}).instrumento_ids)
+)));
+
+// ------------------------ Unidades (patrimonio) ------------------------
+router.get('/:id/unidades', asyncHandler((req, res) => res.json(instrumentos.listarUnidades(req.params.id))));
+router.post('/:id/unidades', asyncHandler((req, res) => res.status(201).json(instrumentos.criarUnidade(Number(req.params.id), req.body || {}))));
+router.post('/:id/unidades/gerar', asyncHandler((req, res) => res.json(instrumentos.gerarUnidades(Number(req.params.id), (req.body || {}).quantidade))));
+router.put('/unidades/:unidadeId', asyncHandler((req, res) => res.json(instrumentos.atualizarUnidade(req.params.unidadeId, req.body || {}))));
+router.delete('/unidades/:unidadeId', asyncHandler((req, res) => res.json(instrumentos.excluirUnidade(req.params.unidadeId))));
+
 router.get('/:id', asyncHandler((req, res) => res.json(instrumentos.obter(req.params.id))));
 router.post('/', asyncHandler((req, res) => res.status(201).json(instrumentos.criar(req.body || {}))));
 router.put('/:id', asyncHandler((req, res) => res.json(instrumentos.atualizar(req.params.id, req.body || {}))));

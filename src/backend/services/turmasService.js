@@ -123,18 +123,44 @@ function validar(dados) {
  * Impede abrir/editar turma pedindo mais instrumentos do que existem livres
  * naquele horario. Explica o limite com nomes, para dar para agir.
  */
+/** Quantos matriculados ativos da turma trazem o proprio instrumento. */
+function comInstrumentoProprio(turmaId, instrumentoId) {
+  if (!turmaId || !instrumentoId) return 0;
+  return getDb().prepare(`
+    SELECT COUNT(*) c FROM matriculas m
+    JOIN alunos_instrumentos_proprios p ON p.aluno_id = m.aluno_id AND p.instrumento_id = @instrumentoId
+    WHERE m.turma_id = @turmaId AND m.status = 'ativa'
+  `).get({ turmaId, instrumentoId }).c;
+}
+
+/**
+ * Confere o acervo ao abrir/editar a turma.
+ *
+ * As vagas NAO sao travadas pelo tamanho do acervo, e isso e proposital: um
+ * instituto com 4 violoes pode abrir turma de 8 quando metade dos alunos
+ * traz o proprio instrumento — travar aqui impediria de criar a turma antes
+ * de existir qualquer matricula (o ovo e a galinha). O limite de verdade e
+ * cobrado na MATRICULA, onde da para saber exatamente quem precisa de
+ * instrumento emprestado.
+ *
+ * O unico caso barrado aqui e o impossivel: turma que depende de instrumento
+ * quando nao ha nenhum livre naquele horario.
+ */
 function conferirAcervo(d, horarios, turmaIdIgnorar) {
   if (!d.instrumento_id || d.vagas === 0) return null;
   const disp = instrumentos.vagasDisponiveis(d.instrumento_id, horarios, {
     turmaIdIgnorar,
     instrumentosPorAluno: d.instrumentos_por_aluno,
   });
-  if (d.vagas > disp.vagas_maximas) {
+
+  if (disp.vagas_maximas === 0) {
     const ocupando = disp.turmas_no_mesmo_horario.map((t) => t.nome).join(', ');
     throw new AppError(
-      `O instituto tem ${disp.quantidade_total} ${disp.instrumento}(s) e neste horário `
-      + `${disp.em_uso_no_horario} já está(ão) comprometido(s)${ocupando ? ` com: ${ocupando}` : ''}. `
-      + `Esta turma comporta no máximo ${disp.vagas_maximas} aluno(s).`
+      `Não há ${disp.instrumento} livre neste horário`
+      + (ocupando ? ` (todos comprometidos com: ${ocupando})` : '')
+      + (disp.emprestados ? `, ${disp.emprestados} emprestado(s)` : '')
+      + (disp.fora_de_uso ? `, ${disp.fora_de_uso} em manutenção/baixado` : '')
+      + '. Escolha outro horário, ou matricule apenas alunos que tenham o próprio instrumento.'
     );
   }
   return disp;
@@ -189,6 +215,9 @@ function atualizar(id, dados) {
   });
   salvar();
 
+  // Mudou dia/horario? Os encontros futuros do horario ANTIGO ficariam
+  // orfaos no calendario (trocar terça por quarta deixaria os dois).
+  if (dados.horarios) limparEncontrosForaDoHorario(id);
   if (d.status === 'aberta' || d.status === 'planejada') gerarEncontros(id);
   return obter(id);
 }
@@ -242,6 +271,25 @@ function matricular(turmaId, { aluno_id, observacao }) {
 
   const jaTem = db.prepare("SELECT * FROM matriculas WHERE turma_id = ? AND aluno_id = ? AND status IN ('ativa','espera')").get(turmaId, aluno.id);
   if (jaTem) throw new AppError(`${aluno.nome} já está ${jaTem.status === 'espera' ? 'na fila de espera' : 'matriculado'} nesta turma.`);
+
+  // Aluno sem instrumento proprio precisa de um do acervo: confere se sobra
+  // algum naquele horario antes de deixar entrar como ativo.
+  const traiOProprio = instrumentos.alunoTemInstrumentoProprio(aluno.id, turma.instrumento_id);
+  if (turma.instrumento_id && !traiOProprio) {
+    const disp = instrumentos.vagasDisponiveis(turma.instrumento_id, turma.horarios, {
+      turmaIdIgnorar: turmaId,
+      instrumentosPorAluno: turma.instrumentos_por_aluno,
+    });
+    const usandoAcervo = turma.matriculas.filter((m) => m.status === 'ativa'
+      && !instrumentos.alunoTemInstrumentoProprio(m.aluno_id, turma.instrumento_id)).length;
+    if (usandoAcervo >= disp.vagas_maximas) {
+      throw new AppError(
+        `Não há ${disp.instrumento} disponível neste horário para ${aluno.nome}. `
+        + `Os ${disp.vagas_maximas} do acervo já estão com outros alunos. `
+        + 'Se o aluno tiver o próprio instrumento, marque isso no cadastro dele.'
+      );
+    }
+  }
 
   const status = turma.matriculados >= turma.vagas ? 'espera' : 'ativa';
   const info = db.prepare(
@@ -359,6 +407,39 @@ function gerarEncontros(turmaId, diasAFrente = 90) {
   return { geradas };
 }
 
+/**
+ * Remove do calendario os encontros FUTUROS que nao batem mais com os
+ * horarios atuais da turma (depois de o dia/hora terem sido editados).
+ *
+ * Nunca mexe no passado nem em encontro que ja teve chamada: o historico do
+ * que realmente aconteceu vale mais que a arrumacao do calendario.
+ */
+function limparEncontrosForaDoHorario(turmaId) {
+  const db = getDb();
+  const horarios = db.prepare('SELECT * FROM turmas_horarios WHERE turma_id = ?').all(turmaId);
+  const turma = db.prepare('SELECT periodo_inicio, periodo_fim FROM turmas WHERE id = ?').get(turmaId);
+  const hoje = new Date().toISOString().slice(0, 10);
+
+  const futuros = db.prepare(`
+    SELECT a.id, a.data, a.hora_inicio FROM agendamentos a
+    WHERE a.turma_id = ? AND a.data >= ?
+      AND NOT EXISTS (SELECT 1 FROM presencas p WHERE p.agendamento_id = a.id)
+  `).all(turmaId, hoje);
+
+  const excluir = db.prepare('DELETE FROM agendamentos WHERE id = ?');
+  let removidos = 0;
+  const rodar = db.transaction(() => {
+    futuros.forEach((enc) => {
+      const diaSemana = new Date(enc.data + 'T12:00:00').getDay();
+      const casa = horarios.some((h) => Number(h.dia_semana) === diaSemana && h.hora_inicio === enc.hora_inicio);
+      const dentroDoPeriodo = enc.data >= turma.periodo_inicio && (!turma.periodo_fim || enc.data <= turma.periodo_fim);
+      if (!casa || !dentroDoPeriodo) { excluir.run(enc.id); removidos++; }
+    });
+  });
+  rodar();
+  return { removidos };
+}
+
 /** Gera os encontros de todas as turmas ativas (chamado no boot do sistema). */
 function gerarEncontrosPendentes() {
   const db = getDb();
@@ -371,6 +452,7 @@ function gerarEncontrosPendentes() {
 module.exports = {
   listar, obter, criar, atualizar, excluir,
   matricular, mudarStatusMatricula, removerMatricula,
-  gerarEncontros, gerarEncontrosPendentes,
+  gerarEncontros, gerarEncontrosPendentes, limparEncontrosForaDoHorario,
+  comInstrumentoProprio,
   STATUS_TURMA, STATUS_MATRICULA, DIAS,
 };

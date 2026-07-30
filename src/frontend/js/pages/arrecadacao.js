@@ -199,11 +199,12 @@ window.PaginaArrecadacao = (function () {
   }
 
   async function gerarRecibo(id) {
-    let o; let cfg = {};
+    let o; let cfg = {}; let assinante = null;
     try {
-      [o, cfg] = await Promise.all([
+      [o, cfg, assinante] = await Promise.all([
         API.get(`/api/arrecadacao/ofertas/${id}`),
         API.get('/api/config').catch(() => ({})),
+        API.get('/api/membros/assinante').catch(() => null),
       ]);
     } catch (e) { UI.erro(e.message); return; }
 
@@ -228,7 +229,10 @@ window.PaginaArrecadacao = (function () {
       ${o.projeto_nome ? `destinada ao projeto <strong>${UI.escapar(o.projeto_nome)}</strong>` : 'para manutenção das atividades da instituição'},
       recebida em ${UI.escapar(o.data)}${o.forma ? ` via ${UI.escapar(o.forma)}` : ''}.</p>
       <p>Por ser expressão da verdade, firmamos o presente recibo.</p>
-      <div class="assinatura">${UI.escapar(cfg.nome_loja || 'Responsável')}</div>
+      <div class="assinatura">
+        ${UI.escapar(assinante ? assinante.nome : (cfg.nome_loja || 'Responsável'))}
+        ${assinante ? `<br><span style="font-size:11px;color:#555">${UI.escapar(assinante.cargo)}</span>` : ''}
+      </div>
       </body></html>`;
 
     try {

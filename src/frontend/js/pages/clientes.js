@@ -65,18 +65,53 @@ window.PaginaClientes = (function () {
           <span class="dica">Obrigatório na prática para alunos menores de idade.</span></div>
         <div class="campo"><label>Telefone do responsável</label>
           <input name="responsavel_telefone" value="${UI.escapar(c.responsavel_telefone || '')}" /></div>
+        <div class="campo col-2" id="cli-instr-proprios" style="border-top:1px solid var(--borda);padding-top:14px">
+          <label>Instrumentos próprios do aluno</label>
+          <span class="dica">Aluno que traz o próprio instrumento não ocupa vaga do acervo — é o que permite a turma ser maior que a quantidade de instrumentos do instituto.</span>
+          <div id="cli-instr-lista" class="mt-16"><span class="dica">Carregando…</span></div>
+        </div>
         ` : ''}
         <div class="campo col-2"><label>Endereço</label><input name="endereco" value="${UI.escapar(c.endereco || '')}" /></div>
         <div class="campo col-2"><label>Observação</label><textarea name="observacao">${UI.escapar(c.observacao || '')}</textarea></div>
       </form>`,
       textoConfirmar: 'Salvar',
+      aoAbrir: async (el) => {
+        const wrap = el.querySelector('#cli-instr-lista');
+        if (!wrap) return;
+        let instrumentos = [];
+        let proprios = [];
+        try {
+          [instrumentos, proprios] = await Promise.all([
+            API.get('/api/instrumentos'),
+            ed ? API.get(`/api/instrumentos/proprios/${cliente.id}`) : Promise.resolve([]),
+          ]);
+        } catch (_) { wrap.innerHTML = '<span class="dica">Não foi possível carregar os instrumentos.</span>'; return; }
+
+        if (!instrumentos.length) {
+          wrap.innerHTML = '<span class="dica">Nenhum instrumento cadastrado no acervo ainda.</span>';
+          return;
+        }
+        const tem = new Set(proprios.map((p) => p.instrumento_id));
+        wrap.innerHTML = instrumentos.map((i) => `
+          <label class="flex gap-12" style="align-items:center;padding:4px 0;cursor:pointer">
+            <input type="checkbox" class="cli-instr" value="${i.id}" ${tem.has(i.id) ? 'checked' : ''} />
+            <span>${UI.escapar(i.nome)}</span>
+          </label>`).join('');
+      },
       aoConfirmar: async (el) => {
         const f = el.querySelector('#fc');
         if (!f.nome.value.trim()) { UI.erro('Informe o nome.'); return false; }
         const body = Object.fromEntries(new FormData(f).entries());
+        const marcados = Array.from(el.querySelectorAll('.cli-instr:checked')).map((c2) => Number(c2.value));
+        const temSecaoInstrumentos = !!el.querySelector('#cli-instr-lista');
         try {
-          if (ed) await API.put('/api/clientes/' + cliente.id, body);
-          else await API.post('/api/clientes', body);
+          const salvo = ed
+            ? await API.put('/api/clientes/' + cliente.id, body)
+            : await API.post('/api/clientes', body);
+          if (temSecaoInstrumentos) {
+            const alunoId = (salvo && salvo.id) || (ed ? cliente.id : null);
+            if (alunoId) await API.put(`/api/instrumentos/proprios/${alunoId}`, { instrumento_ids: marcados });
+          }
           UI.sucesso(`${rotulo(true)} salvo.`); await listar();
         } catch (e) { UI.erro(e.message); return false; }
       },

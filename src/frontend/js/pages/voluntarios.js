@@ -250,8 +250,13 @@ window.PaginaVoluntarios = (function () {
   }
 
   async function declaracao(pessoa, de, ate) {
-    let cfg = {};
-    try { cfg = await API.get('/api/config'); } catch (_) { cfg = {}; }
+    let cfg = {}; let assinante = null;
+    try {
+      [cfg, assinante] = await Promise.all([
+        API.get('/api/config').catch(() => ({})),
+        API.get('/api/membros/assinante').catch(() => null),
+      ]);
+    } catch (_) { cfg = {}; }
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Declaração de voluntariado</title>
       <style>
         body{font-family:Georgia,serif;padding:56px;color:#111;line-height:1.9}
@@ -273,7 +278,10 @@ window.PaginaVoluntarios = (function () {
       <p>O trabalho voluntário aqui declarado não gera vínculo empregatício nem obrigação de natureza
       trabalhista, previdenciária ou afim, nos termos da Lei nº 9.608/1998.</p>
       <p>Por ser expressão da verdade, firmamos a presente declaração.</p>
-      <div class="assinatura">${UI.escapar(cfg.nome_loja || 'Responsável pela instituição')}</div>
+      <div class="assinatura">
+        ${UI.escapar(assinante ? assinante.nome : (cfg.nome_loja || 'Responsável pela instituição'))}
+        ${assinante ? `<br><span style="font-size:11px;color:#555">${UI.escapar(assinante.cargo)}</span>` : ''}
+      </div>
       </body></html>`;
 
     try { await UI.baixarPDF(html, `declaracao-voluntariado-${pessoa.nome.replace(/\s+/g, '-').toLowerCase()}.pdf`); }
