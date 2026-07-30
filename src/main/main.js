@@ -2,14 +2,22 @@
 
 const path = require('path');
 const fs = require('fs');
-const { app, BrowserWindow, dialog, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, shell, ipcMain, Tray, Menu, nativeImage } = require('electron');
 const { startServer } = require('../backend/server');
 
 let mainWindow = null;
 let backend = null;
 let timerBackup = null;
+let tray = null;
+let appEncerrando = false; // true so quando o usuario escolhe "Sair" (ou o SO esta fechando de verdade)
+let saindo = false; // evita rodar a limpeza de saida duas vezes (tray "Sair" + window-all-closed)
+let avisoTrayMostrado = false;
 
 const isDev = process.env.NODE_ENV === 'development';
+// Quando o Windows abre o programa sozinho (inicializacao automatica), passa
+// esse argumento pra nao aparecer a janela do nada assim que liga o PC — o
+// programa ja sobe direto minimizado na bandeja.
+const iniciadoOculto = process.argv.includes('--hidden');
 
 // ------------------------- IPC (backup / pastas) -------------------------
 ipcMain.handle('escolher-pasta', async () => {
@@ -39,6 +47,19 @@ ipcMain.handle('escolher-arquivo-backup', async () => {
 ipcMain.handle('recarregar-janela', async () => {
   if (mainWindow) mainWindow.webContents.reload();
   return true;
+});
+
+// ------------------------- Iniciar com o Windows / bandeja -------------------------
+ipcMain.handle('obter-inicializacao-automatica', () => ({
+  ativo: app.getLoginItemSettings().openAtLogin,
+}));
+
+ipcMain.handle('definir-inicializacao-automatica', (_e, ativar) => {
+  app.setLoginItemSettings({
+    openAtLogin: !!ativar,
+    args: ativar ? ['--hidden'] : [],
+  });
+  return { ativo: app.getLoginItemSettings().openAtLogin };
 });
 
 /**
@@ -73,6 +94,54 @@ ipcMain.handle('gerar-pdf', async (_e, { html, nomeSugerido }) => {
     janela.destroy();
   }
 });
+
+/**
+ * Encerra de verdade: desconecta o WhatsApp (soltando o lock do perfil do
+ * Chrome direitinho), fecha o backend e sai. Chamado pelo "Sair" da bandeja
+ * — o botao "X" da janela normal so minimiza (ver o "close" em criarJanela).
+ */
+async function sairDeVerdade() {
+  if (saindo) return;
+  saindo = true;
+  appEncerrando = true;
+  if (timerBackup) clearInterval(timerBackup);
+  try {
+    const whatsapp = require('../backend/services/whatsappService');
+    await Promise.race([
+      whatsapp.desconectar(),
+      new Promise((resolve) => setTimeout(resolve, 5000)),
+    ]);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[whatsapp] falha ao desconectar ao fechar o programa:', e && e.message);
+  }
+  if (backend && backend.server) backend.server.close();
+  app.quit();
+}
+
+// Icone da bandeja: fica rodando mesmo com a janela fechada/minimizada, pra
+// continuar recebendo mensagens do WhatsApp em segundo plano.
+function criarTray() {
+  try {
+    const iconPath = path.join(__dirname, '..', '..', 'build', 'tray-icon.png');
+    const icone = nativeImage.createFromPath(iconPath);
+    tray = new Tray(icone.isEmpty() ? icone : icone.resize({ width: 16, height: 16 }));
+    tray.setToolTip('Gestor de Vendas');
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: 'Abrir Gestor de Vendas', click: () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } } },
+      { type: 'separator' },
+      { label: 'Sair', click: () => sairDeVerdade() },
+    ]));
+    tray.on('click', () => {
+      if (!mainWindow) return;
+      if (mainWindow.isVisible()) mainWindow.focus();
+      else mainWindow.show();
+    });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[tray] nao foi possivel criar o icone da bandeja:', e && e.message);
+  }
+}
 
 // Executa o backup automatico (se configurado) e agenda verificacoes periodicas.
 function agendarBackupAutomatico() {
@@ -109,7 +178,24 @@ async function criarJanela() {
     mainWindow.webContents.send('backend-url', backend.url);
   });
 
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.once('ready-to-show', () => { if (!iniciadoOculto) mainWindow.show(); });
+
+  // O "X" da janela so minimiza pra bandeja — o backend/WhatsApp continuam
+  // rodando em segundo plano. So fecha de verdade via "Sair" na bandeja.
+  mainWindow.on('close', (e) => {
+    if (appEncerrando) return;
+    e.preventDefault();
+    mainWindow.hide();
+    if (!avisoTrayMostrado && tray && process.platform === 'win32') {
+      avisoTrayMostrado = true;
+      try {
+        tray.displayBalloon({
+          title: 'Gestor de Vendas continua rodando',
+          content: 'O programa continua em segundo plano (recebendo mensagens do WhatsApp, por exemplo). Clique no ícone da bandeja pra abrir de novo.',
+        });
+      } catch (_) { /* balloon e so cosmetico */ }
+    }
+  });
 
   // Abrir links externos no navegador padrao, nao dentro do app.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -181,7 +267,10 @@ function verificarAtualizacoes() {
   }
 }
 
-app.whenReady().then(criarJanela).catch((err) => {
+app.whenReady().then(async () => {
+  criarTray();
+  await criarJanela();
+}).catch((err) => {
   dialog.showErrorBox(
     'Erro ao iniciar',
     'Nao foi possivel iniciar o programa.\n\nDetalhes tecnicos: ' + (err && err.message ? err.message : err)
@@ -189,26 +278,20 @@ app.whenReady().then(criarJanela).catch((err) => {
   app.quit();
 });
 
-// Desconecta o WhatsApp antes de fechar (com prazo maximo de 5s) para o
-// Chrome interno liberar o "lock" do perfil direitinho — sem isso, a proxima
-// abertura do programa pode falhar com "The browser is already running for
-// ...\whatsapp-auth\session" mesmo sem nenhum Chrome de verdade aberto.
-app.on('window-all-closed', async () => {
-  if (timerBackup) clearInterval(timerBackup);
-  try {
-    const whatsapp = require('../backend/services/whatsappService');
-    await Promise.race([
-      whatsapp.desconectar(),
-      new Promise((resolve) => setTimeout(resolve, 5000)),
-    ]);
-  } catch (e) {
-    // eslint-disable-next-line no-console
-    console.error('[whatsapp] falha ao desconectar ao fechar o programa:', e && e.message);
-  }
-  if (backend && backend.server) backend.server.close();
-  if (process.platform !== 'darwin') app.quit();
+// Garante que qualquer caminho de saida (Cmd+Q no mac, fechamento de sessao
+// do Windows etc.) marca "encerrando de verdade" antes das janelas fecharem,
+// pra nao ficar preso escondendo a janela em vez de deixar sair.
+app.on('before-quit', () => { appEncerrando = true; });
+
+// Com a janela so minimizando pra bandeja (ver "close" em criarJanela), isso
+// so dispara mesmo num encerramento de verdade — serve de rede de seguranca
+// pra garantir a limpeza (desconectar WhatsApp, fechar backend) mesmo se
+// "Sair" da bandeja nao tiver sido o caminho usado.
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') sairDeVerdade();
 });
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) criarJanela();
+  else if (mainWindow) mainWindow.show();
 });

@@ -89,7 +89,31 @@ window.PaginaConfiguracoes = (function () {
           </div>
           <div class="campo col-2"><button class="btn" type="submit">Salvar configurações</button></div>
         </form>
+      </div>
+
+      <div class="card mt-16" id="cfg-inicializacao-card" style="max-width:640px;display:none">
+        <h3 style="margin-top:0">🖥️ Inicialização</h3>
+        <p class="dica">Deixe o sistema sempre rodando em segundo plano (recebendo mensagens do WhatsApp, por exemplo) — abre sozinho, minimizado na bandeja, quando o computador ligar. O "X" da janela passa a só minimizar; use "Sair" no ícone da bandeja pra fechar de verdade.</p>
+        <label class="flex gap-12" style="align-items:center">
+          <input type="checkbox" id="cfg-auto-inicio" /> Iniciar automaticamente com o Windows
+        </label>
       </div>`;
+
+    if (window.appDesktop && window.appDesktop.obterInicializacaoAutomatica) {
+      const cardIni = alvo.querySelector('#cfg-inicializacao-card');
+      const checkIni = alvo.querySelector('#cfg-auto-inicio');
+      cardIni.style.display = '';
+      window.appDesktop.obterInicializacaoAutomatica().then((r) => { checkIni.checked = !!r.ativo; }).catch(() => {});
+      checkIni.addEventListener('change', async (ev) => {
+        try {
+          await window.appDesktop.definirInicializacaoAutomatica(ev.target.checked);
+          UI.sucesso(ev.target.checked ? 'Vai iniciar sozinho com o Windows, minimizado.' : 'Inicialização automática desativada.');
+        } catch (e) {
+          UI.erro(e.message);
+          ev.target.checked = !ev.target.checked;
+        }
+      });
+    }
 
     alvo.querySelector('select[name="perfil_negocio"]').addEventListener('change', (e) => {
       const wrap = alvo.querySelector('#cfg-ramo-wrap');

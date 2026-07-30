@@ -16,5 +16,7 @@ contextBridge.exposeInMainWorld('appDesktop', {
   escolherArquivoBackup: () => ipcRenderer.invoke('escolher-arquivo-backup'),
   recarregarJanela: () => ipcRenderer.invoke('recarregar-janela'),
   gerarPdf: (html, nomeSugerido) => ipcRenderer.invoke('gerar-pdf', { html, nomeSugerido }),
+  obterInicializacaoAutomatica: () => ipcRenderer.invoke('obter-inicializacao-automatica'),
+  definirInicializacaoAutomatica: (ativar) => ipcRenderer.invoke('definir-inicializacao-automatica', ativar),
   plataforma: process.platform,
 });
