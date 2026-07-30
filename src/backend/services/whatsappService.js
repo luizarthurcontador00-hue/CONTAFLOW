@@ -36,6 +36,30 @@ let estado = 'desconectado'; // desconectado | gerando_qr | aguardando_leitura |
 let qrDataUrl = null;
 let ultimoErro = null;
 
+/**
+ * Onde fica o Chromium baixado para o Puppeteer (whatsapp-web.js) usar.
+ * O .puppeteerrc.cjs manda o Puppeteer BAIXAR em puppeteer-cache/ na hora do
+ * "npm install" (pra dar pra empacotar junto no instalador via
+ * asarUnpack), mas isso nao garante que o Puppeteer vai OLHAR nesse mesmo
+ * lugar quando o app ja instalado roda no PC do cliente — sem isso, ele cai
+ * no cache padrao do sistema (%USERPROFILE%\.cache\puppeteer), que nunca foi
+ * baixado naquele computador, e da erro "Could not find Chrome".
+ */
+function resolverDiretorioCachePuppeteer() {
+  try {
+    // eslint-disable-next-line global-require
+    const electron = require('electron');
+    const app = electron.app || (electron.remote && electron.remote.app);
+    if (app && app.isPackaged) {
+      // No app empacotado, puppeteer-cache/ fica fora do asar (asarUnpack).
+      return path.join(process.resourcesPath, 'app.asar.unpacked', 'puppeteer-cache');
+    }
+  } catch (_) {
+    // Electron indisponivel (ex.: rodando so o backend com "npm run server").
+  }
+  return path.join(__dirname, '..', '..', '..', 'puppeteer-cache');
+}
+
 const MAPA_TIPOS = {
   chat: 'texto', image: 'imagem', video: 'video',
   audio: 'audio', ptt: 'audio', document: 'documento', sticker: 'sticker',
@@ -65,6 +89,10 @@ function status() {
 /** Inicia a conexao (idempotente: se ja estiver iniciando/conectado, so retorna o status). */
 async function iniciar() {
   if (client) return status();
+
+  if (!process.env.PUPPETEER_CACHE_DIR) {
+    process.env.PUPPETEER_CACHE_DIR = resolverDiretorioCachePuppeteer();
+  }
 
   // eslint-disable-next-line global-require
   const { Client, LocalAuth } = require('whatsapp-web.js');
