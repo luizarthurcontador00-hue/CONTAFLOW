@@ -2,13 +2,51 @@
 
 /**
  * Pagina de Compras: importacao de NF-e (XML) em dois passos (preview ->
- * confirmacao, completando produtos novos) e historico de notas importadas.
+ * confirmacao, completando produtos novos), historico de notas importadas, e
+ * pedidos de compra (rascunho enviado ao fornecedor, antes da mercadoria
+ * chegar — quando chegar, continua sendo a importacao de NF-e quem da
+ * entrada de verdade no estoque).
  */
 window.PaginaCompras = (function () {
   let categorias = [];
+  let fornecedores = [];
+  let abaAtual = 'notas';
+  const STATUS_PEDIDO = {
+    aberto: ['Em aberto', 'alerta'], enviado: ['Enviado', 'muted'],
+    recebido: ['Recebido', 'ok'], cancelado: ['Cancelado', 'muted'],
+  };
 
   async function render(container) {
     container.innerHTML = `
+      <div class="tabs">
+        <div class="tab ${abaAtual === 'notas' ? 'ativo' : ''}" data-aba="notas">Notas fiscais</div>
+        <div class="tab ${abaAtual === 'pedidos' ? 'ativo' : ''}" data-aba="pedidos">📝 Pedidos de compra</div>
+      </div>
+      <div id="compras-conteudo"></div>`;
+
+    container.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
+      abaAtual = t.dataset.aba;
+      container.querySelectorAll('.tab').forEach((x) => x.classList.toggle('ativo', x === t));
+      trocarAba();
+    }));
+
+    [categorias, fornecedores] = await Promise.all([
+      API.get('/api/categorias').catch(() => []),
+      API.get('/api/fornecedores').catch(() => []),
+    ]);
+
+    trocarAba();
+  }
+
+  function trocarAba() {
+    if (abaAtual === 'pedidos') renderPedidos();
+    else renderNotas();
+  }
+
+  // ------------------------------ Notas fiscais (NF-e) ------------------------------
+  async function renderNotas() {
+    const alvo = document.getElementById('compras-conteudo');
+    alvo.innerHTML = `
       <div class="barra-ferramentas">
         <div class="cresce">
           <strong>Importar nota fiscal</strong>
@@ -23,10 +61,8 @@ window.PaginaCompras = (function () {
       </div>
     `;
 
-    categorias = await API.get('/api/categorias').catch(() => []);
-
-    const input = container.querySelector('#xml-file');
-    container.querySelector('#btn-importar').addEventListener('click', () => input.click());
+    const input = alvo.querySelector('#xml-file');
+    alvo.querySelector('#btn-importar').addEventListener('click', () => input.click());
     input.addEventListener('change', async () => {
       if (!input.files.length) return;
       await importar(input.files[0]);
@@ -246,6 +282,280 @@ window.PaginaCompras = (function () {
         <tfoot><tr><th colspan="4" style="text-align:right">Total da nota</th><th>${UI.moeda(c.valor_total)}</th></tr></tfoot>
       </table>`;
     Modal.abrir({ titulo: 'Itens da nota', tamanho: 'modal--grande', corpoHTML: corpo, mostrarConfirmar: false });
+  }
+
+  // ------------------------------ Pedidos de compra ------------------------------
+  const filtroPedidos = { status: '', fornecedor_id: '' };
+
+  async function renderPedidos() {
+    const alvo = document.getElementById('compras-conteudo');
+    alvo.innerHTML = `
+      <div class="barra-ferramentas">
+        <select id="pd-filtro-fornecedor"><option value="">Todos os fornecedores</option>${fornecedores.map((f) => `<option value="${f.id}">${UI.escapar(f.nome)}</option>`).join('')}</select>
+        <select id="pd-filtro-status">
+          <option value="">Todos os status</option>
+          ${Object.entries(STATUS_PEDIDO).map(([k, v]) => `<option value="${k}">${v[0]}</option>`).join('')}
+        </select>
+        <div class="cresce"></div>
+        <button class="btn" id="pd-novo">+ Novo pedido de compra</button>
+      </div>
+      <div class="card"><div id="pd-lista">Carregando…</div></div>`;
+
+    alvo.querySelector('#pd-filtro-fornecedor').addEventListener('change', (e) => { filtroPedidos.fornecedor_id = e.target.value; listarPedidos(); });
+    alvo.querySelector('#pd-filtro-status').addEventListener('change', (e) => { filtroPedidos.status = e.target.value; listarPedidos(); });
+    alvo.querySelector('#pd-novo').addEventListener('click', () => formPedido());
+
+    await listarPedidos();
+  }
+
+  async function listarPedidos() {
+    const alvo = document.getElementById('pd-lista');
+    if (!alvo) return;
+    const params = new URLSearchParams();
+    if (filtroPedidos.status) params.set('status', filtroPedidos.status);
+    if (filtroPedidos.fornecedor_id) params.set('fornecedor_id', filtroPedidos.fornecedor_id);
+    let pedidos;
+    try { pedidos = await API.get('/api/pedidos-compra?' + params.toString()); }
+    catch (e) { alvo.innerHTML = UI.escapar(e.message); return; }
+
+    if (!pedidos.length) { alvo.innerHTML = '<p class="muted">Nenhum pedido de compra neste filtro.</p>'; return; }
+
+    alvo.innerHTML = `<table class="tabela">
+      <thead><tr><th>Fornecedor</th><th>Criado em</th><th>Itens</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+      <tbody>${pedidos.map((p) => {
+        const [txt, cor] = STATUS_PEDIDO[p.status] || [p.status, 'muted'];
+        return `<tr>
+          <td>${UI.escapar(p.fornecedor_nome)}</td>
+          <td>${UI.dataHora(p.criado_em)}</td>
+          <td>${p.qtd_itens}</td>
+          <td>${UI.moeda(p.valor_total)}</td>
+          <td><span class="badge badge--${cor}">${txt}</span></td>
+          <td style="text-align:right;white-space:nowrap">
+            ${p.status === 'aberto' ? `<button class="btn btn--secundario" data-editar="${p.id}">Editar</button>` : `<button class="btn btn--secundario" data-ver="${p.id}">Ver</button>`}
+          </td>
+        </tr>`;
+      }).join('')}</tbody></table>`;
+
+    alvo.querySelectorAll('[data-editar]').forEach((b) => b.addEventListener('click', async () => {
+      try { formPedido(await API.get(`/api/pedidos-compra/${b.dataset.editar}`)); } catch (e) { UI.erro(e.message); }
+    }));
+    alvo.querySelectorAll('[data-ver]').forEach((b) => b.addEventListener('click', async () => {
+      try { verPedido(await API.get(`/api/pedidos-compra/${b.dataset.ver}`)); } catch (e) { UI.erro(e.message); }
+    }));
+  }
+
+  /** Form de criacao/edicao de um pedido (so' permitido enquanto status='aberto'). */
+  function formPedido(pedido) {
+    const editando = !!pedido;
+    let fornecedorId = pedido ? pedido.fornecedor_id : '';
+    const itens = pedido ? pedido.itens.map((i) => ({
+      produto_id: i.produto_id, nome: i.produto_nome, unidade: i.unidade,
+      quantidade: Number(i.quantidade), custo_unitario: Number(i.custo_unitario),
+    })) : [];
+
+    const corpo = `
+      <div class="campo">
+        <label>Fornecedor *</label>
+        ${editando
+          ? `<input readonly value="${UI.escapar(pedido.fornecedor_nome)}" />`
+          : `<select id="pc-fornecedor"><option value="">Selecione…</option>${fornecedores.map((f) => `<option value="${f.id}">${UI.escapar(f.nome)}</option>`).join('')}</select>`}
+      </div>
+      <div class="flex flex--between mt-16" style="align-items:center">
+        <label style="margin:0">Itens do pedido</label>
+        <button type="button" class="btn btn--secundario" id="pc-sugerir" ${fornecedorId ? '' : 'disabled'}>💡 Sugerir itens em falta</button>
+      </div>
+      <div class="barra-ferramentas mt-16" style="margin-bottom:8px">
+        <input type="search" id="pc-busca" class="cresce" placeholder="Buscar produto deste fornecedor…" autocomplete="off" ${fornecedorId ? '' : 'disabled'} />
+      </div>
+      <div id="pc-busca-resultados"></div>
+      <div id="pc-itens" class="mt-16"></div>
+      <div class="campo mt-16"><label>Observação</label><textarea id="pc-obs" rows="2">${UI.escapar(pedido ? pedido.observacao || '' : '')}</textarea></div>`;
+
+    Modal.abrir({
+      titulo: editando ? `Editar pedido #${pedido.id}` : 'Novo pedido de compra',
+      tamanho: 'modal--grande', corpoHTML: corpo, textoConfirmar: 'Salvar',
+      aoAbrir: (el) => {
+        const renderItens = () => {
+          const totalGeral = itens.reduce((s, i) => s + i.quantidade * i.custo_unitario, 0);
+          el.querySelector('#pc-itens').innerHTML = itens.length ? `<table class="tabela">
+            <thead><tr><th>Produto</th><th>Qtd</th><th>Custo unit.</th><th>Total</th><th></th></tr></thead>
+            <tbody>${itens.map((i, idx) => `<tr>
+              <td>${UI.escapar(i.nome)}</td>
+              <td><input type="number" min="0.01" step="0.01" data-qtd="${idx}" value="${i.quantidade}" style="width:80px" /></td>
+              <td><input type="number" min="0" step="0.01" data-custo="${idx}" value="${i.custo_unitario}" style="width:100px" /></td>
+              <td>${UI.moeda(i.quantidade * i.custo_unitario)}</td>
+              <td><button type="button" class="btn btn--secundario" data-remover="${idx}">✕</button></td>
+            </tr>`).join('')}</tbody>
+            <tfoot><tr><th colspan="3" style="text-align:right">Total do pedido</th><th>${UI.moeda(totalGeral)}</th><th></th></tr></tfoot>
+          </table>` : '<p class="muted">Nenhum item adicionado ainda.</p>';
+
+          el.querySelectorAll('[data-qtd]').forEach((inp) => inp.addEventListener('change', () => {
+            itens[Number(inp.dataset.qtd)].quantidade = Number(inp.value) || 0; renderItens();
+          }));
+          el.querySelectorAll('[data-custo]').forEach((inp) => inp.addEventListener('change', () => {
+            itens[Number(inp.dataset.custo)].custo_unitario = Number(inp.value) || 0; renderItens();
+          }));
+          el.querySelectorAll('[data-remover]').forEach((b) => b.addEventListener('click', () => {
+            itens.splice(Number(b.dataset.remover), 1); renderItens();
+          }));
+        };
+        renderItens();
+
+        const adicionarItem = (p, qtdSugerida) => {
+          const existente = itens.find((i) => i.produto_id === p.produto_id || i.produto_id === p.id);
+          if (existente) { existente.quantidade += qtdSugerida || 1; renderItens(); return; }
+          itens.push({
+            produto_id: p.produto_id || p.id,
+            nome: p.produto_nome || p.nome,
+            unidade: p.unidade || 'UN',
+            quantidade: qtdSugerida || 1,
+            custo_unitario: Number(p.custo_unitario ?? p.custo ?? 0),
+          });
+          renderItens();
+        };
+
+        const buscaInput = el.querySelector('#pc-busca');
+        const resAlvo = el.querySelector('#pc-busca-resultados');
+        let debounce;
+        buscaInput.addEventListener('input', () => {
+          clearTimeout(debounce);
+          const termo = buscaInput.value.trim();
+          if (!termo) { resAlvo.innerHTML = ''; return; }
+          debounce = setTimeout(async () => {
+            const achados = await API.get(`/api/produtos?fornecedor_id=${fornecedorId}&busca=${encodeURIComponent(termo)}`).catch(() => []);
+            resAlvo.innerHTML = achados.length ? `<div class="pdv-resultados">${achados.map((p) => `
+              <button type="button" data-add="${p.id}">${UI.escapar(p.nome)} <span class="muted">estoque ${UI.numero(p.estoque_atual)} · ${UI.moeda(p.custo)}</span></button>
+            `).join('')}</div>` : '<p class="muted">Nenhum produto encontrado para esse fornecedor.</p>';
+            resAlvo.querySelectorAll('[data-add]').forEach((b) => b.addEventListener('click', () => {
+              const p = achados.find((x) => x.id === Number(b.dataset.add));
+              adicionarItem(p);
+              buscaInput.value = ''; resAlvo.innerHTML = ''; buscaInput.focus();
+            }));
+          }, 250);
+        });
+
+        el.querySelector('#pc-sugerir').addEventListener('click', async () => {
+          if (!fornecedorId) return;
+          let sugestoes;
+          try { sugestoes = await API.get(`/api/pedidos-compra/sugerir?fornecedor_id=${fornecedorId}`); }
+          catch (e) { UI.erro(e.message); return; }
+          if (!sugestoes.length) { UI.toast('Nenhum produto deste fornecedor está abaixo do estoque mínimo.', 'info'); return; }
+          sugestoes.forEach((s) => adicionarItem(s, s.quantidade));
+          UI.sucesso(`${sugestoes.length} item(ns) sugerido(s) adicionado(s).`);
+        });
+
+        if (!editando) {
+          el.querySelector('#pc-fornecedor').addEventListener('change', (e) => {
+            fornecedorId = e.target.value ? Number(e.target.value) : '';
+            if (itens.length) { itens.length = 0; renderItens(); UI.toast('Itens limpos: fornecedor trocado.', 'info'); }
+            el.querySelector('#pc-busca').disabled = !fornecedorId;
+            el.querySelector('#pc-sugerir').disabled = !fornecedorId;
+          });
+        }
+      },
+      aoConfirmar: async (el) => {
+        if (!fornecedorId) { UI.erro('Selecione o fornecedor.'); return false; }
+        if (!itens.length) { UI.erro('Adicione ao menos um item ao pedido.'); return false; }
+        const payload = {
+          fornecedor_id: fornecedorId,
+          observacao: el.querySelector('#pc-obs').value,
+          itens: itens.map((i) => ({ produto_id: i.produto_id, quantidade: i.quantidade, custo_unitario: i.custo_unitario })),
+        };
+        try {
+          if (editando) await API.put(`/api/pedidos-compra/${pedido.id}`, payload);
+          else await API.post('/api/pedidos-compra', payload);
+          UI.sucesso(editando ? 'Pedido atualizado.' : 'Pedido criado.');
+          await listarPedidos();
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
+  /** Visualizacao (com acoes de status/PDF) de um pedido — usada para os que nao estao mais 'aberto', ou para so conferir. */
+  function verPedido(pedido) {
+    const [txt, cor] = STATUS_PEDIDO[pedido.status] || [pedido.status, 'muted'];
+    const corpo = `
+      <div class="flex flex--between mb-16">
+        <div><strong>${UI.escapar(pedido.fornecedor_nome)}</strong>
+          <div class="dica">Criado em ${UI.dataHora(pedido.criado_em)}${pedido.enviado_em ? ' · Enviado em ' + UI.dataHora(pedido.enviado_em) : ''}${pedido.recebido_em ? ' · Recebido em ' + UI.dataHora(pedido.recebido_em) : ''}</div></div>
+        <span class="badge badge--${cor}">${txt}</span>
+      </div>
+      ${pedido.observacao ? `<p class="dica">${UI.escapar(pedido.observacao)}</p>` : ''}
+      <table class="tabela">
+        <thead><tr><th>Produto</th><th>Qtd</th><th>Custo unit.</th><th>Total</th></tr></thead>
+        <tbody>${pedido.itens.map((i) => `<tr>
+          <td>${UI.escapar(i.produto_nome)}</td>
+          <td>${UI.numero(i.quantidade)} ${UI.escapar(i.unidade)}</td>
+          <td>${UI.moeda(i.custo_unitario)}</td>
+          <td>${UI.moeda(i.valor_total)}</td>
+        </tr>`).join('')}</tbody>
+        <tfoot><tr><th colspan="3" style="text-align:right">Total do pedido</th><th>${UI.moeda(pedido.valor_total)}</th></tr></tfoot>
+      </table>`;
+
+    Modal.abrir({
+      titulo: `Pedido de compra #${pedido.id}`, tamanho: 'modal--grande', corpoHTML: corpo, mostrarConfirmar: false,
+      aoAbrir: (el) => {
+        const foot = el.querySelector('.modal__foot');
+        const botoes = [];
+        botoes.push('<button class="btn btn--secundario" id="pd-pdf">⬇️ Baixar PDF</button>');
+        if (pedido.status === 'aberto') botoes.push('<button class="btn btn--secundario" id="pd-editar">Editar</button>');
+        if (pedido.status === 'aberto') botoes.push('<button class="btn" id="pd-enviar">📤 Marcar como enviado</button>');
+        if (pedido.status === 'enviado') botoes.push('<button class="btn" id="pd-receber">✅ Marcar como recebido</button>');
+        if (pedido.status === 'aberto' || pedido.status === 'enviado') botoes.push('<button class="btn btn--perigo" id="pd-cancelar">Cancelar pedido</button>');
+        foot.innerHTML = `<div class="flex gap-12" style="flex-wrap:wrap;width:100%">${botoes.join('')}</div>`;
+
+        foot.querySelector('#pd-pdf').addEventListener('click', () => baixarPdfPedido(pedido));
+        const btnEditar = foot.querySelector('#pd-editar');
+        if (btnEditar) btnEditar.addEventListener('click', () => { el.remove(); formPedido(pedido); });
+        const btnEnviar = foot.querySelector('#pd-enviar');
+        if (btnEnviar) btnEnviar.addEventListener('click', () => mudarStatusPedido(pedido.id, 'enviado', el));
+        const btnReceber = foot.querySelector('#pd-receber');
+        if (btnReceber) btnReceber.addEventListener('click', () => mudarStatusPedido(pedido.id, 'recebido', el));
+        const btnCancelar = foot.querySelector('#pd-cancelar');
+        if (btnCancelar) btnCancelar.addEventListener('click', async () => {
+          const ok = await UI.confirmar('Cancelar este pedido de compra?', { titulo: 'Cancelar pedido', textoConfirmar: 'Cancelar pedido' });
+          if (ok) mudarStatusPedido(pedido.id, 'cancelado', el);
+        });
+      },
+    });
+  }
+
+  async function mudarStatusPedido(id, status, elModal) {
+    try {
+      await API.post(`/api/pedidos-compra/${id}/status`, { status });
+      UI.sucesso('Status atualizado.');
+      if (elModal) elModal.remove();
+      await listarPedidos();
+    } catch (e) { UI.erro(e.message); }
+  }
+
+  async function baixarPdfPedido(pedido) {
+    let loja = {};
+    try { loja = await API.get('/api/config'); } catch (_) { /* segue sem dados da loja */ }
+    const linhas = pedido.itens.map((i) => `<tr>
+      <td>${UI.escapar(i.produto_nome)}</td>
+      <td style="text-align:center">${UI.numero(i.quantidade)} ${UI.escapar(i.unidade)}</td>
+      <td style="text-align:right">${UI.moeda(i.custo_unitario)}</td>
+      <td style="text-align:right">${UI.moeda(i.valor_total)}</td>
+    </tr>`).join('');
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Pedido de compra #${pedido.id}</title>
+      <style>body{font-family:Arial,sans-serif;color:#111;padding:24px;max-width:720px;margin:auto}
+      h1{font-size:20px;margin:0} .cab{display:flex;justify-content:space-between;border-bottom:2px solid #333;padding-bottom:12px;margin-bottom:12px}
+      table{width:100%;border-collapse:collapse;margin-top:12px} th,td{border-bottom:1px solid #ddd;padding:6px;font-size:13px;text-align:left}
+      .tot{text-align:right;font-size:16px;margin-top:12px} .box{border:1px solid #ccc;border-radius:8px;padding:10px;margin-top:10px;font-size:13px}
+      .muted{color:#666}</style></head><body>
+      <div class="cab"><div style="display:flex;gap:12px;align-items:center">${loja.loja_logo ? `<img src="${loja.loja_logo}" style="width:56px;height:56px;object-fit:contain">` : ''}<div><h1>${UI.escapar(loja.nome_loja || 'Minha Empresa')}</h1>
+        <div class="muted">${UI.escapar(loja.loja_telefone || '')} ${UI.escapar(loja.loja_cnpj || '')}</div></div></div>
+        <div style="text-align:right"><strong>Pedido de compra #${pedido.id}</strong><br><span class="muted">${UI.dataHora(pedido.criado_em)}</span></div></div>
+      <div class="box"><strong>Fornecedor:</strong> ${UI.escapar(pedido.fornecedor_nome)}
+      ${pedido.fornecedor_telefone ? `<br><strong>Telefone:</strong> ${UI.escapar(pedido.fornecedor_telefone)}` : ''}
+      ${pedido.fornecedor_email ? `<br><strong>E-mail:</strong> ${UI.escapar(pedido.fornecedor_email)}` : ''}</div>
+      <table><thead><tr><th>Produto</th><th style="text-align:center">Qtd</th><th style="text-align:right">Custo unit.</th><th style="text-align:right">Total</th></tr></thead>
+      <tbody>${linhas}</tbody></table>
+      <div class="tot"><strong>Total do pedido: ${UI.moeda(pedido.valor_total)}</strong></div>
+      ${pedido.observacao ? `<div class="box"><strong>Observações:</strong> ${UI.escapar(pedido.observacao)}</div>` : ''}
+      </body></html>`;
+    UI.baixarPDF(html, `pedido-compra-${pedido.id}.pdf`);
   }
 
   return { titulo: 'Compras', render };

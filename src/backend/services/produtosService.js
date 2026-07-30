@@ -15,7 +15,7 @@ const SELECT_BASE = `
   LEFT JOIN fornecedores f ON f.id = p.fornecedor_id
 `;
 
-function listar({ busca, categoria_id, estoque_baixo, incluir_inativos, eh_servico } = {}) {
+function listar({ busca, categoria_id, fornecedor_id, estoque_baixo, incluir_inativos, eh_servico } = {}) {
   const db = getDb();
   const where = [];
   const params = {};
@@ -32,6 +32,10 @@ function listar({ busca, categoria_id, estoque_baixo, incluir_inativos, eh_servi
   if (categoria_id) {
     where.push('p.categoria_id = @categoria_id');
     params.categoria_id = Number(categoria_id);
+  }
+  if (fornecedor_id) {
+    where.push('p.fornecedor_id = @fornecedor_id');
+    params.fornecedor_id = Number(fornecedor_id);
   }
   if (estoque_baixo === true || estoque_baixo === 'true' || estoque_baixo === '1') {
     where.push('p.estoque_atual <= p.estoque_minimo');

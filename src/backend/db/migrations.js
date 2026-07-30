@@ -1078,6 +1078,42 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 28,
+    name: 'pedidos-de-compra',
+    up(db) {
+      db.exec(`
+        -- Pedido de compra: um "rascunho" de compra a ser enviado para o
+        -- fornecedor, ANTES da mercadoria chegar (diferente de "compras", que
+        -- ja representa uma nota fiscal importada/estoque ja recebido). Cada
+        -- pedido e sempre de UM fornecedor so, e so pode ter itens de
+        -- produtos daquele mesmo fornecedor.
+        CREATE TABLE IF NOT EXISTS pedidos_compra (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          fornecedor_id INTEGER NOT NULL REFERENCES fornecedores(id) ON DELETE RESTRICT,
+          status        TEXT NOT NULL DEFAULT 'aberto', -- aberto | enviado | recebido | cancelado
+          observacao    TEXT,
+          valor_total   REAL NOT NULL DEFAULT 0,
+          compra_id     INTEGER REFERENCES compras(id) ON DELETE SET NULL, -- NF-e vinculada quando o pedido e recebido
+          criado_em     TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+          enviado_em    TEXT,
+          recebido_em   TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_pedidos_compra_fornecedor ON pedidos_compra(fornecedor_id);
+        CREATE INDEX IF NOT EXISTS idx_pedidos_compra_status ON pedidos_compra(status);
+
+        CREATE TABLE IF NOT EXISTS pedidos_compra_itens (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          pedido_id      INTEGER NOT NULL REFERENCES pedidos_compra(id) ON DELETE CASCADE,
+          produto_id     INTEGER NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
+          quantidade     REAL NOT NULL,
+          custo_unitario REAL NOT NULL DEFAULT 0,
+          valor_total    REAL NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_pedidos_compra_itens_pedido ON pedidos_compra_itens(pedido_id);
+      `);
+    },
+  },
 ];
 
 /**

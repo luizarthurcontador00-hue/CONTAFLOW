@@ -13,6 +13,7 @@ router.get('/', asyncHandler((req, res) => {
   res.json(produtos.listar({
     busca: req.query.busca,
     categoria_id: req.query.categoria_id,
+    fornecedor_id: req.query.fornecedor_id,
     estoque_baixo: req.query.estoque_baixo,
     incluir_inativos: req.query.incluir_inativos === '1',
     eh_servico: req.query.eh_servico,
