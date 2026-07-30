@@ -184,6 +184,39 @@ function sugestoes(id) {
 }
 
 /**
+ * Busca manual de contas a pagar/receber para conciliar (quando a sugestao
+ * automatica por valor nao acha, ou o usuario quer escolher outra). Traz
+ * tanto pendentes (pra dar baixa junto) quanto ja pagas/recebidas (pra so
+ * amarrar com o extrato, sem lancar de novo).
+ */
+function buscarContas(id, { termo, status } = {}) {
+  const db = getDb();
+  const t = obterTransacao(id);
+  const tabela = t.tipo === 'debito' ? 'contas_pagar' : 'contas_receber';
+  const dataCol = t.tipo === 'debito' ? 'data_pagamento' : 'data_recebimento';
+  const nomeJoin = t.tipo === 'debito'
+    ? 'LEFT JOIN fornecedores j ON j.id = x.fornecedor_id'
+    : 'LEFT JOIN clientes j ON j.id = x.cliente_id';
+
+  const where = ["x.status != 'cancelada'"];
+  const params = {};
+  if (status === 'pendente' || status === 'pago') {
+    where.push('x.status = @status');
+    params.status = status === 'pago' ? (t.tipo === 'debito' ? 'pago' : 'recebido') : 'pendente';
+  }
+  if (termo) { where.push('x.descricao LIKE @termo'); params.termo = `%${termo}%`; }
+
+  return db.prepare(`
+    SELECT x.*, j.nome AS contraparte_nome
+    FROM ${tabela} x
+    ${nomeJoin}
+    WHERE ${where.join(' AND ')}
+    ORDER BY (x.status = 'pendente') DESC, date(COALESCE(x.vencimento, x.${dataCol})) DESC
+    LIMIT 30
+  `).all(params);
+}
+
+/**
  * Concilia a transacao com uma conta a pagar/receber ja existente. Se ela
  * ainda estiver pendente, da a baixa de verdade (usando a data do extrato e
  * a propria conta financeira de onde ele veio). Se ja estiver paga/recebida
@@ -263,7 +296,7 @@ function reabrir(id) {
 }
 
 module.exports = {
-  importarExtrato, listarTransacoes, obterTransacao, sugestoes,
+  importarExtrato, listarTransacoes, obterTransacao, sugestoes, buscarContas,
   conciliarComExistente, conciliarComNovo, ignorar, reabrir,
   listarRegras, criarRegra, atualizarRegra, excluirRegra, aplicarRegrasPendentes,
 };

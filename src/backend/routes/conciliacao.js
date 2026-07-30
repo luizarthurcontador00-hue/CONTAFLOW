@@ -14,6 +14,7 @@ router.delete('/regras/:id', asyncHandler((req, res) => res.json(svc.excluirRegr
 
 router.get('/', asyncHandler((req, res) => res.json(svc.listarTransacoes(req.query))));
 router.get('/:id/sugestoes', asyncHandler((req, res) => res.json(svc.sugestoes(req.params.id))));
+router.get('/:id/buscar', asyncHandler((req, res) => res.json(svc.buscarContas(req.params.id, req.query))));
 router.post('/:id/conciliar', asyncHandler((req, res) => res.json(svc.conciliarComExistente(req.params.id, req.body || {}))));
 router.post('/:id/novo-lancamento', asyncHandler((req, res) => res.json(svc.conciliarComNovo(req.params.id, req.body || {}))));
 router.post('/:id/ignorar', asyncHandler((req, res) => res.json(svc.ignorar(req.params.id))));

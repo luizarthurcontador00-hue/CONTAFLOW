@@ -1149,10 +1149,24 @@ window.PaginaFinanceiro = (function () {
     });
   }
 
+  function opcaoContaHTML(s, tipo, marcada) {
+    const diferenca = Math.abs(Number(s.valor) - Number(s.__valorTransacao || 0));
+    const statusTxt = s.status === 'pendente' ? '<span class="badge badge--alerta">Pendente</span>' : `<span class="badge badge--ok">${tipo === 'pagar' ? 'Paga' : 'Recebida'} — só amarra com o extrato</span>`;
+    return `
+      <label class="flex gap-12" style="align-items:center;padding:8px 0;border-bottom:1px solid var(--borda)">
+        <input type="radio" name="cc-opcao" value="${s.id}" ${marcada ? 'checked' : ''} />
+        <span class="cresce">${UI.escapar(s.descricao)}${s.contraparte_nome ? ' — ' + UI.escapar(s.contraparte_nome) : ''}
+          <span class="dica">${s.vencimento ? 'vence ' + s.vencimento : ''} — ${UI.moeda(s.valor)}${diferenca > 0.01 ? ` <span style="color:var(--perigo)">(diferença de ${UI.moeda(diferenca)})</span>` : ''}</span>
+        </span>
+        ${statusTxt}
+      </label>`;
+  }
+
   async function formConciliar(t) {
     let sugestoes;
     try { sugestoes = await API.get(`/api/conciliacao/${t.id}/sugestoes`); } catch (e) { UI.erro(e.message); return; }
     const tipo = t.tipo === 'debito' ? 'pagar' : 'receber';
+    sugestoes.forEach((s) => { s.__valorTransacao = t.valor; });
 
     const corpo = `
       <div class="card mb-16">
@@ -1161,16 +1175,25 @@ window.PaginaFinanceiro = (function () {
       </div>
       ${sugestoes.length ? `
       <div class="campo"><label>Bate com uma conta já cadastrada?</label></div>
-      <div id="cc-sugestoes">${sugestoes.map((s, idx) => `
-        <label class="flex gap-12" style="align-items:center;padding:8px 0;border-bottom:1px solid var(--borda)">
-          <input type="radio" name="cc-opcao" value="${s.id}" ${idx === 0 ? 'checked' : ''} />
-          <span>${UI.escapar(s.descricao)} <span class="dica">${s.vencimento ? '— vence ' + s.vencimento : ''} — ${UI.moeda(s.valor)}</span></span>
-        </label>`).join('')}
-        <label class="flex gap-12" style="align-items:center;padding:8px 0">
-          <input type="radio" name="cc-opcao" value="novo" />
-          <span>Nenhuma dessas — criar um lançamento novo</span>
-        </label>
-      </div>` : '<div class="dica mb-16">Nenhuma conta pendente com esse valor. Crie um lançamento novo:</div>'}
+      <div id="cc-sugestoes">${sugestoes.map((s, idx) => opcaoContaHTML(s, tipo, idx === 0)).join('')}</div>` : '<div class="dica mb-16">Nenhuma conta pendente com esse valor.</div>'}
+
+      <div class="campo mt-16"><label>🔍 Buscar outra conta ${tipo === 'pagar' ? 'a pagar' : 'a receber'}</label></div>
+      <div class="barra-ferramentas" style="margin-bottom:8px">
+        <input id="cc-busca-termo" class="cresce" placeholder="Buscar por descrição…" />
+        <select id="cc-busca-status">
+          <option value="">Pendentes e pagas</option>
+          <option value="pendente">Só pendentes</option>
+          <option value="pago">Só já ${tipo === 'pagar' ? 'pagas' : 'recebidas'}</option>
+        </select>
+        <button type="button" class="btn btn--secundario" id="cc-busca-btn">Buscar</button>
+      </div>
+      <div id="cc-busca-resultados" class="mb-16"></div>
+
+      <label class="flex gap-12" style="align-items:center;padding:8px 0">
+        <input type="radio" name="cc-opcao" value="novo" ${sugestoes.length ? '' : 'checked'} />
+        <span>Nenhuma dessas — criar um lançamento novo</span>
+      </label>
+
       <div id="cc-form-novo" class="mt-16" style="${sugestoes.length ? 'display:none' : ''}">
         <div class="campo"><label>Descrição</label><input id="cc-nova-desc" value="${UI.escapar(t.descricao)}" /></div>
         ${tipo === 'pagar' ? `
@@ -1185,10 +1208,29 @@ window.PaginaFinanceiro = (function () {
     Modal.abrir({
       titulo: `Conciliar — ${tipo === 'pagar' ? 'a pagar' : 'a receber'}`, tamanho: 'modal--grande', corpoHTML: corpo, textoConfirmar: 'Confirmar',
       aoAbrir: (el) => {
-        el.querySelectorAll('input[name="cc-opcao"]').forEach((r) => r.addEventListener('change', () => {
+        // Delegacao: cobre tanto os radios que ja vem no HTML quanto os que a busca adicionar depois.
+        el.addEventListener('change', (e) => {
+          if (e.target.name !== 'cc-opcao') return;
           const sel = el.querySelector('input[name="cc-opcao"]:checked');
           el.querySelector('#cc-form-novo').style.display = sel && sel.value === 'novo' ? '' : 'none';
-        }));
+        });
+
+        el.querySelector('#cc-busca-btn').addEventListener('click', async () => {
+          const termo = el.querySelector('#cc-busca-termo').value.trim();
+          const status = el.querySelector('#cc-busca-status').value;
+          const resAlvo = el.querySelector('#cc-busca-resultados');
+          resAlvo.innerHTML = 'Buscando…';
+          try {
+            const params = new URLSearchParams();
+            if (termo) params.set('termo', termo);
+            if (status) params.set('status', status);
+            const achadas = await API.get(`/api/conciliacao/${t.id}/buscar?${params.toString()}`);
+            achadas.forEach((s) => { s.__valorTransacao = t.valor; });
+            resAlvo.innerHTML = achadas.length
+              ? achadas.map((s) => opcaoContaHTML(s, tipo, false)).join('')
+              : '<p class="muted">Nenhuma conta encontrada.</p>';
+          } catch (e) { resAlvo.innerHTML = UI.escapar(e.message); }
+        });
       },
       aoConfirmar: async (el) => {
         const opcaoSel = el.querySelector('input[name="cc-opcao"]:checked');
