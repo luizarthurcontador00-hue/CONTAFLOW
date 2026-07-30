@@ -30,7 +30,7 @@ window.PaginaCatalogo = (function () {
       <div class="card mb-16"><div id="cat-lista">Carregando…</div></div>
       <div class="card">
         <h3 style="margin-top:0">📢 Catálogo para divulgação</h3>
-        <p class="dica">Gera uma folha com foto, nome e preço dos itens selecionados. Na tela de impressão, escolha "Salvar como PDF" para gerar o arquivo e enviar pelo WhatsApp ou postar nas redes.</p>
+        <p class="dica">Gera um PDF com foto, nome e preço dos itens selecionados, pronto para enviar pelo WhatsApp ou postar nas redes.</p>
         <div class="form-grid">
           <div class="campo"><label>Título do catálogo</label><input id="cat-titulo" value="${UI.escapar(config.nome_loja ? `Catálogo — ${config.nome_loja}` : 'Catálogo de Produtos')}"></div>
           <div class="campo"><label>Itens por linha</label><select id="cat-colunas">
@@ -47,7 +47,7 @@ window.PaginaCatalogo = (function () {
         </label>
         <div class="flex flex--between mt-16">
           <span class="dica"><strong id="cat-total-sel">0</strong> item(ns) selecionado(s)</span>
-          <button class="btn" id="cat-gerar">📄 Gerar catálogo</button>
+          <button class="btn" id="cat-gerar">📄 Gerar catálogo em PDF</button>
         </div>
       </div>`;
 
@@ -155,7 +155,7 @@ window.PaginaCatalogo = (function () {
         ${rodapeHTML}
       </body></html>`;
 
-    UI.imprimir(html);
+    UI.baixarPDF(html, `${titulo.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.pdf`);
   }
 
   function escaparTxt(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }

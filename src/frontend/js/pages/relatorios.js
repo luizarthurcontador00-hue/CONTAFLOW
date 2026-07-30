@@ -34,7 +34,8 @@ window.PaginaRelatorios = (function () {
         <div class="cresce"></div>
         <button class="btn btn--secundario" id="r-excel" style="align-self:end">⬇️ Excel</button>
         <button class="btn btn--secundario" id="r-csv" style="align-self:end">⬇️ CSV</button>
-        <button class="btn" id="r-pdf" style="align-self:end">🖨️ Imprimir / PDF</button>
+        <button class="btn btn--secundario" id="r-pdf" style="align-self:end">🖨️ Imprimir</button>
+        <button class="btn" id="r-baixar-pdf" style="align-self:end">⬇️ Baixar PDF</button>
       </div>
       <div class="card"><div id="r-conteudo">Selecione um relatório e clique em Gerar.</div></div>
 
@@ -54,6 +55,7 @@ window.PaginaRelatorios = (function () {
     container.querySelector('#r-excel').addEventListener('click', () => exportar('xls'));
     container.querySelector('#r-csv').addEventListener('click', () => exportar('csv'));
     container.querySelector('#r-pdf').addEventListener('click', imprimir);
+    container.querySelector('#r-baixar-pdf').addEventListener('click', baixarPdf);
     container.querySelector('#ec-exportar').addEventListener('click', exportarContador);
     ajustarPeriodo();
     await gerar();
@@ -212,10 +214,10 @@ window.PaginaRelatorios = (function () {
     document.body.appendChild(a); a.click(); a.remove();
   }
 
-  function imprimir() {
+  function htmlRelatorio() {
     const area = document.getElementById('print-area');
-    if (!area) { UI.erro('Gere o relatório antes de imprimir.'); return; }
-    UI.imprimir(`<html><head><title>Relatório</title>
+    if (!area) return null;
+    return `<html><head><title>Relatório</title>
       <style>
         body{font-family:Segoe UI,Arial,sans-serif;padding:24px;color:#111}
         table{width:100%;border-collapse:collapse;margin-top:8px}
@@ -225,7 +227,19 @@ window.PaginaRelatorios = (function () {
       </style></head><body>
       <div style="text-align:right;color:#666;font-size:11px">Emitido em ${new Date().toLocaleString('pt-BR')}</div>
       ${area.innerHTML}
-      </body></html>`);
+      </body></html>`;
+  }
+
+  function imprimir() {
+    const html = htmlRelatorio();
+    if (!html) { UI.erro('Gere o relatório antes de imprimir.'); return; }
+    UI.imprimir(html);
+  }
+
+  function baixarPdf() {
+    const html = htmlRelatorio();
+    if (!html) { UI.erro('Gere o relatório antes de baixar o PDF.'); return; }
+    UI.baixarPDF(html, `relatorio-${relatorio}.pdf`);
   }
 
   return { titulo: 'Relatórios', render };

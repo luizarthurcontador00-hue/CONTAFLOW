@@ -102,5 +102,22 @@ const UI = (function () {
     }
   }
 
-  return { toast, sucesso, erro, confirmar, moeda, numero, dataHora, escapar, imprimir };
+  /**
+   * Gera um PDF de verdade (texto selecionavel) a partir de um HTML, pedindo
+   * onde salvar. No app empacotado usa o motor nativo do Electron (sempre
+   * seleciona­vel, nao depende de qual "impressora PDF" o usuario tem
+   * instalada no Windows); no navegador (modo dev) cai para o imprimir()
+   * normal, deixando o proprio navegador gerar o PDF.
+   */
+  async function baixarPDF(html, nomeSugerido) {
+    if (!window.appDesktop || !window.appDesktop.gerarPdf) { imprimir(html); return; }
+    try {
+      const r = await window.appDesktop.gerarPdf(html, nomeSugerido);
+      if (r && r.ok) sucesso('PDF salvo em ' + r.caminho);
+    } catch (e) {
+      erro('Não foi possível gerar o PDF: ' + (e && e.message ? e.message : 'erro desconhecido'));
+    }
+  }
+
+  return { toast, sucesso, erro, confirmar, moeda, numero, dataHora, escapar, imprimir, baixarPDF };
 })();

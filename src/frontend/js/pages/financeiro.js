@@ -584,7 +584,7 @@ window.PaginaFinanceiro = (function () {
         <div class="pix-copia">${UI.escapar(dados.pix.payload)}</div>
       </div>
       </body></html>`;
-    UI.imprimir(html);
+    UI.baixarPDF(html, `cobranca-${c.id}.pdf`);
   }
 
   async function baixar(tipo, id) {

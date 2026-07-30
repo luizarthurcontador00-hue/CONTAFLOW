@@ -266,6 +266,7 @@ window.PaginaOrdens = (function () {
             <button class="btn btn--secundario" id="det-status-btn" ${o.venda_id ? 'disabled' : ''}>Atualizar status</button>
             <div class="cresce"></div>
             <button class="btn btn--secundario" id="det-print">🖨️ Imprimir</button>
+            <button class="btn btn--secundario" id="det-baixar-pdf">⬇️ Baixar PDF</button>
             ${o.tipo === 'orcamento' && !o.venda_id ? '<button class="btn btn--secundario" id="det-geraros">→ Gerar OS</button>' : ''}
             ${podeEditar ? '<button class="btn btn--secundario" id="det-editar">Editar</button>' : ''}
             ${!o.venda_id ? `<button class="btn btn--secundario" id="det-faturar">💲 Faturar rápido</button>` : ''}
@@ -276,6 +277,7 @@ window.PaginaOrdens = (function () {
           catch (e) { UI.erro(e.message); }
         });
         el.querySelector('#det-print').addEventListener('click', () => imprimir(o));
+        el.querySelector('#det-baixar-pdf').addEventListener('click', () => baixarPdf(o));
         const ed = el.querySelector('#det-editar');
         if (ed) ed.addEventListener('click', () => { el.remove(); abrirForm(o); });
         const gos = el.querySelector('#det-geraros');
@@ -345,11 +347,11 @@ window.PaginaOrdens = (function () {
   }
 
   // ------------------------------ Impressão ------------------------------
-  async function imprimir(o) {
+  async function htmlOrdem(o) {
     let loja = {};
     try { loja = await API.get('/api/config'); } catch (_) { /* segue sem dados da loja */ }
     const linhas = o.itens.map((i) => `<tr><td>${UI.escapar(i.descricao)}</td><td style="text-align:center">${UI.numero(i.quantidade)}</td><td style="text-align:right">${UI.moeda(i.preco_unitario)}</td><td style="text-align:right">${UI.moeda(i.valor_total)}</td></tr>`).join('');
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${rotulo(o.tipo)} #${o.numero}</title>
+    return `<!doctype html><html><head><meta charset="utf-8"><title>${rotulo(o.tipo)} #${o.numero}</title>
       <style>body{font-family:Arial,sans-serif;color:#111;padding:24px;max-width:720px;margin:auto}
       h1{font-size:20px;margin:0} .cab{display:flex;justify-content:space-between;border-bottom:2px solid #333;padding-bottom:12px;margin-bottom:12px}
       table{width:100%;border-collapse:collapse;margin-top:12px} th,td{border-bottom:1px solid #ddd;padding:6px;font-size:13px;text-align:left}
@@ -369,8 +371,10 @@ window.PaginaOrdens = (function () {
       ${o.observacao ? `<div class="box"><strong>Observações:</strong> ${UI.escapar(o.observacao)}</div>` : ''}
       <p class="muted" style="margin-top:24px;text-align:center">${UI.escapar(loja.loja_rodape_cupom || '')}</p>
       </body></html>`;
-    UI.imprimir(html);
   }
+
+  async function imprimir(o) { UI.imprimir(await htmlOrdem(o)); }
+  async function baixarPdf(o) { UI.baixarPDF(await htmlOrdem(o), `${rotulo(o.tipo).toLowerCase()}-${o.numero}.pdf`); }
 
   // ------------------------------ Pátio da Oficina (Kanban) ------------------------------
   const COLUNAS_PATIO = [

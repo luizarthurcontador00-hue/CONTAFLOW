@@ -1,6 +1,7 @@
 'use strict';
 
 const path = require('path');
+const fs = require('fs');
 const { app, BrowserWindow, dialog, shell, ipcMain } = require('electron');
 const { startServer } = require('../backend/server');
 
@@ -38,6 +39,39 @@ ipcMain.handle('escolher-arquivo-backup', async () => {
 ipcMain.handle('recarregar-janela', async () => {
   if (mainWindow) mainWindow.webContents.reload();
   return true;
+});
+
+/**
+ * Gera um PDF de verdade (texto selecionavel) a partir de um HTML, usando o
+ * motor de PDF nativo do Chromium (webContents.printToPDF) — diferente do
+ * window.print() do renderer, que depende da impressora/driver escolhida
+ * pelo usuario no Windows (algumas "impressoras PDF" de terceiros rasterizam
+ * a pagina como imagem, o que deixa o texto sem poder ser selecionado).
+ */
+ipcMain.handle('gerar-pdf', async (_e, { html, nomeSugerido }) => {
+  const janela = new BrowserWindow({ show: false });
+  try {
+    // baseURLForDataURL resolve imagens com caminho relativo (ex.: logo da
+    // loja, fotos de produto em /uploads/...) contra o backend local —
+    // sem isso elas nao carregariam dentro de uma data: URL solta.
+    await janela.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html || ''), {
+      baseURLForDataURL: backend ? backend.url + '/' : undefined,
+    });
+    const buffer = await janela.webContents.printToPDF({ printBackground: true, pageSize: 'A4' });
+
+    const resultado = await dialog.showSaveDialog(mainWindow, {
+      title: 'Salvar PDF',
+      defaultPath: nomeSugerido || 'documento.pdf',
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (resultado.canceled || !resultado.filePath) return { cancelado: true };
+
+    fs.writeFileSync(resultado.filePath, buffer);
+    shell.openPath(resultado.filePath);
+    return { ok: true, caminho: resultado.filePath };
+  } finally {
+    janela.destroy();
+  }
 });
 
 // Executa o backup automatico (se configurado) e agenda verificacoes periodicas.

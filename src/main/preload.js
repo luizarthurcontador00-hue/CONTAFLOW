@@ -15,5 +15,6 @@ contextBridge.exposeInMainWorld('appDesktop', {
   abrirPasta: (caminho) => ipcRenderer.invoke('abrir-pasta', caminho),
   escolherArquivoBackup: () => ipcRenderer.invoke('escolher-arquivo-backup'),
   recarregarJanela: () => ipcRenderer.invoke('recarregar-janela'),
+  gerarPdf: (html, nomeSugerido) => ipcRenderer.invoke('gerar-pdf', { html, nomeSugerido }),
   plataforma: process.platform,
 });
