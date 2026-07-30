@@ -117,6 +117,15 @@ async function criarJanela() {
     return { action: 'deny' };
   });
 
+  // Links tipo mailto:/tel: (ex.: contato do contador na tela de licenca)
+  // abrem no aplicativo padrao do sistema, em vez de tentar navegar a janela.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith('mailto:') || url.startsWith('tel:')) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
+  });
+
   await mainWindow.loadURL(backend.url);
 
   if (isDev) {
@@ -125,6 +134,17 @@ async function criarJanela() {
 
   agendarBackupAutomatico();
   verificarAtualizacoes();
+}
+
+// Formata as notas de versao vindas do GitHub Release (info.releaseNotes do
+// electron-updater) para texto simples, pronto pra caixa de dialogo nativa.
+function formatarNotasVersao(releaseNotes) {
+  if (!releaseNotes) return '';
+  const limpar = (s) => String(s || '').replace(/<[^>]+>/g, '').trim();
+  if (Array.isArray(releaseNotes)) {
+    return releaseNotes.map((r) => `v${r.version}:\n${limpar(r.note)}`).join('\n\n');
+  }
+  return limpar(releaseNotes);
 }
 
 // Verifica atualizacoes no GitHub Releases (apenas no app empacotado).
@@ -136,11 +156,13 @@ function verificarAtualizacoes() {
     autoUpdater.autoDownload = true;
     autoUpdater.on('update-downloaded', (info) => {
       if (!mainWindow) return;
+      const novidades = formatarNotasVersao(info.releaseNotes);
       dialog.showMessageBox(mainWindow, {
         type: 'info',
         title: 'Atualização disponível',
         message: `Uma nova versão (${info.version}) foi baixada.`,
-        detail: 'A atualização será instalada ao fechar o programa. Deseja reiniciar agora para atualizar?',
+        detail: (novidades ? `O que mudou nesta versão:\n${novidades}\n\n` : '')
+          + 'A atualização será instalada ao fechar o programa. Deseja reiniciar agora para atualizar?',
         buttons: ['Reiniciar agora', 'Mais tarde'],
         defaultId: 0,
         cancelId: 1,

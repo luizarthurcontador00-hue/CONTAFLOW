@@ -43,6 +43,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Definir as notas da versao no Release (aparecem no aviso de atualizacao do app)
+        # Usa a mensagem do commit (sem a linha de coautoria) como "o que mudou
+        # nesta versao" -- o electron-updater le isso em info.releaseNotes.
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          NOTES=$(git log -1 --pretty=%B | sed '/Co-Authored-By:/,$d')
+          gh release edit "v$VERSION" --notes "$NOTES"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Enviar o instalador como artefato (download rapido)
         uses: actions/upload-artifact@v4
         with:

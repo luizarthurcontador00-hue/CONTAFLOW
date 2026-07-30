@@ -15,6 +15,13 @@ const MOTIVO_TEXTO = {
   erro: 'Não foi possível verificar a licença.',
 };
 
+const RODAPE_LICENCA = `
+  <hr class="mt-16 mb-16" />
+  <p class="dica" style="text-align:center;margin:0">
+    Sistema licenciado por <strong>Gonçalves Contabilidade</strong> — Caldas Novas/GO<br>
+    Precisa de um contador? <a href="mailto:luizarthurcontador00@gmail.com">luizarthurcontador00@gmail.com</a> · +55 64 99306-5328
+  </p>`;
+
 function atualizarBadgeLicenca(st) {
   const badge = document.getElementById('licenca-badge');
   if (!badge || !st) return;
@@ -52,7 +59,8 @@ window.__verificarLicenca = function () {
         <div class="campo mt-16">
           <label>Chave de ativação</label>
           <textarea id="lic-chave" rows="4" placeholder="Cole aqui a chave que você recebeu"></textarea>
-        </div>`;
+        </div>
+        ${RODAPE_LICENCA}`;
       Modal.abrir({
         titulo: '🔒 Ativação necessária', tamanho: 'modal--grande', corpoHTML: corpo, textoConfirmar: 'Ativar',
         aoAbrir: (el) => {
@@ -108,7 +116,8 @@ window.__mostrarInfoLicenca = async function () {
     <div class="campo mt-16">
       <label>Renovar / trocar chave</label>
       <textarea id="lic2-chave" rows="3" placeholder="Cole aqui uma nova chave de ativação, se tiver"></textarea>
-    </div>`;
+    </div>
+    ${RODAPE_LICENCA}`;
   Modal.abrir({
     titulo: 'Licença do sistema', tamanho: 'modal--grande', corpoHTML: corpo, textoConfirmar: 'Salvar nova chave',
     aoAbrir: (el) => {
