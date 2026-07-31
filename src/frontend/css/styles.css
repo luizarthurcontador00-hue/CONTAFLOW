@@ -510,7 +510,8 @@ kbd { background: var(--fundo-tabela-cabecalho); color: var(--texto); border: 1p
 .dre-tabela tr.dre-forte td { font-weight: 700; border-top: 1px solid var(--borda); }
 
 /* ===================== Onboarding (perfil do negócio) ===================== */
-.ob-perfil { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+/* auto-fit para a fileira fechar bonito com 3, 4 ou 5 opcoes */
+.ob-perfil { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
 .ob-opcao {
   display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
   text-align: left; padding: 14px; border: 2px solid var(--borda);

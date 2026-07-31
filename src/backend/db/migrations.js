@@ -1497,6 +1497,23 @@ const migrations = [
       });
     },
   },
+
+  {
+    version: 35,
+    name: 'instituto-vira-categoria',
+    up(db) {
+      // O instituto era um "ramo de serviço", ao lado de salão e oficina. Mas
+      // uma ONG não presta serviço nem vende — ela atende. Agora ele é uma
+      // categoria de atividade propria, ao lado de comercio/servico/ambos.
+      // Quem ja usava o modo instituto passa para a categoria nova.
+      const ramo = db.prepare("SELECT valor FROM config WHERE chave = 'ramo_servico'").get();
+      if (!ramo || ramo.valor !== 'instituto') return;
+      db.prepare(`
+        INSERT INTO config (chave, valor) VALUES ('perfil_negocio', 'instituto')
+        ON CONFLICT(chave) DO UPDATE SET valor = 'instituto'
+      `).run();
+    },
+  },
 ];
 
 /**

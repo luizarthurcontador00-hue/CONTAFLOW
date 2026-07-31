@@ -47,13 +47,18 @@
   const view = () => document.getElementById('view');
   const titulo = () => document.getElementById('titulo-pagina');
 
-  // Perfil do negócio: 'comercio' | 'servico' | 'ambos'. Controla quais
-  // itens do menu (e rotas) ficam visíveis.
+  // Perfil do negócio: 'comercio' | 'servico' | 'ambos' | 'instituto'.
+  // Controla quais itens do menu (e rotas) ficam visíveis.
+  //
+  // "instituto" é uma categoria própria, não um ramo de serviço: uma ONG não
+  // presta serviço nem vende, ela atende. Por trás ele continua implicando
+  // ramo = 'instituto', que é o que as telas já leem.
   let perfil = 'ambos';
   // Ramo de atividade (só importa quando perfil inclui 'servico'):
   // 'salao' | 'oficina' | 'geral'. Refina ainda mais o que aparece —
   // ex.: Ordens de Serviço/Pátio (foco oficina) não faz sentido num salão.
   let ramo = 'geral';
+  const PERFIS = ['comercio', 'servico', 'ambos', 'instituto'];
   const rotaPerfil = {
     produtos: 'comercio', compras: 'comercio', fornecedores: 'comercio', precificacao: 'comercio', sacolas: 'comercio',
     servicos: 'servico', agenda: 'servico', ordens: 'servico', comissoes: 'servico', crm: 'servico', viagens: 'servico',
@@ -74,20 +79,33 @@
   // Relatorio de impacto.
   const ESCONDIDAS_NO_INSTITUTO = ['pdv', 'vendas', 'sacolas', 'precificacao', 'comissoes', 'ordens', 'compras', 'produtos', 'catalogo', 'etiquetas', 'lote', 'dashboard', 'servicos'];
 
+  // O instituto usa as telas de "serviço" (agenda, turmas, chamada...), então
+  // conta como serviço na hora de filtrar rota por perfil.
+  function perfilAtende(p) {
+    if (!p) return true;
+    if (perfil === 'ambos') return true;
+    if (perfil === 'instituto') return p === 'servico';
+    return perfil === p;
+  }
+
+  // Um instituto não compra mercadoria, mas paga fornecedor (cordas, aluguel,
+  // gráfica) — e a despesa se amarra a ele. Por isso o cadastro fica visível
+  // mesmo sendo, na origem, um módulo de comércio.
+  const EXTRAS_NO_INSTITUTO = ['fornecedores'];
+
   function rotaVisivel(nome) {
     if (ramo === 'instituto' && ESCONDIDAS_NO_INSTITUTO.includes(nome)) return false;
+    if (ramo === 'instituto' && EXTRAS_NO_INSTITUTO.includes(nome)) return true;
     if (nome === 'ordens' && (perfil === 'servico' || perfil === 'ambos') && (ramo === 'salao' || ramo === 'agencia_viagem' || ramo === 'professor')) return false;
     if (nome === 'agenda' && (perfil === 'servico' || perfil === 'ambos') && ramo === 'agencia_viagem') return false;
     if ((nome === 'pdv' || nome === 'vendas' || nome === 'comissoes' || nome === 'dashboard') && (perfil === 'servico' || perfil === 'ambos') && ramo === 'professor') return false;
     if (rotaRamo[nome] && ramo !== rotaRamo[nome]) return false;
-    const p = rotaPerfil[nome];
-    return !p || perfil === 'ambos' || perfil === p;
+    return perfilAtende(rotaPerfil[nome]);
   }
 
   function aplicarPerfil() {
     document.querySelectorAll('.nav-item[data-perfil]').forEach((a) => {
-      const mostra = perfil === 'ambos' || perfil === a.dataset.perfil;
-      a.style.display = mostra ? '' : 'none';
+      a.style.display = perfilAtende(a.dataset.perfil) ? '' : 'none';
     });
     // Regras compostas (dependem tambem do ramo, nao so do perfil).
     ['ordens', 'agenda', 'crm', 'viagens', 'pdv', 'vendas', 'comissoes', 'dashboard',
@@ -225,8 +243,11 @@
   async function carregarPerfil() {
     let cfg = {};
     try { cfg = await API.get('/api/config'); } catch (_) { cfg = {}; }
-    perfil = ['comercio', 'servico', 'ambos'].includes(cfg.perfil_negocio) ? cfg.perfil_negocio : 'ambos';
+    perfil = PERFIS.includes(cfg.perfil_negocio) ? cfg.perfil_negocio : 'ambos';
     ramo = ['salao', 'oficina', 'agencia_viagem', 'professor', 'instituto', 'geral'].includes(cfg.ramo_servico) ? cfg.ramo_servico : 'geral';
+    // A categoria "instituto" define o ramo sozinha — não existe ONG de salão.
+    if (perfil === 'instituto') ramo = 'instituto';
+    else if (ramo === 'instituto') perfil = 'instituto';
     window.__perfilNegocio = perfil;
     window.__ramoServico = ramo;
     aplicarPerfil();
@@ -297,11 +318,19 @@
   // Permite que a tela de Configurações reaplique o perfil sem recarregar tudo.
   window.__recarregarPerfil = async () => { await carregarPerfil(); if (!rotaVisivel(rotaAtual())) location.hash = '#/inicio'; };
 
+  /** Qual ramo gravar para cada categoria (o instituto define o seu sozinho). */
+  function ramoDoPerfil(perfilEscolhido, ramoEscolhido) {
+    if (perfilEscolhido === 'instituto') return 'instituto';
+    if (perfilEscolhido === 'servico' || perfilEscolhido === 'ambos') return ramoEscolhido;
+    return 'geral';
+  }
+  window.__ramoDoPerfil = ramoDoPerfil;
+
   function abrirOnboarding() {
     return new Promise((resolve) => {
       const corpo = `
-        <p class="dica" style="margin-top:0">Bem-vindo! Vamos configurar o sistema para o seu negócio. Você pode alterar tudo depois em <strong>Configurações</strong>.</p>
-        <div class="campo"><label>Nome da empresa *</label><input id="ob-nome" placeholder="Ex.: Barbearia do João" /></div>
+        <p class="dica" style="margin-top:0">Bem-vindo! Vamos configurar o sistema para a sua atividade. Você pode alterar tudo depois em <strong>Configurações</strong>.</p>
+        <div class="campo"><label id="ob-nome-label">Nome da empresa *</label><input id="ob-nome" placeholder="Ex.: Barbearia do João" /></div>
         <div class="form-grid mt-16">
           <div class="campo"><label>Telefone</label><input id="ob-tel" /></div>
           <div class="campo"><label>CNPJ / CPF</label><input id="ob-doc" /></div>
@@ -311,6 +340,7 @@
             <button type="button" class="ob-opcao" data-p="comercio"><span class="ob-opcao__ic">📦</span><strong>Comércio</strong><span class="dica">Venda de produtos, estoque, compras/NF-e</span></button>
             <button type="button" class="ob-opcao" data-p="servico"><span class="ob-opcao__ic">🧰</span><strong>Serviço</strong><span class="dica">Prestação de serviços (sem estoque)</span></button>
             <button type="button" class="ob-opcao ativa" data-p="ambos"><span class="ob-opcao__ic">🧩</span><strong>Comércio e Serviço</strong><span class="dica">Os dois no mesmo sistema</span></button>
+            <button type="button" class="ob-opcao" data-p="instituto"><span class="ob-opcao__ic">🎼</span><strong>Instituto / ONG</strong><span class="dica">Sem fins lucrativos: turmas, voluntários, ofertas e prestação de contas</span></button>
           </div>
         </div>
         <div class="campo mt-16" id="ob-ramo-wrap" style="display:none">
@@ -320,9 +350,13 @@
             <button type="button" class="ob-opcao" data-r="oficina"><span class="ob-opcao__ic">🔧</span><strong>Oficina / Assistência técnica</strong><span class="dica">Ordens de serviço, pátio e peças</span></button>
             <button type="button" class="ob-opcao" data-r="agencia_viagem"><span class="ob-opcao__ic">✈️</span><strong>Agência de viagem</strong><span class="dica">CRM de leads e calendário de viagens</span></button>
             <button type="button" class="ob-opcao" data-r="professor"><span class="ob-opcao__ic">🎓</span><strong>Professor particular / Aulas</strong><span class="dica">Alunos, aula fixa recorrente e mensalidade</span></button>
-            <button type="button" class="ob-opcao" data-r="instituto"><span class="ob-opcao__ic">🎼</span><strong>Instituto / ONG (sem fins lucrativos)</strong><span class="dica">Turmas, voluntários, chamada e arrecadação</span></button>
             <button type="button" class="ob-opcao" data-r="geral"><span class="ob-opcao__ic">💼</span><strong>Outros serviços</strong><span class="dica">Consultoria, autônomo, geral</span></button>
           </div>
+        </div>
+        <div class="dica mt-16" id="ob-instituto-aviso" style="display:none">
+          🎼 No modo Instituto o sistema não mostra venda, PDV, estoque nem lucro:
+          as entradas são <strong>ofertas</strong>, as saídas são <strong>despesas</strong> e o
+          resultado vira <strong>prestação de contas</strong>.
         </div>`;
       let escolha = 'ambos';
       let ramoEscolha = 'salao';
@@ -330,7 +364,15 @@
         titulo: 'Configuração inicial', tamanho: 'modal--grande', corpoHTML: corpo, textoConfirmar: 'Concluir',
         aoAbrir: (el) => {
           const ramoWrap = el.querySelector('#ob-ramo-wrap');
-          const atualizarRamoWrap = () => { ramoWrap.style.display = (escolha === 'servico' || escolha === 'ambos') ? '' : 'none'; };
+          const aviso = el.querySelector('#ob-instituto-aviso');
+          const nomeLabel = el.querySelector('#ob-nome-label');
+          const nomeInput = el.querySelector('#ob-nome');
+          const atualizarRamoWrap = () => {
+            ramoWrap.style.display = (escolha === 'servico' || escolha === 'ambos') ? '' : 'none';
+            aviso.style.display = escolha === 'instituto' ? '' : 'none';
+            nomeLabel.textContent = escolha === 'instituto' ? 'Nome do instituto *' : 'Nome da empresa *';
+            nomeInput.placeholder = escolha === 'instituto' ? 'Ex.: Instituto Harmonia' : 'Ex.: Barbearia do João';
+          };
           el.querySelectorAll('#ob-perfil .ob-opcao').forEach((b) => b.addEventListener('click', () => {
             escolha = b.dataset.p;
             el.querySelectorAll('#ob-perfil .ob-opcao').forEach((x) => x.classList.toggle('ativa', x === b));
@@ -349,14 +391,14 @@
         },
         aoConfirmar: async (el) => {
           const nome = el.querySelector('#ob-nome').value.trim();
-          if (!nome) { UI.erro('Informe o nome da empresa.'); return false; }
+          if (!nome) { UI.erro(escolha === 'instituto' ? 'Informe o nome do instituto.' : 'Informe o nome da empresa.'); return false; }
           try {
             await API.put('/api/config', {
               nome_loja: nome,
               loja_telefone: el.querySelector('#ob-tel').value,
               loja_cnpj: el.querySelector('#ob-doc').value,
               perfil_negocio: escolha,
-              ramo_servico: (escolha === 'servico' || escolha === 'ambos') ? ramoEscolha : 'geral',
+              ramo_servico: ramoDoPerfil(escolha, ramoEscolha),
               onboarding_ok: '1',
             });
             // Alinha a atividade da precificação ao perfil escolhido.

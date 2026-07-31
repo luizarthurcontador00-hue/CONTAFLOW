@@ -54,6 +54,9 @@ window.PaginaConfiguracoes = (function () {
   // ------------------------------ Loja ------------------------------
   function renderLoja(alvo, cfg, container) {
     const inst = ehInstituto();
+    // Instalações antigas gravaram "instituto" no ramo, com o perfil em
+    // serviço/ambos. Aqui o instituto e uma categoria propria.
+    const perfilAtual = cfg.ramo_servico === 'instituto' ? 'instituto' : (cfg.perfil_negocio || 'ambos');
     alvo.innerHTML = `
       <div class="card" style="max-width:640px">
         <h3 style="margin-top:0">${inst ? 'Dados do instituto' : 'Dados da loja'}</h3>
@@ -63,22 +66,27 @@ window.PaginaConfiguracoes = (function () {
         <form id="form-cfg" class="form-grid">
           <div class="campo col-2"><label>Tipo de atividade</label>
             <select name="perfil_negocio">
-              <option value="comercio" ${cfg.perfil_negocio === 'comercio' ? 'selected' : ''}>Comércio (produtos, estoque)</option>
-              <option value="servico" ${cfg.perfil_negocio === 'servico' ? 'selected' : ''}>Serviço (prestação de serviços)</option>
-              <option value="ambos" ${(cfg.perfil_negocio || 'ambos') === 'ambos' ? 'selected' : ''}>Comércio e Serviço</option>
+              <option value="comercio" ${perfilAtual === 'comercio' ? 'selected' : ''}>Comércio (produtos, estoque)</option>
+              <option value="servico" ${perfilAtual === 'servico' ? 'selected' : ''}>Serviço (prestação de serviços)</option>
+              <option value="ambos" ${perfilAtual === 'ambos' ? 'selected' : ''}>Comércio e Serviço</option>
+              <option value="instituto" ${perfilAtual === 'instituto' ? 'selected' : ''}>🎼 Instituto / ONG (sem fins lucrativos)</option>
             </select>
             <span class="dica">Define quais módulos aparecem no menu. Recarrega o menu ao salvar.</span></div>
-          <div class="campo col-2" id="cfg-ramo-wrap" style="display:${(cfg.perfil_negocio === 'servico' || (cfg.perfil_negocio || 'ambos') === 'ambos') ? '' : 'none'}">
+          <div class="campo col-2" id="cfg-ramo-wrap" style="display:${(perfilAtual === 'servico' || perfilAtual === 'ambos') ? '' : 'none'}">
             <label>Ramo de serviço</label>
             <select name="ramo_servico">
               <option value="salao" ${(cfg.ramo_servico || 'salao') === 'salao' ? 'selected' : ''}>💇 Salão / Barbearia / Estética</option>
               <option value="oficina" ${cfg.ramo_servico === 'oficina' ? 'selected' : ''}>🔧 Oficina / Assistência técnica</option>
               <option value="agencia_viagem" ${cfg.ramo_servico === 'agencia_viagem' ? 'selected' : ''}>✈️ Agência de viagem</option>
               <option value="professor" ${cfg.ramo_servico === 'professor' ? 'selected' : ''}>🎓 Professor particular / Aulas</option>
-              <option value="instituto" ${cfg.ramo_servico === 'instituto' ? 'selected' : ''}>🎼 Instituto / ONG (sem fins lucrativos)</option>
               <option value="geral" ${cfg.ramo_servico === 'geral' ? 'selected' : ''}>💼 Outros serviços</option>
             </select>
             <span class="dica">Refina o que aparece no menu — ex.: "Ordens & Orçamentos" (Pátio/OS) fica escondido para Salão.</span>
+          </div>
+          <div class="campo col-2 dica" id="cfg-instituto-aviso" style="display:${perfilAtual === 'instituto' ? '' : 'none'}">
+            🎼 No modo Instituto o sistema não mostra venda, PDV, estoque nem lucro:
+            as entradas são <strong>ofertas</strong>, as saídas são <strong>despesas</strong> e o
+            resultado vira <strong>prestação de contas</strong>.
           </div>
           <div class="campo col-2"><label>${inst ? 'Nome do instituto' : 'Nome da loja'}</label><input name="nome_loja" value="${UI.escapar(cfg.nome_loja || '')}" /></div>
           <div class="campo"><label>Telefone</label><input name="loja_telefone" value="${UI.escapar(cfg.loja_telefone || '')}" /></div>
@@ -129,13 +137,17 @@ window.PaginaConfiguracoes = (function () {
     }
 
     alvo.querySelector('select[name="perfil_negocio"]').addEventListener('change', (e) => {
-      const wrap = alvo.querySelector('#cfg-ramo-wrap');
-      wrap.style.display = (e.target.value === 'servico' || e.target.value === 'ambos') ? '' : 'none';
+      const ehInst = e.target.value === 'instituto';
+      alvo.querySelector('#cfg-ramo-wrap').style.display = (e.target.value === 'servico' || e.target.value === 'ambos') ? '' : 'none';
+      alvo.querySelector('#cfg-instituto-aviso').style.display = ehInst ? '' : 'none';
     });
 
     alvo.querySelector('#form-cfg').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const body = Object.fromEntries(new FormData(ev.target).entries());
+      // O instituto define o ramo sozinho — nao existe ONG "de salao".
+      // (O select de ramo fica escondido nesse caso, mas ainda vem no FormData.)
+      if (body.perfil_negocio === 'instituto') body.ramo_servico = 'instituto';
       // Checkbox nao marcado nao entra no FormData: normaliza para '0'/'1'.
       // (No instituto esse campo nem existe — nao ha produto para etiquetar.)
       const codAuto = ev.target.querySelector('#cfg-cod-auto');

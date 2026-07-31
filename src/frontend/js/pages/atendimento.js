@@ -115,11 +115,11 @@ window.PaginaAtendimento = (function () {
     return tel || '—';
   }
 
-  /** Salão/oficina/serviço geral tem Agenda; agência de viagem usa CRM + Calendário de Viagens em vez disso. */
+  /** Salão/oficina/serviço geral e instituto têm Agenda; agência de viagem usa CRM + Calendário de Viagens em vez disso. */
   function agendaDisponivel() {
     const perfil = window.__perfilNegocio;
     const ramo = window.__ramoServico;
-    return (perfil === 'servico' || perfil === 'ambos') && ramo !== 'agencia_viagem';
+    return (perfil === 'servico' || perfil === 'ambos' || perfil === 'instituto') && ramo !== 'agencia_viagem';
   }
 
   function crmDisponivel() {
