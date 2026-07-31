@@ -77,6 +77,7 @@ function registrarChamada(agendamentoId, { presencas, profissional_id }) {
   const db = getDb();
   const encontro = db.prepare('SELECT * FROM agendamentos WHERE id = ? AND turma_id IS NOT NULL').get(agendamentoId);
   if (!encontro) throw new AppError('Encontro não encontrado (ou não é uma aula de turma).', 404);
+  if (encontro.suspensa) throw new AppError('Este dia está suspenso — não é possível registrar chamada. Reabra o dia primeiro, se a aula acabou acontecendo.');
   if (!Array.isArray(presencas) || !presencas.length) throw new AppError('Nenhuma presença foi informada.');
 
   const matriculados = new Set(
@@ -142,11 +143,14 @@ function folhaParaImpressao(turmaId, { mes, de, ate } = {}) {
   }
 
   const DIAS_CURTO = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+  // Dia suspenso (feriado, ferias) nao vira coluna na folha em branco: nao
+  // ha aula pra marcar presenca, e deixar a coluna la so confunde quem vai
+  // preencher a mao.
   const encontros = db.prepare(`
     SELECT a.id, a.data, a.hora_inicio, a.hora_fim,
       (SELECT COUNT(*) FROM presencas pr WHERE pr.agendamento_id = a.id) AS ja_tem_chamada
     FROM agendamentos a
-    WHERE a.turma_id = ? AND a.status != 'cancelado'
+    WHERE a.turma_id = ? AND a.status != 'cancelado' AND a.suspensa = 0
       AND date(a.data) BETWEEN date(?) AND date(?)
     ORDER BY a.data, a.hora_inicio
   `).all(turmaId, inicio, fim).map((e) => {
