@@ -251,20 +251,33 @@ window.Documentos = (function () {
    * colunas, quadradinhos em branco. Sempre com linhas vazias no fim — aluno
    * novo aparece na aula antes de aparecer no sistema.
    */
-  async function folhaDeChamada(turmaId, mes) {
-    let d; let ctx;
-    try {
-      [d, ctx] = await Promise.all([
-        API.get(`/api/turmas/${turmaId}/folha-impressao?mes=${encodeURIComponent(mes || '')}`),
-        contexto(),
-      ]);
-    } catch (e) { UI.erro(e.message); return; }
+  const CSS_FOLHA_CHAMADA = `
+    @page { size: A4 landscape; margin: 12mm; }
+    body { padding: 0; }
+    /* width:auto deixa a grade do tamanho do conteúdo: com poucas datas no
+       mês ela não estica os quadradinhos pela folha toda. */
+    table.chamada, table.assinaturas { width:auto; min-width:55%; }
+    table.chamada td, table.chamada th { text-align:center; }
+    table.chamada .col-n { width:26px; color:#666; }
+    table.chamada .col-nome { text-align:left; min-width:220px; }
+    table.chamada .col-dia { width:38px; height:26px; }
+    table.chamada .dia-semana { font-weight:normal; font-size:9px; color:#666; }
+    table.chamada tr.extra .col-nome { background:repeating-linear-gradient(180deg,#fff,#fff 22px,#eee 22px,#eee 23px); }
+    table.assinaturas { margin-top:14px; }
+    table.assinaturas th { text-align:center; }
+    table.assinaturas .rubrica { height:40px; min-width:110px; }
+    .legenda { font-size:11px; color:#555; margin:6px 0 0; }
+    .ficha-turma th { width:90px; }
+    .quebra-pagina { page-break-before: always; }
+  `;
 
+  /** Monta o corpo (sem a moldura do documento) da folha de uma turma — usado tanto sozinho quanto no lote de todas as turmas. */
+  function corpoFolhaChamada(d, ctx) {
     const colunas = d.encontros.length;
     const linhasExtras = 4;
     const [ano, mesNum] = d.periodo.de.split('-').map(Number);
 
-    const corpo = `
+    return `
       ${cabecalho(ctx.cfg, 'Folha de chamada', `${MESES[mesNum - 1]} de ${ano}`)}
 
       <table class="ficha-turma">
@@ -314,27 +327,125 @@ window.Documentos = (function () {
         ${d.alunos.length} aluno(s) matriculado(s) · ${colunas} encontro(s) no mês ·
         emitido em ${dataBR(new Date().toISOString().slice(0, 10))}
       </div>`;
+  }
 
-    const css = `
-      @page { size: A4 landscape; margin: 12mm; }
-      body { padding: 0; }
-      /* width:auto deixa a grade do tamanho do conteúdo: com poucas datas no
-         mês ela não estica os quadradinhos pela folha toda. */
-      table.chamada, table.assinaturas { width:auto; min-width:55%; }
-      table.chamada td, table.chamada th { text-align:center; }
-      table.chamada .col-n { width:26px; color:#666; }
-      table.chamada .col-nome { text-align:left; min-width:220px; }
-      table.chamada .col-dia { width:38px; height:26px; }
-      table.chamada .dia-semana { font-weight:normal; font-size:9px; color:#666; }
-      table.chamada tr.extra .col-nome { background:repeating-linear-gradient(180deg,#fff,#fff 22px,#eee 22px,#eee 23px); }
-      table.assinaturas { margin-top:14px; }
-      table.assinaturas th { text-align:center; }
-      table.assinaturas .rubrica { height:40px; min-width:110px; }
-      .legenda { font-size:11px; color:#555; margin:6px 0 0; }
-      .ficha-turma th { width:90px; }
-    `;
+  async function folhaDeChamada(turmaId, mes) {
+    let d; let ctx;
+    try {
+      [d, ctx] = await Promise.all([
+        API.get(`/api/turmas/${turmaId}/folha-impressao?mes=${encodeURIComponent(mes || '')}`),
+        contexto(),
+      ]);
+    } catch (e) { UI.erro(e.message); return; }
 
-    try { await UI.baixarPDF(pagina('Folha de chamada', ctx.cfg, corpo, css), nomeArquivo(`chamada-${d.periodo.de.slice(0, 7)}`, d.turma.nome)); }
+    const corpo = corpoFolhaChamada(d, ctx);
+    try { await UI.baixarPDF(pagina('Folha de chamada', ctx.cfg, corpo, CSS_FOLHA_CHAMADA), nomeArquivo(`chamada-${d.periodo.de.slice(0, 7)}`, d.turma.nome)); }
+    catch (e) { UI.erro(e.message); }
+  }
+
+  /**
+   * Gera de uma vez as folhas de chamada do mês de todas as turmas abertas,
+   * num PDF só (uma folha por turma, com quebra de página entre elas) —
+   * pra imprimir tudo já pronto em vez de gerar turma por turma.
+   */
+  async function folhasDeChamadaLote(mes) {
+    let turmas; let ctx;
+    try {
+      [turmas, ctx] = await Promise.all([
+        API.get('/api/turmas?status=aberta'),
+        contexto(),
+      ]);
+    } catch (e) { UI.erro(e.message); return; }
+
+    if (!turmas.length) { UI.erro('Não há turma aberta para gerar as folhas.'); return; }
+
+    const dados = [];
+    for (const t of turmas) {
+      try { dados.push(await API.get(`/api/turmas/${t.id}/folha-impressao?mes=${encodeURIComponent(mes || '')}`)); }
+      catch (e) { /* turma sem horario cadastrado, por exemplo: pula */ }
+    }
+    if (!dados.length) { UI.erro('Nenhuma turma pôde gerar folha para este mês.'); return; }
+
+    const corpo = dados.map((d, i) => `${i > 0 ? '<div class="quebra-pagina"></div>' : ''}${corpoFolhaChamada(d, ctx)}`).join('');
+    const [ano, mesNum] = dados[0].periodo.de.split('-').map(Number);
+    try { await UI.baixarPDF(pagina('Folhas de chamada', ctx.cfg, corpo, CSS_FOLHA_CHAMADA), nomeArquivo('chamadas', `${MESES[mesNum - 1]}-${ano}`)); }
+    catch (e) { UI.erro(e.message); }
+  }
+
+  // ===================== Calendário de aulas (instrutor) =====================
+
+  const DIAS_SEMANA = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+
+  /** Linhas dia/horário/turma de um instrutor, ordenadas pra impressão. */
+  function linhasCalendario(p) {
+    const linhas = [];
+    (p.turmas || []).forEach((t) => {
+      (t.horarios || []).forEach((h) => {
+        linhas.push({
+          dia: h.dia_semana, hora_inicio: h.hora_inicio, hora_fim: h.hora_fim,
+          turma: t.nome, curso: t.curso_nome, sala: t.sala, papel: t.papel,
+        });
+      });
+    });
+    return linhas.sort((a, b) => a.dia - b.dia || a.hora_inicio.localeCompare(b.hora_inicio));
+  }
+
+  function corpoCalendarioInstrutor(p) {
+    const linhas = linhasCalendario(p);
+    return `
+      <h2 style="margin-top:0">${esc(p.nome)}</h2>
+      ${linhas.length ? `
+      <table>
+        <thead><tr><th>Dia</th><th>Horário</th><th>Turma</th><th>Curso</th><th>Sala</th><th>Função</th></tr></thead>
+        <tbody>${linhas.map((l) => `<tr>
+          <td>${DIAS_SEMANA[l.dia]}</td>
+          <td>${esc(l.hora_inicio)}${l.hora_fim ? ' às ' + esc(l.hora_fim) : ''}</td>
+          <td>${esc(l.turma)}</td>
+          <td>${esc(l.curso)}</td>
+          <td>${esc(l.sala || '—')}</td>
+          <td>${esc(l.papel)}</td>
+        </tr>`).join('')}</tbody>
+      </table>` : '<p class="dica">Sem turma com horário cadastrado no momento.</p>'}`;
+  }
+
+  /** Calendário semanal das aulas de um instrutor, pronto pra imprimir e levar. */
+  async function calendarioInstrutor(profissionalId) {
+    let p; let ctx;
+    try {
+      [p, ctx] = await Promise.all([
+        API.get(`/api/agenda/profissionais/${profissionalId}`),
+        contexto(),
+      ]);
+    } catch (e) { UI.erro(e.message); return; }
+
+    const corpo = `${cabecalho(ctx.cfg, 'Calendário de aulas')}${corpoCalendarioInstrutor(p)}
+      <div class="rodape">emitido em ${dataBR(new Date().toISOString().slice(0, 10))}</div>`;
+    try { await UI.baixarPDF(pagina('Calendário de aulas', ctx.cfg, corpo), nomeArquivo('calendario-aulas', p.nome)); }
+    catch (e) { UI.erro(e.message); }
+  }
+
+  /** Um PDF só com o calendário de todos os instrutores (uma página cada). */
+  async function calendariosInstrutoresLote() {
+    let profissionais; let ctx;
+    try {
+      [profissionais, ctx] = await Promise.all([
+        API.get('/api/agenda/profissionais'),
+        contexto(),
+      ]);
+    } catch (e) { UI.erro(e.message); return; }
+
+    const comTurma = [];
+    for (const pf of profissionais) {
+      let p;
+      try { p = await API.get(`/api/agenda/profissionais/${pf.id}`); } catch (_) { continue; }
+      if (p.turmas && p.turmas.length) comTurma.push(p);
+    }
+    if (!comTurma.length) { UI.erro('Nenhum instrutor está escalado em turma no momento.'); return; }
+
+    const corpo = `${cabecalho(ctx.cfg, 'Calendário de aulas')}`
+      + comTurma.map((p, i) => `${i > 0 ? '<div class="quebra-pagina"></div>' : ''}${corpoCalendarioInstrutor(p)}`).join('')
+      + `<div class="rodape">emitido em ${dataBR(new Date().toISOString().slice(0, 10))}</div>`;
+    try { await UI.baixarPDF(pagina('Calendário de aulas', ctx.cfg, corpo, '.quebra-pagina { page-break-before: always; }'), nomeArquivo('calendario-aulas', 'todos-os-instrutores')); }
     catch (e) { UI.erro(e.message); }
   }
 
@@ -434,7 +545,8 @@ window.Documentos = (function () {
   }
 
   return {
-    fichaDoAluno, folhaDeChamada,
+    fichaDoAluno, folhaDeChamada, folhasDeChamadaLote,
+    calendarioInstrutor, calendariosInstrutoresLote,
     declaracaoMatricula, declaracaoVoluntariado, termoVoluntariado, certificado,
     porExtenso, dataBR,
   };

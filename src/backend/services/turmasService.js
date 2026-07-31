@@ -39,6 +39,11 @@ function listar({ curso_id, status, instrumento_id } = {}) {
   const db = getDb();
   turmas.forEach((t) => {
     t.horarios = db.prepare('SELECT * FROM turmas_horarios WHERE turma_id = ? ORDER BY dia_semana, hora_inicio').all(t.id);
+    t.instrutores = db.prepare(`
+      SELECT ti.papel, p.id, p.nome
+      FROM turmas_instrutores ti JOIN profissionais p ON p.id = ti.profissional_id
+      WHERE ti.turma_id = ? ORDER BY ti.papel, p.nome
+    `).all(t.id);
   });
   return turmas;
 }

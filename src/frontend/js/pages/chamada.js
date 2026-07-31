@@ -60,6 +60,7 @@ window.PaginaChamada = (function () {
         para o instrutor levar impressa e marcar à mão. Depois é só digitar a chamada aqui.</p>
         <div class="campo"><label>Turma *</label>
           <select id="fi-turma">
+            <option value="todas">🖨️ Todas as turmas (um PDF só, uma folha por turma)</option>
             ${turmas.map((t) => `<option value="${t.id}" ${String(filtro.turma_id) === String(t.id) ? 'selected' : ''}>${UI.escapar(t.nome)}</option>`).join('')}
           </select></div>
         <div class="campo mt-16"><label>Mês *</label>
@@ -68,7 +69,8 @@ window.PaginaChamada = (function () {
         const turmaId = el.querySelector('#fi-turma').value;
         const mes = el.querySelector('#fi-mes').value;
         if (!turmaId || !mes) { UI.erro('Escolha a turma e o mês.'); return false; }
-        await Documentos.folhaDeChamada(turmaId, mes);
+        if (turmaId === 'todas') await Documentos.folhasDeChamadaLote(mes);
+        else await Documentos.folhaDeChamada(turmaId, mes);
       },
     });
   }

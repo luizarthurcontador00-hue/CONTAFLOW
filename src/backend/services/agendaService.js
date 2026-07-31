@@ -51,12 +51,14 @@ function obterProfissional(id) {
   if (!p) throw new AppError('Profissional nao encontrado.', 404);
   p.disponibilidade = db.prepare('SELECT * FROM voluntarios_disponibilidade WHERE profissional_id = ? ORDER BY dia_semana, hora_inicio').all(id);
   p.turmas = db.prepare(`
-    SELECT t.id, t.nome, ti.papel, c.nome AS curso_nome
+    SELECT t.id, t.nome, t.sala, ti.papel, c.nome AS curso_nome
     FROM turmas_instrutores ti JOIN turmas t ON t.id = ti.turma_id
     JOIN cursos c ON c.id = t.curso_id
     WHERE ti.profissional_id = ? AND t.status IN ('aberta','planejada')
     ORDER BY t.nome
   `).all(id);
+  const horarios = db.prepare('SELECT * FROM turmas_horarios WHERE turma_id = ? ORDER BY dia_semana, hora_inicio');
+  p.turmas.forEach((t) => { t.horarios = horarios.all(t.id); });
   return p;
 }
 

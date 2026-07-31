@@ -10,6 +10,10 @@ window.PaginaVoluntarios = (function () {
   let filtroTipo = '';
 
   async function render(container) {
+    // Reseta a cada visita (mesmo motivo do filtro de Turmas/Chamada): senao
+    // o select volta a mostrar "Todos" mas a lista continua filtrada por
+    // dentro pelo valor da visita anterior.
+    filtroTipo = '';
     container.innerHTML = `
       <div class="barra-ferramentas">
         <div class="cresce">
@@ -26,6 +30,7 @@ window.PaginaVoluntarios = (function () {
         </div>
         <button class="btn btn--secundario" id="vol-atividades">📋 Atividades</button>
         <button class="btn btn--secundario" id="vol-horas">⏱️ Horas de voluntariado</button>
+        <button class="btn btn--secundario" id="vol-calendarios">🗓️ Calendário de todos</button>
         <button class="btn" id="vol-novo">+ Nova pessoa</button>
       </div>
       <div class="card"><div id="vol-lista">Carregando…</div></div>`;
@@ -34,6 +39,7 @@ window.PaginaVoluntarios = (function () {
     container.querySelector('#vol-novo').addEventListener('click', () => formulario(null));
     container.querySelector('#vol-horas').addEventListener('click', horasVoluntariado);
     container.querySelector('#vol-atividades').addEventListener('click', () => atividades());
+    container.querySelector('#vol-calendarios').addEventListener('click', () => Documentos.calendariosInstrutoresLote());
     listar();
   }
 
@@ -66,6 +72,7 @@ window.PaginaVoluntarios = (function () {
               <td class="dica">${UI.escapar(p.telefone || p.email || '—')}</td>
               <td style="text-align:right;white-space:nowrap">
                 ${p.tipo === 'voluntario' ? `<button class="btn btn--secundario" data-termo="${p.id}">📜 Termo</button>` : ''}
+                <button class="btn btn--secundario" data-calendario="${p.id}" title="Calendário de aulas para imprimir">🗓️</button>
                 <button class="btn btn--secundario" data-ver="${p.id}">Ver</button>
                 <button class="btn btn--secundario" data-editar="${p.id}">Editar</button>
               </td>
@@ -83,6 +90,9 @@ window.PaginaVoluntarios = (function () {
     }));
     alvo.querySelectorAll('[data-termo]').forEach((b) => b.addEventListener('click', () => {
       formTermo(pessoas.find((p) => String(p.id) === b.dataset.termo));
+    }));
+    alvo.querySelectorAll('[data-calendario]').forEach((b) => b.addEventListener('click', () => {
+      Documentos.calendarioInstrutor(b.dataset.calendario);
     }));
   }
 
