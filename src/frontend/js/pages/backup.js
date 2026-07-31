@@ -9,7 +9,7 @@ window.PaginaBackup = (function () {
     container.innerHTML = `
       <div class="card mb-16">
         <h3 style="margin-top:0">Backup do banco de dados</h3>
-        <p class="muted">O backup gera uma cópia do arquivo do banco (com todos os dados: produtos, vendas, financeiro).
+        <p class="muted">O backup gera uma cópia do arquivo do banco (com todos os dados do sistema: cadastros, movimentações e financeiro).
           Guarde as cópias em um pen drive ou nuvem para maior segurança.</p>
         <div class="flex gap-12" style="flex-wrap:wrap">
           <button class="btn" id="bk-agora">💾 Fazer backup agora</button>
@@ -76,7 +76,7 @@ window.PaginaBackup = (function () {
 
   async function restaurar(origem) {
     const ok = await UI.confirmar(
-      'Restaurar este backup vai SUBSTITUIR todos os dados atuais (produtos, vendas, financeiro) pelos dados do backup. Um backup de segurança do estado atual será feito automaticamente antes. Deseja continuar?',
+      'Restaurar este backup vai SUBSTITUIR todos os dados atuais (cadastros, movimentações e financeiro) pelos dados do backup. Um backup de segurança do estado atual será feito automaticamente antes. Deseja continuar?',
       { titulo: 'Restaurar backup', textoConfirmar: 'Restaurar' }
     );
     if (!ok) return;

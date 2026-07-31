@@ -193,6 +193,184 @@ function painelProfessor() {
 }
 
 /**
+ * Panorama do instituto: o retrato de hoje em quatro frentes — ensino
+ * (turmas, alunos, aulas), acervo (instrumentos), pessoas (voluntarios) e
+ * dinheiro (ofertas x despesas, saldo em caixa).
+ *
+ * Aqui nao existe venda, produto nem lucro: o "resultado" de um instituto
+ * sem fins lucrativos e quanta gente ele atendeu e se as contas fecham.
+ */
+function painelInstituto() {
+  const db = getDb();
+  const hoje = new Date().toISOString().slice(0, 10);
+  const mesIni = hoje.slice(0, 8) + '01';
+  const daquiA7 = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
+
+  // ---------------------------- Ensino ----------------------------
+  const turmas = db.prepare(`
+    SELECT t.id, t.nome, t.vagas, c.nome AS curso_nome,
+      (SELECT COUNT(*) FROM matriculas m WHERE m.turma_id = t.id AND m.status = 'ativa') AS matriculados,
+      (SELECT COUNT(*) FROM matriculas m WHERE m.turma_id = t.id AND m.status = 'espera') AS na_fila,
+      (SELECT COUNT(*) FROM turmas_instrutores ti WHERE ti.turma_id = t.id) AS instrutores
+    FROM turmas t LEFT JOIN cursos c ON c.id = t.curso_id
+    WHERE t.status IN ('aberta','planejada')
+    ORDER BY c.nome, t.nome
+  `).all();
+
+  const vagasTotais = turmas.reduce((s, t) => s + Number(t.vagas || 0), 0);
+  const ocupadas = turmas.reduce((s, t) => s + Number(t.matriculados || 0), 0);
+
+  const alunosAtivos = db.prepare(`
+    SELECT COUNT(DISTINCT aluno_id) c FROM matriculas WHERE status = 'ativa'
+  `).get().c;
+  const alunosNovosMes = db.prepare(`
+    SELECT COUNT(DISTINCT aluno_id) c FROM matriculas WHERE date(data_matricula) >= date(?)
+  `).get(mesIni).c;
+
+  // ---------------------------- Aulas ----------------------------
+  const aulasHoje = db.prepare(`
+    SELECT a.id, a.hora_inicio, a.hora_fim, a.status, t.nome AS turma_nome,
+      c.nome AS curso_nome, p.nome AS instrutor_nome,
+      (SELECT COUNT(*) FROM presencas pr WHERE pr.agendamento_id = a.id) AS chamada_feita,
+      (SELECT COUNT(*) FROM matriculas m WHERE m.turma_id = t.id AND m.status = 'ativa') AS alunos
+    FROM agendamentos a
+    JOIN turmas t ON t.id = a.turma_id
+    LEFT JOIN cursos c ON c.id = t.curso_id
+    LEFT JOIN profissionais p ON p.id = a.profissional_id
+    WHERE date(a.data) = date(?) AND a.status != 'cancelado'
+    ORDER BY a.hora_inicio
+  `).all(hoje);
+
+  const aulasSemana = db.prepare(`
+    SELECT COUNT(*) c FROM agendamentos
+    WHERE turma_id IS NOT NULL AND status != 'cancelado'
+      AND date(data) BETWEEN date(?) AND date(?)
+  `).get(hoje, daquiA7).c;
+
+  const aulasRealizadasMes = db.prepare(`
+    SELECT COUNT(*) c FROM agendamentos
+    WHERE turma_id IS NOT NULL AND status = 'atendido' AND date(data) >= date(?)
+  `).get(mesIni).c;
+
+  // Aula que ja passou e ninguem registrou a chamada: o buraco que mais
+  // estraga o relatorio de impacto depois.
+  const chamadasPendentes = db.prepare(`
+    SELECT COUNT(*) c FROM agendamentos a
+    WHERE a.turma_id IS NOT NULL AND a.status != 'cancelado'
+      AND date(a.data) < date(?)
+      AND NOT EXISTS (SELECT 1 FROM presencas pr WHERE pr.agendamento_id = a.id)
+  `).get(hoje).c;
+
+  const presencasMes = db.prepare(`
+    SELECT
+      SUM(CASE WHEN pr.situacao = 'presente' THEN 1 ELSE 0 END) AS presentes,
+      COUNT(*) AS total
+    FROM presencas pr JOIN agendamentos a ON a.id = pr.agendamento_id
+    WHERE date(a.data) >= date(?)
+  `).get(mesIni);
+  const frequenciaMes = presencasMes.total > 0
+    ? arred((presencasMes.presentes / presencasMes.total) * 100) : null;
+
+  // ---------------------------- Acervo ----------------------------
+  const acervo = db.prepare(`
+    SELECT COALESCE(SUM(quantidade_total),0) t FROM instrumentos WHERE ativo = 1
+  `).get().t;
+  const emprestados = db.prepare(`
+    SELECT COUNT(*) c FROM emprestimos_instrumento WHERE data_devolucao IS NULL
+  `).get().c;
+  const emprestimosAtrasados = db.prepare(`
+    SELECT COUNT(*) c FROM emprestimos_instrumento
+    WHERE data_devolucao IS NULL AND previsao_devolucao IS NOT NULL AND date(previsao_devolucao) < date(?)
+  `).get(hoje).c;
+  const emManutencao = db.prepare(`
+    SELECT COUNT(*) c FROM instrumentos_unidades WHERE estado = 'manutencao'
+  `).get().c;
+
+  // ---------------------------- Pessoas ----------------------------
+  const voluntarios = db.prepare("SELECT COUNT(*) c FROM profissionais WHERE ativo = 1 AND tipo = 'voluntario'").get().c;
+  const equipe = db.prepare('SELECT COUNT(*) c FROM profissionais WHERE ativo = 1').get().c;
+  const horasMes = db.prepare(`
+    SELECT COALESCE(SUM(
+      (CAST(substr(a.hora_fim,1,2) AS INTEGER) * 60 + CAST(substr(a.hora_fim,4,2) AS INTEGER)) -
+      (CAST(substr(a.hora_inicio,1,2) AS INTEGER) * 60 + CAST(substr(a.hora_inicio,4,2) AS INTEGER))
+    ),0) AS minutos
+    FROM agendamentos a
+    WHERE a.turma_id IS NOT NULL AND a.status = 'atendido' AND a.profissional_id IS NOT NULL
+      AND a.hora_fim IS NOT NULL AND date(a.data) >= date(?)
+  `).get(mesIni).minutos;
+
+  const filaEspera = db.prepare("SELECT COUNT(*) c FROM lista_espera WHERE status = 'aguardando'").get().c;
+
+  // ---------------------------- Dinheiro ----------------------------
+  const ofertasMes = db.prepare(`
+    SELECT COALESCE(SUM(valor),0) t, COUNT(*) c FROM ofertas WHERE date(data) >= date(?)
+  `).get(mesIni);
+  const despesasMes = db.prepare(`
+    SELECT COALESCE(SUM(valor),0) t FROM contas_pagar
+    WHERE status = 'pago' AND date(data_pagamento) >= date(?)
+  `).get(mesIni).t;
+  const aPagar = db.prepare("SELECT COALESCE(SUM(valor),0) t FROM contas_pagar WHERE status='pendente'").get().t;
+  const aPagarVencidas = db.prepare(
+    "SELECT COUNT(*) c FROM contas_pagar WHERE status='pendente' AND date(vencimento) < date(?)"
+  ).get(hoje).c;
+  // eslint-disable-next-line global-require
+  const financeiro = require('./financeiroService');
+  const saldoContas = financeiro.listarContasFinanceiras().reduce((s, c) => s + Number(c.saldo_atual), 0);
+
+  return {
+    hoje,
+    ensino: {
+      turmas_ativas: turmas.length,
+      vagas_totais: vagasTotais,
+      vagas_ocupadas: ocupadas,
+      vagas_livres: Math.max(0, vagasTotais - ocupadas),
+      ocupacao_pct: vagasTotais > 0 ? arred((ocupadas / vagasTotais) * 100) : 0,
+      turmas_lotadas: turmas.filter((t) => t.matriculados >= t.vagas).length,
+      turmas_sem_instrutor: turmas.filter((t) => !t.instrutores).length,
+      alunos_ativos: alunosAtivos,
+      alunos_novos_mes: alunosNovosMes,
+      fila_espera: filaEspera,
+      turmas: turmas.map((t) => ({
+        id: t.id, nome: t.nome, curso: t.curso_nome, vagas: t.vagas,
+        matriculados: t.matriculados, na_fila: t.na_fila, instrutores: t.instrutores,
+      })),
+    },
+    aulas: {
+      hoje: aulasHoje.map((a) => ({
+        id: a.id, hora_inicio: a.hora_inicio, hora_fim: a.hora_fim, status: a.status,
+        turma: a.turma_nome, curso: a.curso_nome, instrutor: a.instrutor_nome,
+        alunos: a.alunos, chamada_feita: a.chamada_feita > 0,
+      })),
+      proximos_7_dias: aulasSemana,
+      realizadas_mes: aulasRealizadasMes,
+      chamadas_pendentes: chamadasPendentes,
+      frequencia_mes: frequenciaMes,
+    },
+    acervo: {
+      total: acervo,
+      emprestados,
+      emprestimos_atrasados: emprestimosAtrasados,
+      em_manutencao: emManutencao,
+      no_instituto: Math.max(0, Number(acervo) - Number(emprestados)),
+    },
+    pessoas: {
+      equipe,
+      voluntarios,
+      horas_voluntariado_mes: arred(horasMes / 60),
+    },
+    dinheiro: {
+      ofertas_mes: arred(ofertasMes.t),
+      ofertas_qtd_mes: ofertasMes.c,
+      despesas_mes: arred(despesasMes),
+      resultado_mes: arred(Number(ofertasMes.t) - Number(despesasMes)),
+      saldo_contas: arred(saldoContas),
+      a_pagar: arred(aPagar),
+      a_pagar_vencidas: aPagarVencidas,
+    },
+  };
+}
+
+/**
  * Central de Gestão: lista de pontos que precisam de atenção agora, cada um
  * com um nivel de urgencia (vermelho/laranja/amarelo/azul/verde) e uma rota
  * para onde o clique deve levar. O frontend monta o texto/emoji a partir do
@@ -231,10 +409,24 @@ function centralAtencao() {
     });
   }
 
-  // 3) Produtos abaixo do estoque minimo (so faz sentido para quem vende produtos;
-  // nunca para o ramo "professor", que nao tem produto nenhum por definicao).
   const ramoCfg = db.prepare("SELECT valor FROM config WHERE chave = 'ramo_servico'").get();
   const ramoServico = ramoCfg && ramoCfg.valor;
+
+  // Num instituto sem fins lucrativos nao existe venda, estoque nem meta de
+  // faturamento: o panorama dele e outro (painelInstituto) e os alertas do
+  // dia a dia ficam no sino de avisos. Aqui sobram so as contas e lembretes.
+  if (ramoServico === 'instituto') {
+    // eslint-disable-next-line global-require
+    const lembretesInstituto = require('./lembretesService').pendentesVencidos();
+    if (lembretesInstituto.length > 0) {
+      itens.push({ tipo: 'lembretes_vencidos', nivel: 'vermelho', rota: 'lembretes', peso: 1, dados: { qtd: lembretesInstituto.length } });
+    }
+    itens.sort((a, b) => a.peso - b.peso);
+    return { itens };
+  }
+
+  // 3) Produtos abaixo do estoque minimo (so faz sentido para quem vende produtos;
+  // nunca para o ramo "professor", que nao tem produto nenhum por definicao).
   if (ramoServico !== 'professor') {
     const estoqueBaixo = db.prepare('SELECT COUNT(*) c FROM produtos WHERE ativo=1 AND eh_servico=0 AND eh_kit=0 AND estoque_atual <= estoque_minimo').get().c;
     if (estoqueBaixo > 0) {
@@ -308,4 +500,5 @@ module.exports = {
   resumoGeral,
   centralAtencao,
   painelProfessor,
+  painelInstituto,
 };

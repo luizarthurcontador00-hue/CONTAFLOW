@@ -69,7 +69,10 @@
   };
   // Num instituto sem fins lucrativos nao existe venda: o que entra e oferta,
   // e o que sai e despesa. Estes modulos saem do menu por completo.
-  const ESCONDIDAS_NO_INSTITUTO = ['pdv', 'vendas', 'sacolas', 'precificacao', 'comissoes', 'ordens', 'compras', 'produtos', 'catalogo', 'etiquetas', 'lote'];
+  // O Dashboard tambem sai: ele e inteiro sobre venda, faturamento e curva ABC
+  // de produto. Quem faz esse papel aqui e o panorama da tela inicial e o
+  // Relatorio de impacto.
+  const ESCONDIDAS_NO_INSTITUTO = ['pdv', 'vendas', 'sacolas', 'precificacao', 'comissoes', 'ordens', 'compras', 'produtos', 'catalogo', 'etiquetas', 'lote', 'dashboard', 'servicos'];
 
   function rotaVisivel(nome) {
     if (ramo === 'instituto' && ESCONDIDAS_NO_INSTITUTO.includes(nome)) return false;
@@ -90,7 +93,8 @@
     ['ordens', 'agenda', 'crm', 'viagens', 'pdv', 'vendas', 'comissoes', 'dashboard',
       'cursos', 'instrumentos', 'voluntarios', 'turmas', 'chamada', 'membros',
       'lista-espera', 'autorizacoes', 'atas', 'impacto',
-      'produtos', 'sacolas', 'precificacao', 'compras', 'fornecedores'].forEach((nome) => {
+      'produtos', 'sacolas', 'precificacao', 'compras', 'fornecedores',
+      'servicos', 'catalogo', 'etiquetas', 'lote'].forEach((nome) => {
       const link = document.querySelector(`.nav-item[data-rota="${nome}"]`);
       if (link) link.style.display = rotaVisivel(nome) ? '' : 'none';
     });
@@ -164,6 +168,7 @@
     if (ramo === 'instituto') {
       if (nome === 'clientes') return 'Alunos e mantenedores';
       if (nome === 'financeiro') return 'Financeiro do instituto';
+      if (nome === 'inicio') return 'Panorama do instituto';
       return tituloPadrao;
     }
     if (ramo !== 'professor') return tituloPadrao;

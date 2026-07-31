@@ -58,7 +58,10 @@ window.PaginaInicio = (function () {
     }
   }
 
+  const ehInstituto = () => window.__ramoServico === 'instituto';
+
   async function render(container) {
+    if (ehInstituto()) return renderInstituto(container);
     container.innerHTML = `
       <div class="flex flex--between mb-16" style="align-items:flex-end;flex-wrap:wrap;gap:8px">
         <div>
@@ -144,6 +147,186 @@ window.PaginaInicio = (function () {
       <span class="stat__label">${label}</span>
       <span class="stat__value" style="font-size:22px">${valor}</span>
       <span class="dica">${sub || ''}</span>
+    </div>`;
+  }
+
+  // ===================== Panorama do instituto =====================
+  // Um retrato de quatro frentes: ensino, aulas de hoje, acervo e dinheiro.
+  // Cada bloco leva pra tela onde a coisa se resolve.
+
+  const STATUS_AULA = {
+    agendado: ['Agendada', 'alerta'], confirmado: ['Confirmada', 'muted'],
+    atendido: ['Realizada', 'ok'], faltou: ['Sem aula', 'erro'],
+  };
+
+  async function renderInstituto(container) {
+    container.innerHTML = `
+      <p class="dica mb-16" style="margin-top:0">Como estão as turmas, as aulas, o acervo e o caixa hoje. Clique em qualquer bloco para ir direto à tela.</p>
+      <div id="pi-corpo">Carregando…</div>`;
+
+    const alvo = container.querySelector('#pi-corpo');
+    let d;
+    try { d = await API.get('/api/dashboard/instituto'); }
+    catch (e) {
+      alvo.innerHTML = `<div class="card"><span class="badge badge--erro">Erro</span> ${UI.escapar(e.message)}</div>`;
+      return;
+    }
+    alvo.innerHTML = corpoInstituto(d);
+    alvo.querySelectorAll('[data-ir]').forEach((el) => el.addEventListener('click', () => {
+      location.hash = '#/' + el.dataset.ir;
+    }));
+  }
+
+  function corpoInstituto(d) {
+    return `
+      ${blocoNumeros(d)}
+      <div class="painel-instituto mt-16">
+        ${blocoAulasHoje(d.aulas)}
+        ${blocoTurmas(d.ensino)}
+      </div>
+      <div class="painel-instituto mt-16">
+        ${blocoAcervo(d.acervo)}
+        ${blocoDinheiro(d.dinheiro)}
+      </div>`;
+  }
+
+  function blocoNumeros(d) {
+    const e = d.ensino;
+    const freq = d.aulas.frequencia_mes;
+    return `
+      <div class="grid grid--cards">
+        ${statNav('clientes', '🧑‍🎓 Alunos ativos', e.alunos_ativos,
+          e.alunos_novos_mes > 0 ? `+${e.alunos_novos_mes} matriculado(s) neste mês` : 'nenhuma matrícula nova neste mês')}
+        ${statNav('turmas', '📚 Turmas ativas', e.turmas_ativas,
+          `${e.vagas_ocupadas}/${e.vagas_totais} vagas ocupadas (${e.ocupacao_pct}%)`)}
+        ${statNav('chamada', '🗓️ Aulas nos próximos 7 dias', d.aulas.proximos_7_dias,
+          `${d.aulas.realizadas_mes} realizada(s) neste mês`)}
+        ${statNav('impacto', '✅ Frequência do mês', freq != null ? freq + '%' : '—',
+          freq != null ? 'presenças sobre chamadas feitas' : 'ainda sem chamada registrada')}
+        ${statNav('instrumentos', '🎸 Instrumentos', d.acervo.total,
+          `${d.acervo.no_instituto} no instituto · ${d.acervo.emprestados} emprestado(s)`)}
+        ${statNav('voluntarios', '🤝 Horas de voluntariado', d.pessoas.horas_voluntariado_mes + 'h',
+          `${d.pessoas.voluntarios} voluntário(s) de ${d.pessoas.equipe} na equipe`)}
+      </div>`;
+  }
+
+  function statNav(rota, label, valor, sub) {
+    return `<div class="card stat pi-clicavel" data-ir="${rota}">
+      <span class="stat__label">${label}</span>
+      <span class="stat__value" style="font-size:24px">${valor}</span>
+      <span class="dica">${UI.escapar(sub || '')}</span>
+    </div>`;
+  }
+
+  function blocoAulasHoje(a) {
+    const pendencia = a.chamadas_pendentes > 0
+      ? `<div class="pi-alerta" data-ir="chamada">⚠️ ${a.chamadas_pendentes} aula(s) já passaram sem chamada registrada — sem isso o relatório de impacto sai menor do que a realidade.</div>`
+      : '';
+    if (!a.hoje.length) {
+      return `<div class="card">
+        <h3 style="margin-top:0">🗓️ Aulas de hoje</h3>
+        ${pendencia}
+        <p class="muted">Nenhuma aula marcada para hoje.</p>
+      </div>`;
+    }
+    return `<div class="card">
+      <h3 style="margin-top:0">🗓️ Aulas de hoje <span class="dica">(${a.hoje.length})</span></h3>
+      ${pendencia}
+      <div class="rolagem"><table class="tabela">
+        <thead><tr><th>Horário</th><th>Turma</th><th>Instrutor</th><th>Alunos</th><th>Chamada</th></tr></thead>
+        <tbody>${a.hoje.map((x) => {
+          const [rot, cor] = STATUS_AULA[x.status] || [x.status, 'muted'];
+          return `<tr class="pi-clicavel" data-ir="chamada">
+            <td><strong>${UI.escapar(x.hora_inicio || '—')}</strong>${x.hora_fim ? `<div class="dica">até ${UI.escapar(x.hora_fim)}</div>` : ''}</td>
+            <td>${UI.escapar(x.turma || '—')}<div class="dica">${UI.escapar(x.curso || '')}</div></td>
+            <td>${x.instrutor ? UI.escapar(x.instrutor) : '<span class="badge badge--erro">sem instrutor</span>'}</td>
+            <td>${x.alunos}</td>
+            <td>${x.chamada_feita
+              ? '<span class="badge badge--ok">feita</span>'
+              : `<span class="badge badge--${cor}">${rot}</span>`}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>
+    </div>`;
+  }
+
+  function blocoTurmas(e) {
+    const avisos = [];
+    if (e.turmas_sem_instrutor > 0) avisos.push(`<span class="badge badge--erro">${e.turmas_sem_instrutor} sem instrutor</span>`);
+    if (e.turmas_lotadas > 0) avisos.push(`<span class="badge badge--alerta">${e.turmas_lotadas} lotada(s)</span>`);
+    if (e.fila_espera > 0) avisos.push(`<span class="badge badge--muted">${e.fila_espera} na lista de espera</span>`);
+
+    if (!e.turmas.length) {
+      return `<div class="card">
+        <h3 style="margin-top:0">📚 Turmas</h3>
+        <p class="muted">Nenhuma turma ativa. Crie a primeira em <strong>Turmas</strong>.</p>
+      </div>`;
+    }
+    return `<div class="card">
+      <div class="flex flex--between" style="align-items:center;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0">📚 Turmas e vagas</h3>
+        <div class="flex gap-12" style="flex-wrap:wrap">${avisos.join(' ')}</div>
+      </div>
+      <div class="rolagem mt-16"><table class="tabela">
+        <thead><tr><th>Turma</th><th>Ocupação</th><th style="width:140px"></th></tr></thead>
+        <tbody>${e.turmas.map((t) => {
+          const pct = t.vagas > 0 ? Math.min(100, Math.round((t.matriculados / t.vagas) * 100)) : 0;
+          const cor = pct >= 100 ? 'var(--perigo)' : pct >= 80 ? 'var(--alerta,#b45309)' : 'var(--sucesso)';
+          return `<tr class="pi-clicavel" data-ir="turmas">
+            <td>${UI.escapar(t.nome)}<div class="dica">${UI.escapar(t.curso || '—')}${t.na_fila ? ` · ${t.na_fila} na fila` : ''}${t.instrutores ? '' : ' · <strong style="color:var(--perigo)">sem instrutor</strong>'}</div></td>
+            <td style="white-space:nowrap">${t.matriculados}/${t.vagas}</td>
+            <td><div class="pi-barra"><span style="width:${pct}%;background:${cor}"></span></div></td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>
+    </div>`;
+  }
+
+  function blocoAcervo(a) {
+    const linhas = [
+      ['No instituto (disponível para as turmas)', a.no_instituto, ''],
+      ['Emprestados a alunos', a.emprestados, a.emprestimos_atrasados > 0 ? `${a.emprestimos_atrasados} com devolução atrasada` : ''],
+      ['Em manutenção', a.em_manutencao, ''],
+    ];
+    return `<div class="card">
+      <h3 style="margin-top:0">🎸 Acervo de instrumentos</h3>
+      ${a.total === 0
+        ? '<p class="muted">Nenhum instrumento cadastrado. O acervo é o que define quantas vagas cada turma de música pode abrir.</p>'
+        : `<table class="tabela">
+            ${linhas.map(([r, v, sub]) => `<tr class="pi-clicavel" data-ir="instrumentos">
+              <td>${r}${sub ? `<div class="dica" style="color:var(--perigo)">${sub}</div>` : ''}</td>
+              <td style="text-align:right"><strong>${v}</strong></td>
+            </tr>`).join('')}
+            <tr><td><strong>Total do acervo</strong></td><td style="text-align:right"><strong>${a.total}</strong></td></tr>
+          </table>`}
+    </div>`;
+  }
+
+  function blocoDinheiro(f) {
+    const positivo = f.resultado_mes >= 0;
+    return `<div class="card">
+      <h3 style="margin-top:0">💰 Dinheiro do mês</h3>
+      <table class="tabela">
+        <tr class="pi-clicavel" data-ir="financeiro">
+          <td>Ofertas recebidas<div class="dica">${f.ofertas_qtd_mes} doação(ões)</div></td>
+          <td style="text-align:right;color:var(--sucesso)">+ ${UI.moeda(f.ofertas_mes)}</td>
+        </tr>
+        <tr class="pi-clicavel" data-ir="financeiro">
+          <td>Despesas pagas</td>
+          <td style="text-align:right;color:var(--perigo)">- ${UI.moeda(f.despesas_mes)}</td>
+        </tr>
+        <tr class="pi-clicavel" data-ir="financeiro">
+          <td><strong>Resultado do mês</strong></td>
+          <td style="text-align:right"><strong style="color:${positivo ? 'var(--sucesso)' : 'var(--perigo)'}">${UI.moeda(f.resultado_mes)}</strong></td>
+        </tr>
+        <tr class="pi-clicavel" data-ir="financeiro">
+          <td>Saldo em caixa e banco<div class="dica">somando todas as contas</div></td>
+          <td style="text-align:right"><strong>${UI.moeda(f.saldo_contas)}</strong></td>
+        </tr>
+      </table>
+      ${f.a_pagar > 0 ? `<div class="pi-alerta mt-16" data-ir="financeiro">
+        ${UI.moeda(f.a_pagar)} em despesas a pagar${f.a_pagar_vencidas > 0 ? ` — <strong>${f.a_pagar_vencidas} já vencida(s)</strong>` : ''}.
+      </div>` : ''}
     </div>`;
   }
 

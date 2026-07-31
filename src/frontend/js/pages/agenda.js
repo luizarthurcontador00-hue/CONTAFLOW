@@ -24,6 +24,9 @@ window.PaginaAgenda = (function () {
 
   // Rotulos: para o ramo "professor" (aulas particulares), fala a lingua do dia a dia do professor.
   const ehProfessor = () => window.__ramoServico === 'professor';
+  // Num instituto sem fins lucrativos a aula nao vira venda: nao ha o que
+  // faturar, nem valor ou servico a cobrar do aluno.
+  const ehInstituto = () => window.__ramoServico === 'instituto';
   const rCliente = (m) => (ehProfessor() ? (m ? 'Aluno' : 'aluno') : (m ? 'Cliente' : 'cliente'));
   const rServico = (m) => (ehProfessor() ? (m ? 'Matéria' : 'matéria') : (m ? 'Serviço' : 'serviço'));
   const rAula = (m) => (ehProfessor() ? (m ? 'Aula' : 'aula') : (m ? 'Agendamento' : 'agendamento'));
@@ -144,7 +147,7 @@ window.PaginaAgenda = (function () {
         return `<div class="agenda-item" style="border-left-color:${a.profissional_cor || 'var(--primaria)'}">
           <div class="agenda-item__hora">${UI.escapar(a.hora_inicio)}${a.hora_fim ? `<span class="dica">até ${UI.escapar(a.hora_fim)}</span>` : ''}</div>
           <div class="agenda-item__info">
-            <strong>${UI.escapar(nome)}</strong> ${badge(a.status)}${a.venda_id ? ' <span class="badge badge--ok">faturado</span>' : ''}${a.aula_recorrente_id ? ` <span class="badge badge--muted" title="Gerado automaticamente de uma ${rAula()} fixa">🔁 fixa</span>` : ''}
+            <strong>${UI.escapar(nome)}</strong> ${badge(a.status)}${a.venda_id && !ehInstituto() ? ' <span class="badge badge--ok">faturado</span>' : ''}${a.aula_recorrente_id ? ` <span class="badge badge--muted" title="Gerado automaticamente de uma ${rAula()} fixa">🔁 fixa</span>` : ''}
             <div class="dica">${UI.escapar(a.servico_nome || rServico(true))}${a.profissional_nome ? ' · ' + UI.escapar(a.profissional_nome) : ''}${tel ? ' · ' + UI.escapar(tel) : ''}</div>
           </div>
           <div class="agenda-item__valor">${UI.moeda(a.valor)}</div>
@@ -442,13 +445,13 @@ window.PaginaAgenda = (function () {
       titulo: `${a.hora_inicio} — ${nome}`, tamanho: 'modal--pequeno', mostrarConfirmar: false,
       corpoHTML: `
         <table class="tabela">
-          <tr><th>Status</th><td>${badge(a.status)}${a.venda_id ? ' <span class="badge badge--ok">faturado (venda #' + a.venda_id + ')</span>' : ''}${a.aula_recorrente_id ? ` <span class="badge badge--muted">🔁 ${rAula()} fixa</span>` : ''}</td></tr>
+          <tr><th>Status</th><td>${badge(a.status)}${a.venda_id && !ehInstituto() ? ' <span class="badge badge--ok">faturado (venda #' + a.venda_id + ')</span>' : ''}${a.aula_recorrente_id ? ` <span class="badge badge--muted">🔁 ${rAula()} fixa</span>` : ''}</td></tr>
           <tr><th>Data</th><td>${diaLabel(a.data)}</td></tr>
           <tr><th>Horário</th><td>${UI.escapar(a.hora_inicio)}${a.hora_fim ? ' às ' + UI.escapar(a.hora_fim) : ''}</td></tr>
-          <tr><th>${rServico(true)}</th><td>${UI.escapar(a.servico_nome || '—')}</td></tr>
-          <tr><th>Profissional</th><td>${UI.escapar(a.profissional_nome || '—')}</td></tr>
+          ${ehInstituto() ? '' : `<tr><th>${rServico(true)}</th><td>${UI.escapar(a.servico_nome || '—')}</td></tr>`}
+          <tr><th>${ehInstituto() ? 'Instrutor' : 'Profissional'}</th><td>${UI.escapar(a.profissional_nome || '—')}</td></tr>
           <tr><th>Telefone</th><td>${UI.escapar(tel || '—')}</td></tr>
-          <tr><th>Valor</th><td><strong>${UI.moeda(a.valor)}</strong></td></tr>
+          ${ehInstituto() ? '' : `<tr><th>Valor</th><td><strong>${UI.moeda(a.valor)}</strong></td></tr>`}
           ${a.observacao ? `<tr><th>Obs.</th><td>${UI.escapar(a.observacao)}</td></tr>` : ''}
         </table>
         <div class="campo mt-16"><label>Mudar status</label>
@@ -464,7 +467,7 @@ window.PaginaAgenda = (function () {
             <div class="cresce"></div>
             ${!a.venda_id ? '<button class="btn btn--secundario" id="d-editar">Editar</button>' : ''}
             ${!a.venda_id ? '<button class="btn btn--perigo" id="d-excluir">Excluir</button>' : ''}
-            ${!a.venda_id ? '<button class="btn" id="d-faturar">💲 Faturar</button>' : ''}
+            ${!a.venda_id && !ehInstituto() ? '<button class="btn" id="d-faturar">💲 Faturar</button>' : ''}
           </div>`;
         foot.querySelector('#d-status').addEventListener('click', async () => {
           try { await API.post(`/api/agenda/${a.id}/status`, { status: el.querySelector('#det-status').value }); UI.sucesso('Status atualizado.'); el.remove(); await atualizarVistaAtual(); }

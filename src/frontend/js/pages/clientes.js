@@ -7,7 +7,12 @@
  */
 window.PaginaClientes = (function () {
   const ehProfessor = () => window.__ramoServico === 'professor';
-  const rotulo = (maiusc) => (ehProfessor() ? (maiusc ? 'Aluno' : 'aluno') : (maiusc ? 'Cliente' : 'cliente'));
+  // No instituto nao ha venda nem fiado: a pessoa e aluno ou mantenedor.
+  const ehInstituto = () => window.__ramoServico === 'instituto';
+  const rotulo = (maiusc) => {
+    if (ehInstituto()) return maiusc ? 'Pessoa' : 'pessoa';
+    return ehProfessor() ? (maiusc ? 'Aluno' : 'aluno') : (maiusc ? 'Cliente' : 'cliente');
+  };
 
   async function render(container) {
     container.innerHTML = `
@@ -30,10 +35,12 @@ window.PaginaClientes = (function () {
     catch (e) { alvo.innerHTML = UI.escapar(e.message); return; }
     if (!clientes.length) { alvo.innerHTML = `<p class="muted">Nenhum ${rotulo()} cadastrado.</p>`; return; }
     alvo.innerHTML = `<table class="tabela">
-      <thead><tr><th>Nome</th><th>Telefone</th><th>CPF</th><th>Deve (fiado)</th><th></th></tr></thead>
+      <thead><tr><th>Nome</th><th>Telefone</th><th>CPF</th><th>${ehInstituto() ? 'Perfil' : 'Deve (fiado)'}</th><th></th></tr></thead>
       <tbody>${clientes.map((c) => `<tr>
         <td>${UI.escapar(c.nome)}</td><td>${UI.escapar(c.telefone || '—')}</td><td>${UI.escapar(c.cpf || '—')}</td>
-        <td>${Number(c.saldo_devedor) > 0 ? `<span class="badge badge--alerta">${UI.moeda(c.saldo_devedor)}</span>` : '<span class="muted">—</span>'}</td>
+        <td>${ehInstituto()
+          ? `<span class="badge badge--muted">${{ aluno: 'Aluno', mantenedor: 'Mantenedor', ambos: 'Aluno e mantenedor' }[c.natureza || 'aluno']}</span>`
+          : (Number(c.saldo_devedor) > 0 ? `<span class="badge badge--alerta">${UI.moeda(c.saldo_devedor)}</span>` : '<span class="muted">—</span>')}</td>
         <td style="text-align:right"><button class="btn btn--secundario" data-ver="${c.id}">Ver</button></td>
       </tr>`).join('')}</tbody></table>`;
     alvo.querySelectorAll('[data-ver]').forEach((b) => b.addEventListener('click', () => detalhe(Number(b.dataset.ver))));
@@ -122,24 +129,24 @@ window.PaginaClientes = (function () {
     let c;
     try { c = await API.get('/api/clientes/' + id); } catch (e) { UI.erro(e.message); return; }
     const corpo = `
-      <div class="grid grid--cards mb-16">
+      ${ehInstituto() ? '' : `<div class="grid grid--cards mb-16">
         <div class="card stat"><span class="stat__label">Deve (fiado)</span><span class="stat__value" style="font-size:22px;color:${Number(c.saldo_devedor) > 0 ? 'var(--alerta)' : 'var(--sucesso)'}">${UI.moeda(c.saldo_devedor)}</span></div>
         <div class="card stat"><span class="stat__label">Limite de crédito</span><span class="stat__value" style="font-size:22px">${UI.moeda(c.limite_credito)}</span></div>
         <div class="card stat"><span class="stat__label">Compras</span><span class="stat__value" style="font-size:22px">${c.compras.length}</span></div>
-      </div>
+      </div>`}
       <table class="tabela mb-16">
         <tr><th>Telefone</th><td>${UI.escapar(c.telefone || '—')}</td><th>CPF</th><td>${UI.escapar(c.cpf || '—')}</td></tr>
         <tr><th>E-mail</th><td>${UI.escapar(c.email || '—')}</td><th>Endereço</th><td>${UI.escapar(c.endereco || '—')}</td></tr>
       </table>
-      <h3>Contas a receber (fiado)</h3>
+      <h3>${ehInstituto() ? 'Cobranças a receber' : 'Contas a receber (fiado)'}</h3>
       ${c.contas.length ? `<table class="tabela"><thead><tr><th>Descrição</th><th>Venc.</th><th>Valor</th><th>Situação</th></tr></thead>
         <tbody>${c.contas.map((ct) => `<tr><td>${UI.escapar(ct.descricao)}</td><td>${ct.vencimento || '—'}</td><td>${UI.moeda(ct.valor)}</td>
           <td>${ct.status === 'pendente' ? '<span class="badge badge--alerta">Pendente</span>' : ct.status === 'recebido' ? '<span class="badge badge--ok">Recebido</span>' : '<span class="badge badge--muted">Cancelada</span>'}</td></tr>`).join('')}</tbody></table>`
         : '<p class="muted">Nenhuma conta.</p>'}
-      <h3 class="mt-16">Últimas compras</h3>
+      ${ehInstituto() ? '' : `<h3 class="mt-16">Últimas compras</h3>
       ${c.compras.length ? `<table class="tabela"><thead><tr><th>#</th><th>Data</th><th>Total</th><th>Status</th></tr></thead>
         <tbody>${c.compras.map((v) => `<tr><td>${v.id}</td><td>${UI.dataHora(v.data)}</td><td>${UI.moeda(v.valor_total)}</td><td>${v.status}</td></tr>`).join('')}</tbody></table>`
-        : '<p class="muted">Nenhuma compra.</p>'}`;
+        : '<p class="muted">Nenhuma compra.</p>'}`}`;
 
     Modal.abrir({
       titulo: c.nome, tamanho: 'modal--grande', corpoHTML: corpo, mostrarConfirmar: false,

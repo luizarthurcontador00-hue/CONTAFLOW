@@ -7,10 +7,13 @@
  */
 window.PaginaConfiguracoes = (function () {
   let abaAtual = 'loja';
-  const ABAS = [
-    ['loja', 'Loja'],
+  const ehInstituto = () => window.__ramoServico === 'instituto';
+  // No instituto nao existe venda: o modulo fiscal (NF-e/NFC-e da venda) fica
+  // fora, senao vira uma aba que nunca vai ser usada.
+  const abas = () => [
+    ['loja', ehInstituto() ? 'Instituto' : 'Loja'],
     ['pix', '💠 PIX'],
-    ['fiscal', '🧾 Fiscal'],
+    ...(ehInstituto() ? [] : [['fiscal', '🧾 Fiscal']]),
     ['aparencia', '🎨 Aparência'],
     ['google', '📅 Google Agenda'],
     ['avisos', '🔔 Avisos automáticos'],
@@ -19,6 +22,9 @@ window.PaginaConfiguracoes = (function () {
   async function render(container) {
     let cfg = {};
     try { cfg = await API.get('/api/config'); } catch (e) { /* usa vazio */ }
+
+    const ABAS = abas();
+    if (!ABAS.some(([id]) => id === abaAtual)) abaAtual = 'loja';
 
     container.innerHTML = `
       <div class="tabs">
@@ -47,10 +53,13 @@ window.PaginaConfiguracoes = (function () {
 
   // ------------------------------ Loja ------------------------------
   function renderLoja(alvo, cfg, container) {
+    const inst = ehInstituto();
     alvo.innerHTML = `
       <div class="card" style="max-width:640px">
-        <h3 style="margin-top:0">Dados da loja</h3>
-        <p class="dica">Aparecem no cupom de venda e nos relatórios impressos.</p>
+        <h3 style="margin-top:0">${inst ? 'Dados do instituto' : 'Dados da loja'}</h3>
+        <p class="dica">${inst
+          ? 'Aparecem nos recibos de doação, nas atas, na prestação de contas e nos relatórios impressos.'
+          : 'Aparecem no cupom de venda e nos relatórios impressos.'}</p>
         <form id="form-cfg" class="form-grid">
           <div class="campo col-2"><label>Tipo de atividade</label>
             <select name="perfil_negocio">
@@ -71,10 +80,11 @@ window.PaginaConfiguracoes = (function () {
             </select>
             <span class="dica">Refina o que aparece no menu — ex.: "Ordens & Orçamentos" (Pátio/OS) fica escondido para Salão.</span>
           </div>
-          <div class="campo col-2"><label>Nome da loja</label><input name="nome_loja" value="${UI.escapar(cfg.nome_loja || '')}" /></div>
+          <div class="campo col-2"><label>${inst ? 'Nome do instituto' : 'Nome da loja'}</label><input name="nome_loja" value="${UI.escapar(cfg.nome_loja || '')}" /></div>
           <div class="campo"><label>Telefone</label><input name="loja_telefone" value="${UI.escapar(cfg.loja_telefone || '')}" /></div>
           <div class="campo"><label>CNPJ / CPF</label><input name="loja_cnpj" value="${UI.escapar(cfg.loja_cnpj || '')}" /></div>
           <div class="campo col-2"><label>Endereço</label><input name="loja_endereco" value="${UI.escapar(cfg.loja_endereco || '')}" /></div>
+          ${inst ? '' : `
           <div class="campo col-2"><label>Mensagem no rodapé do cupom</label>
             <input name="loja_rodape_cupom" value="${UI.escapar(cfg.loja_rodape_cupom || 'Obrigado pela preferência!')}" /></div>
           <div class="campo"><label>Markup padrão (%)</label>
@@ -89,7 +99,7 @@ window.PaginaConfiguracoes = (function () {
               Gerar código de barras automaticamente ao importar produtos
             </label>
             <span class="dica">Ao cadastrar em lote ou importar por NF-e, produtos sem código de barras recebem um EAN-13 interno (para etiquetas e leitura no PDV).</span>
-          </div>
+          </div>`}
           <div class="campo col-2"><button class="btn" type="submit">Salvar configurações</button></div>
         </form>
       </div>
@@ -127,7 +137,9 @@ window.PaginaConfiguracoes = (function () {
       ev.preventDefault();
       const body = Object.fromEntries(new FormData(ev.target).entries());
       // Checkbox nao marcado nao entra no FormData: normaliza para '0'/'1'.
-      body.gerar_codigo_auto = ev.target.querySelector('#cfg-cod-auto').checked ? '1' : '0';
+      // (No instituto esse campo nem existe — nao ha produto para etiquetar.)
+      const codAuto = ev.target.querySelector('#cfg-cod-auto');
+      if (codAuto) body.gerar_codigo_auto = codAuto.checked ? '1' : '0';
       try {
         await API.put('/api/config', body);
         Object.assign(cfg, body);

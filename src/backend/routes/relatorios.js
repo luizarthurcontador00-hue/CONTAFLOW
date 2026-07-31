@@ -99,6 +99,52 @@ router.get('/parados', asyncHandler((req, res) => {
   enviar(res, { formato: req.query.formato, titulo: 'Produtos Parados', colunas, linhas, json: dados });
 }));
 
+// ------------------------- Ofertas (instituto) -------------------------
+router.get('/ofertas', asyncHandler((req, res) => {
+  const dados = rel.ofertasRelatorio(req.query);
+  const colunas = [
+    { chave: 'data', titulo: 'Data' },
+    { chave: 'doador', titulo: 'Doador' },
+    { chave: 'valor', titulo: 'Valor' },
+    { chave: 'forma', titulo: 'Forma' },
+    { chave: 'conta', titulo: 'Entrou na conta' },
+    { chave: 'projeto', titulo: 'Projeto' },
+    { chave: 'recibo', titulo: 'Recibo emitido' },
+  ];
+  const linhas = dados.itens.map((o) => ({
+    ...o, valor: money(o.valor), recibo: o.recibo_emitido ? 'Sim' : 'Não',
+  }));
+  enviar(res, { formato: req.query.formato, titulo: 'Relatorio de Ofertas', colunas, linhas, json: dados });
+}));
+
+// -------------------- Turmas e matriculas (instituto) --------------------
+router.get('/turmas', asyncHandler((req, res) => {
+  const dados = rel.turmasRelatorio();
+  const colunas = [
+    { chave: 'turma', titulo: 'Turma' },
+    { chave: 'curso', titulo: 'Curso' },
+    { chave: 'horarios', titulo: 'Horários' },
+    { chave: 'instrutores', titulo: 'Instrutores' },
+    { chave: 'aluno', titulo: 'Aluno' },
+    { chave: 'telefone', titulo: 'Telefone' },
+    { chave: 'responsavel', titulo: 'Responsável' },
+  ];
+  // Na exportacao vira uma linha por aluno (formato que a secretaria usa).
+  const linhas = [];
+  dados.itens.forEach((t) => {
+    if (!t.alunos.length) {
+      linhas.push({ turma: t.nome, curso: t.curso || '', horarios: t.horarios, instrutores: t.instrutores || '', aluno: '(sem matrículas)', telefone: '', responsavel: '' });
+      return;
+    }
+    t.alunos.forEach((a) => linhas.push({
+      turma: t.nome, curso: t.curso || '', horarios: t.horarios, instrutores: t.instrutores || '',
+      aluno: a.nome, telefone: a.telefone || '',
+      responsavel: a.responsavel_nome ? `${a.responsavel_nome}${a.responsavel_telefone ? ' (' + a.responsavel_telefone + ')' : ''}` : '',
+    }));
+  });
+  enviar(res, { formato: req.query.formato, titulo: 'Turmas e Matriculas', colunas, linhas, json: dados });
+}));
+
 // --------------------------- CRM (agencia de viagem) ---------------------------
 router.get('/crm', asyncHandler((req, res) => {
   const dados = rel.funilCRM(req.query);

@@ -78,6 +78,89 @@ function financeiro({ inicio, fim } = {}) {
 }
 
 /**
+ * Ofertas recebidas no periodo — o equivalente do "vendas detalhado" para um
+ * instituto sem fins lucrativos: aqui a entrada e doacao, nao faturamento.
+ */
+function ofertasRelatorio({ inicio, fim, projeto_id } = {}) {
+  const db = getDb();
+  const ini = inicio || '0000-01-01';
+  const f = fim || '9999-12-31';
+  const itens = db.prepare(`
+    SELECT o.id, o.data, o.valor, o.forma, o.recibo_emitido,
+      COALESCE(c.nome, o.doador_nome) AS doador,
+      p.nome AS projeto, cf.nome AS conta
+    FROM ofertas o
+    LEFT JOIN clientes c ON c.id = o.cliente_id
+    LEFT JOIN projetos p ON p.id = o.projeto_id
+    LEFT JOIN contas_financeiras cf ON cf.id = o.conta_financeira_id
+    WHERE date(o.data) BETWEEN date(@ini) AND date(@fim)
+      AND (@projeto_id IS NULL OR o.projeto_id = @projeto_id)
+    ORDER BY date(o.data) DESC, o.id DESC
+  `).all({ ini, fim: f, projeto_id: projeto_id ? Number(projeto_id) : null });
+
+  const porForma = {};
+  itens.forEach((i) => {
+    const k = i.forma || 'outro';
+    porForma[k] = arred((porForma[k] || 0) + Number(i.valor));
+  });
+
+  return {
+    itens,
+    por_forma: Object.entries(porForma).map(([forma, total]) => ({ forma, total })).sort((a, b) => b.total - a.total),
+    totais: {
+      quantidade: itens.length,
+      total: arred(itens.reduce((s, i) => s + Number(i.valor), 0)),
+      sem_recibo: itens.filter((i) => !i.recibo_emitido).length,
+      fora_do_caixa: itens.filter((i) => !i.conta).length,
+    },
+  };
+}
+
+/**
+ * Turmas ativas com a lista de matriculados — o "diario de secretaria" do
+ * instituto: quem esta em que turma, com quem e em qual horario.
+ */
+function turmasRelatorio() {
+  const db = getDb();
+  const turmas = db.prepare(`
+    SELECT t.id, t.nome, t.vagas, t.sala, t.periodo_inicio, t.periodo_fim,
+      c.nome AS curso, c.categoria,
+      (SELECT GROUP_CONCAT(p.nome, ', ') FROM turmas_instrutores ti
+        JOIN profissionais p ON p.id = ti.profissional_id WHERE ti.turma_id = t.id) AS instrutores,
+      (SELECT COUNT(*) FROM matriculas m WHERE m.turma_id = t.id AND m.status = 'ativa') AS matriculados,
+      (SELECT COUNT(*) FROM matriculas m WHERE m.turma_id = t.id AND m.status = 'espera') AS na_fila
+    FROM turmas t LEFT JOIN cursos c ON c.id = t.curso_id
+    WHERE t.status IN ('aberta','planejada')
+    ORDER BY c.nome, t.nome
+  `).all();
+
+  const horarios = db.prepare('SELECT * FROM turmas_horarios ORDER BY dia_semana, hora_inicio').all();
+  const alunos = db.prepare(`
+    SELECT m.turma_id, cl.nome, cl.telefone, cl.responsavel_nome, cl.responsavel_telefone
+    FROM matriculas m JOIN clientes cl ON cl.id = m.aluno_id
+    WHERE m.status = 'ativa' ORDER BY cl.nome COLLATE NOCASE
+  `).all();
+
+  const DIAS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+  const itens = turmas.map((t) => ({
+    ...t,
+    horarios: horarios.filter((h) => h.turma_id === t.id)
+      .map((h) => `${DIAS[h.dia_semana] || h.dia_semana} ${h.hora_inicio}–${h.hora_fim}`).join(' · '),
+    alunos: alunos.filter((a) => a.turma_id === t.id),
+  }));
+
+  return {
+    itens,
+    totais: {
+      turmas: itens.length,
+      matriculados: itens.reduce((s, t) => s + Number(t.matriculados), 0),
+      vagas: itens.reduce((s, t) => s + Number(t.vagas || 0), 0),
+      sem_instrutor: itens.filter((t) => !t.instrutores).length,
+    },
+  };
+}
+
+/**
  * Produtos ativos, com estoque, que nao vendem ha X dias (ou nunca venderam).
  * Ajuda a identificar estoque encalhado.
  */
@@ -246,11 +329,16 @@ function exportarContador({ inicio, fim } = {}) {
 
   const extratoConciliado = db.prepare(`
     SELECT t.data AS "Data", cf.nome AS "Conta", t.tipo AS "Tipo", t.valor AS "Valor",
-      t.descricao AS "Descrição (banco)", COALESCE(cp.descricao, cr.descricao) AS "Lançamento vinculado"
+      t.descricao AS "Descrição (banco)",
+      COALESCE(cp.descricao, cr.descricao,
+        CASE WHEN o.id IS NULL THEN NULL ELSE 'Oferta — ' || COALESCE(oc.nome, o.doador_nome, 'doador') END
+      ) AS "Lançamento vinculado"
     FROM extrato_ofx_transacoes t
     JOIN contas_financeiras cf ON cf.id = t.conta_financeira_id
     LEFT JOIN contas_pagar cp ON cp.id = t.contas_pagar_id
     LEFT JOIN contas_receber cr ON cr.id = t.contas_receber_id
+    LEFT JOIN ofertas o ON o.id = t.oferta_id
+    LEFT JOIN clientes oc ON oc.id = o.cliente_id
     WHERE t.status = 'conciliada' AND date(t.data) BETWEEN date(?) AND date(?)
     ORDER BY date(t.data)
   `).all(ini, f);
@@ -260,6 +348,62 @@ function exportarContador({ inicio, fim } = {}) {
     const ws = linhas.length ? XLSX.utils.json_to_sheet(linhas) : XLSX.utils.aoa_to_sheet([['Sem registros no período']]);
     XLSX.utils.book_append_sheet(wb, ws, nome);
   };
+
+  // Num instituto sem fins lucrativos nao existe venda nem compra de
+  // mercadoria: o que o contador precisa e a entrada de doacao, a despesa e o
+  // extrato batido. Mantem-se a mesma planilha, com as abas que fazem sentido.
+  const ramoCfg = db.prepare("SELECT valor FROM config WHERE chave = 'ramo_servico'").get();
+  if (ramoCfg && ramoCfg.valor === 'instituto') {
+    const ofertas = db.prepare(`
+      SELECT date(o.data) AS "Data", COALESCE(c.nome, o.doador_nome) AS "Doador",
+        o.valor AS "Valor", o.forma AS "Forma", cf.nome AS "Entrou na conta",
+        p.nome AS "Projeto", CASE WHEN o.recibo_emitido THEN 'Sim' ELSE 'Não' END AS "Recibo emitido"
+      FROM ofertas o
+      LEFT JOIN clientes c ON c.id = o.cliente_id
+      LEFT JOIN projetos p ON p.id = o.projeto_id
+      LEFT JOIN contas_financeiras cf ON cf.id = o.conta_financeira_id
+      WHERE date(o.data) BETWEEN date(?) AND date(?) ORDER BY date(o.data)
+    `).all(ini, f);
+
+    const despesas = db.prepare(`
+      SELECT cp.descricao AS "Descrição", f.nome AS "Fornecedor", cd.nome AS "Categoria",
+        pj.nome AS "Projeto", cp.data_pagamento AS "Pago em", cp.valor AS "Valor"
+      FROM contas_pagar cp
+      LEFT JOIN fornecedores f ON f.id = cp.fornecedor_id
+      LEFT JOIN categorias_despesa cd ON cd.id = cp.categoria_despesa_id
+      LEFT JOIN projetos pj ON pj.id = cp.projeto_id
+      WHERE cp.status = 'pago' AND date(cp.data_pagamento) BETWEEN date(?) AND date(?)
+      ORDER BY date(cp.data_pagamento)
+    `).all(ini, f);
+
+    const especie = db.prepare(`
+      SELECT date(d.data) AS "Data", COALESCE(c.nome, d.doador_nome) AS "Doador",
+        d.descricao AS "Bem doado", d.quantidade AS "Quantidade",
+        d.valor_estimado AS "Valor estimado", p.nome AS "Projeto"
+      FROM doacoes_especie d
+      LEFT JOIN clientes c ON c.id = d.cliente_id
+      LEFT JOIN projetos p ON p.id = d.projeto_id
+      WHERE date(d.data) BETWEEN date(?) AND date(?) ORDER BY date(d.data)
+    `).all(ini, f);
+
+    const saldos = db.prepare(`
+      SELECT cf.nome AS "Conta", cf.tipo AS "Tipo",
+        cf.saldo_inicial + COALESCE((
+          SELECT SUM(CASE WHEN m.tipo = 'entrada' THEN m.valor ELSE -m.valor END)
+          FROM contas_financeiras_mov m WHERE m.conta_id = cf.id
+        ), 0) AS "Saldo atual"
+      FROM contas_financeiras cf WHERE cf.ativa = 1 ORDER BY cf.nome
+    `).all();
+
+    addSheet('Ofertas Recebidas', ofertas);
+    addSheet('Despesas Pagas', despesas);
+    addSheet('Cobrancas Recebidas', contasRecebidas);
+    addSheet('Doacoes em Especie', especie);
+    addSheet('Extrato Conciliado', extratoConciliado);
+    addSheet('Saldos das Contas', saldos);
+    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  }
+
   addSheet('Vendas', vendas);
   addSheet('Compras', compras);
   addSheet('Contas Pagas', contasPagas);
@@ -272,5 +416,6 @@ function exportarContador({ inicio, fim } = {}) {
 module.exports = {
   estoqueAtual, vendasDetalhado, financeiro, produtosParados, exportarContador,
   funilCRM, viagensRelatorio,
+  ofertasRelatorio, turmasRelatorio,
   gerarCSV, gerarXLS,
 };

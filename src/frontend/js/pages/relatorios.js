@@ -12,20 +12,26 @@ window.PaginaRelatorios = (function () {
     const mesIni = hoje.slice(0, 8) + '01';
     // "Estoque atual" e "Produtos parados" so fazem sentido para quem vende produtos
     // (nunca para o ramo "professor", mesmo que o perfil esteja como "ambos").
-    const temProdutos = window.__perfilNegocio !== 'servico' && window.__ramoServico !== 'professor';
+    const ehInstituto = window.__ramoServico === 'instituto';
+    const temProdutos = window.__perfilNegocio !== 'servico' && window.__ramoServico !== 'professor' && !ehInstituto;
     const temCRM = window.__ramoServico === 'agencia_viagem';
-    if (!temProdutos && (relatorio === 'estoque' || relatorio === 'parados')) relatorio = 'vendas';
-    if (!temCRM && (relatorio === 'crm' || relatorio === 'viagens')) relatorio = 'vendas';
+    // Num instituto sem fins lucrativos nao ha venda nem produto: o que se
+    // relata e a doacao que entrou e quem esta sendo atendido.
+    const opcoes = ehInstituto
+      ? [['ofertas', 'Ofertas recebidas'], ['turmas', 'Turmas e matrículas'], ['financeiro', 'Financeiro']]
+      : [
+        ...(temProdutos ? [['estoque', 'Estoque atual']] : []),
+        ['vendas', 'Vendas detalhado'],
+        ['financeiro', 'Financeiro'],
+        ...(temProdutos ? [['parados', 'Produtos parados']] : []),
+        ...(temCRM ? [['crm', 'Funil do CRM'], ['viagens', 'Viagens']] : []),
+      ];
+    if (!opcoes.some(([v]) => v === relatorio)) relatorio = opcoes[0][0];
     container.innerHTML = `
       <div class="barra-ferramentas">
         <div class="campo"><label class="dica">Relatório</label>
           <select id="r-tipo">
-            ${temProdutos ? `<option value="estoque" ${relatorio === 'estoque' ? 'selected' : ''}>Estoque atual</option>` : ''}
-            <option value="vendas" ${relatorio === 'vendas' ? 'selected' : ''}>Vendas detalhado</option>
-            <option value="financeiro" ${relatorio === 'financeiro' ? 'selected' : ''}>Financeiro</option>
-            ${temProdutos ? `<option value="parados" ${relatorio === 'parados' ? 'selected' : ''}>Produtos parados</option>` : ''}
-            ${temCRM ? `<option value="crm" ${relatorio === 'crm' ? 'selected' : ''}>Funil do CRM</option>` : ''}
-            ${temCRM ? `<option value="viagens" ${relatorio === 'viagens' ? 'selected' : ''}>Viagens</option>` : ''}
+            ${opcoes.map(([v, t]) => `<option value="${v}" ${relatorio === v ? 'selected' : ''}>${t}</option>`).join('')}
           </select></div>
         <div class="campo" id="r-periodo"><label class="dica">De</label><input type="date" id="r-inicio" value="${mesIni}"></div>
         <div class="campo" id="r-periodo2"><label class="dica">Até</label><input type="date" id="r-fim" value="${hoje}"></div>
@@ -41,7 +47,9 @@ window.PaginaRelatorios = (function () {
 
       <div class="card mt-16">
         <h3 style="margin-top:0">📊 Exportar para o contador</h3>
-        <p class="dica">Gera uma planilha Excel com Vendas, Compras, Contas Pagas, Contas Recebidas e o <strong>Extrato Conciliado</strong> (transações do extrato bancário já batidas na aba Conciliação) do período — pronta para mandar pro contador fechar o mês.</p>
+        <p class="dica">${ehInstituto
+          ? 'Gera uma planilha Excel com Ofertas Recebidas, Despesas Pagas, Cobranças Recebidas, Doações em Espécie, o <strong>Extrato Conciliado</strong> (transações do banco já batidas na aba Conciliação) e os Saldos das Contas — pronta para mandar pro contador fechar o mês.'
+          : 'Gera uma planilha Excel com Vendas, Compras, Contas Pagas, Contas Recebidas e o <strong>Extrato Conciliado</strong> (transações do extrato bancário já batidas na aba Conciliação) do período — pronta para mandar pro contador fechar o mês.'}</p>
         <div class="barra-ferramentas" style="margin-bottom:0">
           <div class="campo"><label class="dica">De</label><input type="date" id="ec-inicio" value="${mesIni}"></div>
           <div class="campo"><label class="dica">Até</label><input type="date" id="ec-fim" value="${hoje}"></div>
@@ -62,7 +70,7 @@ window.PaginaRelatorios = (function () {
   }
 
   function ajustarPeriodo() {
-    const mostrarPeriodo = relatorio !== 'estoque' && relatorio !== 'parados';
+    const mostrarPeriodo = relatorio !== 'estoque' && relatorio !== 'parados' && relatorio !== 'turmas';
     document.getElementById('r-periodo').style.display = mostrarPeriodo ? '' : 'none';
     document.getElementById('r-periodo2').style.display = mostrarPeriodo ? '' : 'none';
     document.getElementById('r-dias').style.display = relatorio === 'parados' ? '' : 'none';
@@ -70,7 +78,7 @@ window.PaginaRelatorios = (function () {
 
   function params() {
     const p = new URLSearchParams();
-    if (relatorio !== 'estoque' && relatorio !== 'parados') {
+    if (relatorio !== 'estoque' && relatorio !== 'parados' && relatorio !== 'turmas') {
       p.set('inicio', document.getElementById('r-inicio').value);
       p.set('fim', document.getElementById('r-fim').value);
     }
@@ -101,7 +109,48 @@ window.PaginaRelatorios = (function () {
     else if (relatorio === 'parados') alvo.innerHTML = tabelaParados(dados);
     else if (relatorio === 'crm') alvo.innerHTML = tabelaCRM(dados);
     else if (relatorio === 'viagens') alvo.innerHTML = tabelaViagens(dados);
+    else if (relatorio === 'ofertas') alvo.innerHTML = tabelaOfertas(dados);
+    else if (relatorio === 'turmas') alvo.innerHTML = tabelaTurmas(dados);
     else alvo.innerHTML = tabelaFinanceiro(dados);
+  }
+
+  function tabelaOfertas(d) {
+    const alertas = [];
+    if (d.totais.sem_recibo > 0) alertas.push(`${d.totais.sem_recibo} sem recibo emitido`);
+    if (d.totais.fora_do_caixa > 0) alertas.push(`${d.totais.fora_do_caixa} sem conta financeira (fora do saldo)`);
+    return `
+      <div class="flex gap-12 mb-16" style="flex-wrap:wrap">
+        ${mini('Ofertas no período', d.totais.quantidade)} ${mini('Total arrecadado', UI.moeda(d.totais.total))}
+        ${d.por_forma.slice(0, 2).map((f) => mini(f.forma, UI.moeda(f.total))).join('')}
+      </div>
+      ${alertas.length ? `<p class="dica" style="color:var(--perigo)">⚠️ ${alertas.join(' · ')}</p>` : ''}
+      <div id="print-area"><h2 class="print-titulo">Ofertas Recebidas</h2>
+      <table class="tabela"><thead><tr><th>Data</th><th>Doador</th><th>Valor</th><th>Forma</th><th>Entrou na conta</th><th>Projeto</th><th>Recibo</th></tr></thead>
+      <tbody>${d.itens.length ? d.itens.map((o) => `<tr>
+        <td>${UI.escapar(o.data)}</td><td>${UI.escapar(o.doador || '—')}</td><td>${UI.moeda(o.valor)}</td>
+        <td>${UI.escapar(o.forma || '—')}</td><td>${UI.escapar(o.conta || '—')}</td>
+        <td>${UI.escapar(o.projeto || '—')}</td><td>${o.recibo_emitido ? 'Sim' : 'Não'}</td>
+      </tr>`).join('') : '<tr><td colspan="7" class="muted">Nenhuma oferta no período.</td></tr>'}</tbody></table></div>`;
+  }
+
+  function tabelaTurmas(d) {
+    return `
+      <div class="flex gap-12 mb-16" style="flex-wrap:wrap">
+        ${mini('Turmas ativas', d.totais.turmas)} ${mini('Matriculados', d.totais.matriculados)}
+        ${mini('Vagas', d.totais.vagas)} ${mini('Sem instrutor', d.totais.sem_instrutor)}
+      </div>
+      <div id="print-area"><h2 class="print-titulo">Turmas e Matrículas</h2>
+      ${d.itens.length ? d.itens.map((t) => `
+        <h3>${UI.escapar(t.nome)} <span class="dica">${UI.escapar(t.curso || '')}</span></h3>
+        <p class="dica" style="margin-top:0">${UI.escapar(t.horarios || 'sem horário definido')}
+          · ${t.instrutores ? UI.escapar(t.instrutores) : 'sem instrutor'}
+          · ${t.matriculados}/${t.vagas} vagas${t.na_fila ? ` · ${t.na_fila} na fila` : ''}${t.sala ? ` · sala ${UI.escapar(t.sala)}` : ''}</p>
+        <table class="tabela"><thead><tr><th>Aluno</th><th>Telefone</th><th>Responsável</th></tr></thead>
+        <tbody>${t.alunos.length ? t.alunos.map((a) => `<tr>
+          <td>${UI.escapar(a.nome)}</td><td>${UI.escapar(a.telefone || '—')}</td>
+          <td>${UI.escapar(a.responsavel_nome || '—')}${a.responsavel_telefone ? ` <span class="dica">${UI.escapar(a.responsavel_telefone)}</span>` : ''}</td>
+        </tr>`).join('') : '<tr><td colspan="3" class="muted">Nenhuma matrícula ativa.</td></tr>'}</tbody></table>
+      `).join('') : '<p class="muted">Nenhuma turma ativa.</p>'}</div>`;
   }
 
   function tabelaParados(d) {
