@@ -383,7 +383,7 @@ window.PaginaVoluntarios = (function () {
               <div class="rolagem"><table class="tabela">
                 <thead><tr><th>Data</th><th>Voluntário</th><th>Tipo</th><th>Descrição</th><th>Horas</th><th></th></tr></thead>
                 <tbody>${lista.map((a) => `<tr>
-                  <td>${UI.escapar(a.data)}</td>
+                  <td>${UI.dataHora(a.data)}</td>
                   <td>${UI.escapar(a.voluntario_nome)}</td>
                   <td class="dica">${UI.escapar(tipos[a.tipo] || a.tipo)}</td>
                   <td>${UI.escapar(a.descricao || '—')}${a.hora_inicio ? `<div class="dica">${UI.escapar(a.hora_inicio)}–${UI.escapar(a.hora_fim || '')}</div>` : ''}</td>

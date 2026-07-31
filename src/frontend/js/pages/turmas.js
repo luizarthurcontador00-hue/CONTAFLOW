@@ -88,7 +88,7 @@ window.PaginaTurmas = (function () {
     alvo.innerHTML = `
       <div class="rolagem"><table class="tabela">
         <thead><tr>
-          <th>Turma</th><th>Dias</th><th>Ocupação</th><th>Instrumento</th><th>Situação</th><th></th>
+          <th>Turma</th><th>Dias</th><th>Ocupação</th><th>Instrumento</th><th>Instrutor</th><th>Situação</th><th></th>
         </tr></thead>
         <tbody>
           ${turmas.map((t) => {
@@ -106,6 +106,7 @@ window.PaginaTurmas = (function () {
                 ${t.na_espera ? `<div class="dica">${t.na_espera} na espera</div>` : ''}
               </td>
               <td class="dica">${UI.escapar(t.instrumentos.map((i) => i.nome).join(', ') || '—')}</td>
+              <td class="dica">${t.instrutores.length ? UI.escapar(t.instrutores.map((i) => i.nome).join(', ')) : '<span class="badge badge--erro">sem instrutor</span>'}</td>
               <td><span class="badge badge--${cor}">${rot}</span></td>
               <td style="text-align:right;white-space:nowrap">
                 <button class="btn btn--secundario" data-ver="${t.id}">Abrir</button>
@@ -137,7 +138,7 @@ window.PaginaTurmas = (function () {
         </p>
         <p class="dica">
           ${UI.escapar(resumoHorarios(t.horarios))} ·
-          Período: ${UI.escapar(t.periodo_inicio)}${t.periodo_fim ? ' até ' + UI.escapar(t.periodo_fim) : ''}
+          Período: ${UI.dataHora(t.periodo_inicio)}${t.periodo_fim ? ' até ' + UI.dataHora(t.periodo_fim) : ''}
           ${t.periodo_rotulo ? ` · <span class="badge badge--muted">${UI.escapar(t.periodo_rotulo)}</span>` : ''}
         </p>
         <div id="tu-progresso"></div>
@@ -196,7 +197,7 @@ window.PaginaTurmas = (function () {
     if (hist.length < 2) return;
     alvo.innerHTML = `<p class="dica">🔁 Períodos desta turma:
       ${hist.map((h) => {
-        const rotulo = h.periodo_rotulo || h.periodo_inicio;
+        const rotulo = h.periodo_rotulo || UI.dataHora(h.periodo_inicio);
         return h.atual
           ? `<strong>${UI.escapar(rotulo)}</strong>`
           : `<a href="#" data-hist="${h.id}">${UI.escapar(rotulo)}</a>`;
@@ -517,10 +518,10 @@ window.PaginaTurmas = (function () {
               ${horarios.length > 1 ? `<button class="btn btn--perigo" type="button" data-rm-h="${i}">Remover</button>` : ''}
             </div>`).join('');
 
-          alvo.querySelectorAll('[data-dia]').forEach((s) => s.addEventListener('change', () => { horarios[Number(s.dataset.dia)].dia_semana = Number(s.value); conferirVagas(); }));
-          alvo.querySelectorAll('[data-ini]').forEach((s) => s.addEventListener('change', () => { horarios[Number(s.dataset.ini)].hora_inicio = s.value; conferirVagas(); }));
-          alvo.querySelectorAll('[data-fim]').forEach((s) => s.addEventListener('change', () => { horarios[Number(s.dataset.fim)].hora_fim = s.value; conferirVagas(); }));
-          alvo.querySelectorAll('[data-rm-h]').forEach((b) => b.addEventListener('click', () => { horarios.splice(Number(b.dataset.rmH), 1); desenharHorarios(); conferirVagas(); }));
+          alvo.querySelectorAll('[data-dia]').forEach((s) => s.addEventListener('change', () => { horarios[Number(s.dataset.dia)].dia_semana = Number(s.value); conferirVagas(true); }));
+          alvo.querySelectorAll('[data-ini]').forEach((s) => s.addEventListener('change', () => { horarios[Number(s.dataset.ini)].hora_inicio = s.value; conferirVagas(true); }));
+          alvo.querySelectorAll('[data-fim]').forEach((s) => s.addEventListener('change', () => { horarios[Number(s.dataset.fim)].hora_fim = s.value; conferirVagas(true); }));
+          alvo.querySelectorAll('[data-rm-h]').forEach((b) => b.addEventListener('click', () => { horarios.splice(Number(b.dataset.rmH), 1); desenharHorarios(); conferirVagas(true); }));
         }
 
         function desenharInstrutores() {
@@ -546,8 +547,16 @@ window.PaginaTurmas = (function () {
           return Array.from(el.querySelectorAll('#tf-instrumentos input:checked')).map((c) => c.value);
         }
 
-        /** Consulta o acervo (de cada instrumento marcado) e avisa quantas vagas cabem, antes de tentar salvar. */
-        async function conferirVagas() {
+        /**
+         * Consulta o acervo (de cada instrumento marcado) e avisa quantas vagas
+         * cabem. Quando `atualizarVagas` é true (mudou instrumento, horário ou
+         * instrumentos/aluno), o campo Vagas é preenchido sozinho com o limite —
+         * é o que faz "vagas" seguir o acervo em vez de ser só um número
+         * digitado à parte. Não mexe no valor ao abrir pra editar (a turma pode
+         * ter vagas a mais de propósito, contando com aluno que traz o próprio
+         * instrumento), nem enquanto o usuário está digitando o campo direto.
+         */
+        async function conferirVagas(atualizarVagas) {
           const aviso = el.querySelector('#tf-aviso-vagas');
           const ids = instrumentosMarcados();
           if (!ids.length) { aviso.textContent = 'Sem instrumento: as vagas não são limitadas pelo acervo.'; aviso.style.color = ''; return; }
@@ -557,30 +566,31 @@ window.PaginaTurmas = (function () {
               turma_id: ed ? turma.id : null,
               instrumentos_por_aluno: el.querySelector('#tf-por-aluno').value,
             })));
+            const menorVagasMaximas = Math.min(...resultados.map((r) => r.vagas_maximas));
             aviso.innerHTML = resultados.map((r) => {
               const ocupando = r.turmas_no_mesmo_horario.map((t) => t.nome).join(', ');
               return `<strong>${UI.escapar(r.instrumento)}</strong>: o instituto tem ${r.quantidade_total}. `
                 + (r.em_uso_no_horario ? `Neste horário, ${r.em_uso_no_horario} já em uso${ocupando ? ` (${UI.escapar(ocupando)})` : ''}. ` : '')
                 + `Cabem até <strong>${r.vagas_maximas}</strong> aluno(s).`;
-            }).join('<br>');
+            }).join('<br>') + (atualizarVagas ? '<br><span class="dica">Vagas preenchidas automaticamente pelo acervo — ajuste se algum aluno trouxer o próprio instrumento.</span>' : '');
+            if (atualizarVagas) el.querySelector('#tf-vagas').value = menorVagasMaximas;
             const vagas = Number(el.querySelector('#tf-vagas').value || 0);
-            const menorVagasMaximas = Math.min(...resultados.map((r) => r.vagas_maximas));
             aviso.style.color = vagas > menorVagasMaximas ? 'var(--perigo)' : '';
           } catch (e) { aviso.textContent = e.message; }
         }
 
         el.querySelector('#tf-add-horario').addEventListener('click', () => {
           horarios.push({ dia_semana: 4, hora_inicio: '19:00', hora_fim: '20:00' });
-          desenharHorarios(); conferirVagas();
+          desenharHorarios(); conferirVagas(true);
         });
         el.querySelector('#tf-add-instrutor').addEventListener('click', () => {
           if (!equipe.length) { UI.erro('Cadastre voluntários antes de escalar instrutores.'); return; }
           instrutores.push({ profissional_id: equipe[0].id, papel: instrutores.length ? 'auxiliar' : 'titular' });
           desenharInstrutores();
         });
-        el.querySelector('#tf-instrumentos').addEventListener('change', conferirVagas);
-        el.querySelector('#tf-por-aluno').addEventListener('change', conferirVagas);
-        el.querySelector('#tf-vagas').addEventListener('input', conferirVagas);
+        el.querySelector('#tf-instrumentos').addEventListener('change', () => conferirVagas(true));
+        el.querySelector('#tf-por-aluno').addEventListener('change', () => conferirVagas(true));
+        el.querySelector('#tf-vagas').addEventListener('input', () => conferirVagas(false));
 
         desenharHorarios();
         desenharInstrutores();

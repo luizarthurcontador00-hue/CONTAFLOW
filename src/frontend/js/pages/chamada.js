@@ -99,7 +99,7 @@ window.PaginaChamada = (function () {
         <tbody>
           ${encontros.map((e) => `
             <tr>
-              <td>${UI.escapar(UI.data ? UI.data(e.data) : e.data)}</td>
+              <td>${UI.dataHora(e.data)}</td>
               <td>${UI.escapar(e.hora_inicio)}${e.hora_fim ? '–' + UI.escapar(e.hora_fim) : ''}</td>
               <td>
                 <strong>${UI.escapar(e.turma_nome)}</strong>
@@ -168,7 +168,7 @@ window.PaginaChamada = (function () {
       textoConfirmar: 'Salvar chamada',
       corpoHTML: `
         <p class="dica" style="margin-top:0">
-          ${UI.escapar(folha.curso_nome)} · ${UI.escapar(folha.data)} às ${UI.escapar(folha.hora_inicio)}
+          ${UI.escapar(folha.curso_nome)} · ${UI.dataHora(folha.data)} às ${UI.escapar(folha.hora_inicio)}
           ${folha.sala ? ' · Sala ' + UI.escapar(folha.sala) : ''}
         </p>
 

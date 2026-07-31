@@ -44,7 +44,7 @@ window.PaginaAtas = (function () {
           ${atas.map((a) => `
             <tr>
               <td><strong>${UI.escapar(a.titulo)}</strong></td>
-              <td>${UI.escapar(a.data)}${a.hora ? ' ' + UI.escapar(a.hora) : ''}</td>
+              <td>${UI.dataHora(a.data)}${a.hora ? ' ' + UI.escapar(a.hora) : ''}</td>
               <td class="dica">${UI.escapar(a.local || '—')}</td>
               <td>${a.presentes || 0}</td>
               <td style="text-align:right;white-space:nowrap">
@@ -158,7 +158,7 @@ window.PaginaAtas = (function () {
       <div class="sub">${cfg.loja_cnpj ? 'CNPJ: ' + UI.escapar(cfg.loja_cnpj) : ''}</div>
       <h2 style="text-align:center">ATA DE REUNIÃO</h2>
       <p><strong>${UI.escapar(ata.titulo)}</strong><br>
-      Data: ${UI.escapar(ata.data)}${ata.hora ? ` às ${UI.escapar(ata.hora)}` : ''}
+      Data: ${UI.dataHora(ata.data)}${ata.hora ? ` às ${UI.escapar(ata.hora)}` : ''}
       ${ata.local ? ` · Local: ${UI.escapar(ata.local)}` : ''}</p>
 
       <h3>Participantes</h3>

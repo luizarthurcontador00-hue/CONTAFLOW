@@ -121,7 +121,7 @@ window.PaginaAutorizacoes = (function () {
       <div class="sub">${cfg.loja_cnpj ? 'CNPJ: ' + UI.escapar(cfg.loja_cnpj) : ''}${cfg.loja_endereco ? ' · ' + UI.escapar(cfg.loja_endereco) : ''}</div>
       <h2>${titulo}</h2>
       <div class="campo">Aluno(a): <strong>${UI.escapar(aluno.aluno_nome)}</strong></div>
-      <div class="campo">Data de nascimento: ${UI.escapar(aluno.data_nascimento || '____/____/______')}</div>
+      <div class="campo">Data de nascimento: ${aluno.data_nascimento ? UI.dataHora(aluno.data_nascimento) : '____/____/______'}</div>
       <div class="campo">Responsável: <span class="linha">${UI.escapar(aluno.responsavel_nome || '')}</span></div>
       <div class="campo">Documento do responsável: <span class="linha"></span></div>
       <p style="margin-top:24px">Eu, responsável legal acima identificado, ${corpo}</p>

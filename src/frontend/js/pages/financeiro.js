@@ -457,7 +457,7 @@ window.PaginaFinanceiro = (function () {
         <td>${UI.escapar(a.descricao)}</td>
         <td>Dia ${a.dia_vencimento}</td>
         <td>${UI.moeda(a.valor)}</td>
-        <td>${a.data_inicio || '—'} até ${a.data_fim || 'indeterminado'}</td>
+        <td>${a.data_inicio ? UI.dataHora(a.data_inicio) : '—'} até ${a.data_fim ? UI.dataHora(a.data_fim) : 'indeterminado'}</td>
         <td>${encerrada ? '<span class="badge badge--muted">Encerrada</span>' : (a.ativa ? '<span class="badge badge--ok">Ativa</span>' : '<span class="badge badge--muted">Pausada</span>')}</td>
         <td style="text-align:right;white-space:nowrap">
           <button class="btn btn--secundario" data-as-pausar="${a.id}" data-ativa="${a.ativa}">${a.ativa ? 'Pausar' : 'Reativar'}</button>
@@ -622,7 +622,7 @@ window.PaginaFinanceiro = (function () {
         return `<tr>
           <td>${UI.escapar(c.descricao)}${tipo === 'pagar' && c.conta_fixa_id ? ' <span class="badge badge--muted" title="Gerada automaticamente de uma conta fixa">🔁 fixa</span>' : ''}${tipo === 'receber' && c.assinatura_id ? ` <span class="badge badge--muted" title="Gerada automaticamente de uma ${rMens()}">🔁 ${rMens()}</span>` : ''}${tipo === 'pagar' && c.total_parcelas > 1 ? ` <span class="badge badge--muted">${c.parcela}/${c.total_parcelas}</span>` : ''}${tipo === 'pagar' && c.categoria_nome ? `<div class="dica">🏷️ ${UI.escapar(c.categoria_nome)}</div>` : ''}${tipo === 'pagar' && c.projeto_nome ? `<div class="dica">📁 ${UI.escapar(c.projeto_nome)}</div>` : ''}</td>
           ${tipo === 'pagar' ? `<td>${UI.escapar(c.fornecedor_nome || '—')}</td>` : ''}
-          <td>${c.vencimento || '—'}</td>
+          <td>${c.vencimento ? UI.dataHora(c.vencimento) : '—'}</td>
           <td>${UI.moeda(c.valor)}</td>
           <td>${situacao(c)}</td>
           <td style="text-align:right;white-space:nowrap">
@@ -693,7 +693,7 @@ window.PaginaFinanceiro = (function () {
       <h2 class="center">${UI.escapar(cfg.nome_loja || 'Cobrança')}</h2>
       <p class="center" style="color:#555">Cobrança referente a: ${UI.escapar(c.descricao)}</p>
       <div class="center">Cliente: <strong>${UI.escapar(c.cliente_nome || '—')}</strong></div>
-      <div class="center">Vencimento: <strong>${c.vencimento || '—'}</strong></div>
+      <div class="center">Vencimento: <strong>${c.vencimento ? UI.dataHora(c.vencimento) : '—'}</strong></div>
       ${itensHTML}
       <div class="center tot">Total: ${UI.moeda(c.valor)}</div>
       <div class="pix-box">
@@ -1125,7 +1125,7 @@ window.PaginaFinanceiro = (function () {
     alvo.innerHTML = `<table class="tabela">
       <thead><tr><th>Data</th><th>Descrição</th><th>Tipo</th><th>Valor</th><th>Status</th><th></th></tr></thead>
       <tbody>${transacoes.map((t) => `<tr>
-        <td>${t.data}</td>
+        <td>${UI.dataHora(t.data)}</td>
         <td>${UI.escapar(t.descricao)}${t.regra_padrao ? ` <span class="badge badge--muted" title="Conciliado automaticamente pela regra &quot;${UI.escapar(t.regra_padrao)}&quot;">🤖 automático</span>` : ''}${t.pagar_descricao ? `<div class="dica">↳ ${UI.escapar(t.pagar_descricao)}</div>` : ''}${t.receber_descricao ? `<div class="dica">↳ ${UI.escapar(t.receber_descricao)}</div>` : ''}${t.oferta_descricao ? `<div class="dica">↳ ${UI.escapar(t.oferta_descricao)}</div>` : ''}</td>
         <td><span class="chip-forma">${t.tipo === 'credito' ? '🟢 Crédito' : '🔴 Débito'}</span></td>
         <td>${UI.moeda(t.valor)}</td>
@@ -1296,7 +1296,7 @@ window.PaginaFinanceiro = (function () {
     const corpo = `
       <div class="card mb-16">
         <div class="flex flex--between"><strong>${UI.escapar(t.descricao)}</strong><strong>${UI.moeda(t.valor)}</strong></div>
-        <div class="dica">${t.data} · ${t.tipo === 'credito' ? 'Entrada (crédito)' : 'Saída (débito)'}</div>
+        <div class="dica">${UI.dataHora(t.data)} · ${t.tipo === 'credito' ? 'Entrada (crédito)' : 'Saída (débito)'}</div>
       </div>
       ${sugestoes.length ? `
       <div class="campo"><label>Bate com uma conta já cadastrada?</label></div>

@@ -137,7 +137,7 @@ window.PaginaInstrumentos = (function () {
                     return `<tr>
                       <td><strong>${UI.escapar(u.numero)}</strong></td>
                       <td><span class="badge badge--${cor}">${rot}</span></td>
-                      <td class="dica">${u.aluno_nome ? UI.escapar(u.aluno_nome) + (u.previsao_devolucao ? ` <br>devolver até ${UI.escapar(u.previsao_devolucao)}` : '') : '—'}</td>
+                      <td class="dica">${u.aluno_nome ? UI.escapar(u.aluno_nome) + (u.previsao_devolucao ? ` <br>devolver até ${UI.dataHora(u.previsao_devolucao)}` : '') : '—'}</td>
                       <td class="dica">${UI.escapar(u.observacao || '—')}</td>
                       <td style="text-align:right;white-space:nowrap">
                         ${u.estado === 'disponivel' ? `<button class="btn btn--secundario" data-emprestar="${u.id}">Emprestar</button>` : ''}
@@ -326,10 +326,10 @@ window.PaginaInstrumentos = (function () {
                   <td><strong>${UI.escapar(e.instrumento_nome)} nº ${UI.escapar(e.numero)}</strong></td>
                   <td>${UI.escapar(e.aluno_nome)}
                     <div class="dica">${UI.escapar(e.responsavel_telefone || e.aluno_telefone || '')}</div></td>
-                  <td class="dica">${UI.escapar(e.data_emprestimo)}</td>
-                  <td class="dica">${UI.escapar(e.previsao_devolucao || '—')}</td>
+                  <td class="dica">${UI.dataHora(e.data_emprestimo)}</td>
+                  <td class="dica">${e.previsao_devolucao ? UI.dataHora(e.previsao_devolucao) : '—'}</td>
                   <td>${e.data_devolucao
-                    ? `<span class="badge badge--muted">devolvido ${UI.escapar(e.data_devolucao)}</span>`
+                    ? `<span class="badge badge--muted">devolvido ${UI.dataHora(e.data_devolucao)}</span>`
                     : (e.atrasado ? '<span class="badge badge--erro">atrasado</span>' : '<span class="badge badge--alerta">em aberto</span>')}</td>
                   <td style="text-align:right">
                     ${e.data_devolucao ? '' : `<button class="btn" data-dev="${e.id}">Devolver</button>`}

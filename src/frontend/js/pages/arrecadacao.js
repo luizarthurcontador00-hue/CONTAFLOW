@@ -92,7 +92,7 @@ window.SecoesArrecadacao = (function () {
           <tbody>
             ${ofertas.map((o) => `
               <tr>
-                <td>${UI.escapar(o.data)}</td>
+                <td>${UI.dataHora(o.data)}</td>
                 <td>${UI.escapar(o.mantenedor_nome || o.doador_nome || '—')}
                   ${o.recibo_emitido ? ' <span class="badge badge--muted">recibo emitido</span>' : ''}</td>
                 <td>${UI.moeda(o.valor)}</td>
@@ -233,7 +233,7 @@ window.SecoesArrecadacao = (function () {
       <p>Recebemos de <strong>${UI.escapar(doador)}</strong>${o.cpf ? ` (CPF/CNPJ ${UI.escapar(o.cpf)})` : ''}
       a importância de <strong>${UI.moeda(o.valor)}</strong>, a título de doação
       ${o.projeto_nome ? `destinada ao projeto <strong>${UI.escapar(o.projeto_nome)}</strong>` : 'para manutenção das atividades da instituição'},
-      recebida em ${UI.escapar(o.data)}${o.forma ? ` via ${UI.escapar(o.forma)}` : ''}.</p>
+      recebida em ${UI.dataHora(o.data)}${o.forma ? ` via ${UI.escapar(o.forma)}` : ''}.</p>
       <p>Por ser expressão da verdade, firmamos o presente recibo.</p>
       <div class="assinatura">
         ${UI.escapar(assinante ? assinante.nome : (cfg.nome_loja || 'Responsável'))}
@@ -269,7 +269,7 @@ window.SecoesArrecadacao = (function () {
           <tbody>
             ${itens.map((d) => `
               <tr>
-                <td>${UI.escapar(d.data)}</td>
+                <td>${UI.dataHora(d.data)}</td>
                 <td>${UI.escapar(d.mantenedor_nome || d.doador_nome || '—')}</td>
                 <td>${UI.escapar(d.descricao)}
                   ${d.instrumento_nome ? ` <span class="badge badge--ok">${UI.escapar(d.instrumento_nome)}</span>` : ''}</td>

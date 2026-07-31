@@ -68,8 +68,8 @@ window.PaginaMembros = (function () {
                 ${m.documento ? `<div class="dica">Doc.: ${UI.escapar(m.documento)}</div>` : ''}</td>
               <td>${UI.escapar(m.cargo_rotulo || m.cargo)}</td>
               <td class="dica">
-                ${m.mandato_inicio ? UI.escapar(m.mandato_inicio) : '—'}
-                ${m.mandato_fim ? ' até ' + UI.escapar(m.mandato_fim) : ''}
+                ${m.mandato_inicio ? UI.dataHora(m.mandato_inicio) : '—'}
+                ${m.mandato_fim ? ' até ' + UI.dataHora(m.mandato_fim) : ''}
                 ${m.mandato_vencido ? ' <span class="badge badge--erro">vencido</span>' : ''}
               </td>
               <td class="dica">${UI.escapar(m.telefone || m.email || '—')}</td>

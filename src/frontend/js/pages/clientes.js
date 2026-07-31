@@ -141,7 +141,7 @@ window.PaginaClientes = (function () {
       </table>
       <h3>${ehInstituto() ? 'Cobranças a receber' : 'Contas a receber (fiado)'}</h3>
       ${c.contas.length ? `<table class="tabela"><thead><tr><th>Descrição</th><th>Venc.</th><th>Valor</th><th>Situação</th></tr></thead>
-        <tbody>${c.contas.map((ct) => `<tr><td>${UI.escapar(ct.descricao)}</td><td>${ct.vencimento || '—'}</td><td>${UI.moeda(ct.valor)}</td>
+        <tbody>${c.contas.map((ct) => `<tr><td>${UI.escapar(ct.descricao)}</td><td>${ct.vencimento ? UI.dataHora(ct.vencimento) : '—'}</td><td>${UI.moeda(ct.valor)}</td>
           <td>${ct.status === 'pendente' ? '<span class="badge badge--alerta">Pendente</span>' : ct.status === 'recebido' ? '<span class="badge badge--ok">Recebido</span>' : '<span class="badge badge--muted">Cancelada</span>'}</td></tr>`).join('')}</tbody></table>`
         : '<p class="muted">Nenhuma conta.</p>'}
       ${ehInstituto() ? '' : `<h3 class="mt-16">Últimas compras</h3>

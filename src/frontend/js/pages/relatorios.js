@@ -127,7 +127,7 @@ window.PaginaRelatorios = (function () {
       <div id="print-area"><h2 class="print-titulo">Ofertas Recebidas</h2>
       <table class="tabela"><thead><tr><th>Data</th><th>Doador</th><th>Valor</th><th>Forma</th><th>Entrou na conta</th><th>Projeto</th><th>Recibo</th></tr></thead>
       <tbody>${d.itens.length ? d.itens.map((o) => `<tr>
-        <td>${UI.escapar(o.data)}</td><td>${UI.escapar(o.doador || '—')}</td><td>${UI.moeda(o.valor)}</td>
+        <td>${UI.dataHora(o.data)}</td><td>${UI.escapar(o.doador || '—')}</td><td>${UI.moeda(o.valor)}</td>
         <td>${UI.escapar(o.forma || '—')}</td><td>${UI.escapar(o.conta || '—')}</td>
         <td>${UI.escapar(o.projeto || '—')}</td><td>${o.recibo_emitido ? 'Sim' : 'Não'}</td>
       </tr>`).join('') : '<tr><td colspan="7" class="muted">Nenhuma oferta no período.</td></tr>'}</tbody></table></div>`;
