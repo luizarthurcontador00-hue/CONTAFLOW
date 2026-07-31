@@ -372,11 +372,35 @@ function alunoTemInstrumentoProprio(alunoId, instrumentoId) {
     .get(alunoId, instrumentoId);
 }
 
+/**
+ * Aluno que ja esta com um exemplar do acervo emprestado (emprestimo em
+ * aberto) tambem nao precisa de "mais uma vaga" do instrumento pra
+ * matricular — o exemplar que ele ja tem em maos e a propria vaga dele,
+ * so que o instituto ainda e o dono. Sem isso, o sistema conta esse
+ * exemplar como "indisponivel" (correto, pra outros alunos) e ao mesmo
+ * tempo barra o dono do emprestimo por falta de instrumento — ele fica
+ * disputando um lugar que, na pratica, ja e dele.
+ */
+function alunoTemInstrumentoEmprestado(alunoId, instrumentoId) {
+  if (!instrumentoId) return true;
+  return !!getDb().prepare(`
+    SELECT 1 FROM emprestimos_instrumento e
+    JOIN instrumentos_unidades u ON u.id = e.unidade_id
+    WHERE e.aluno_id = ? AND u.instrumento_id = ? AND e.data_devolucao IS NULL
+  `).get(alunoId, instrumentoId);
+}
+
+/** Aluno nao depende do acervo pra este instrumento: ou e dele, ou ja esta emprestado com ele. */
+function alunoJaTemInstrumento(alunoId, instrumentoId) {
+  return alunoTemInstrumentoProprio(alunoId, instrumentoId) || alunoTemInstrumentoEmprestado(alunoId, instrumentoId);
+}
+
 module.exports = {
   listar, obter, criar, atualizar, excluir,
   vagasDisponiveis, picoComprometido, horariosColidem, contarIndisponiveis,
   listarUnidades, criarUnidade, gerarUnidades, atualizarUnidade, excluirUnidade,
   listarEmprestimos, emprestar, devolver,
-  instrumentosProprios, definirInstrumentosProprios, alunoTemInstrumentoProprio,
+  instrumentosProprios, definirInstrumentosProprios,
+  alunoTemInstrumentoProprio, alunoTemInstrumentoEmprestado, alunoJaTemInstrumento,
   ESTADOS_UNIDADE,
 };

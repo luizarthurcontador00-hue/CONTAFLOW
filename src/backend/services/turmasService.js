@@ -472,36 +472,39 @@ function matricular(turmaId, { aluno_id, observacao }) {
   const jaTem = db.prepare("SELECT * FROM matriculas WHERE turma_id = ? AND aluno_id = ? AND status IN ('ativa','espera')").get(turmaId, aluno.id);
   if (jaTem) throw new AppError(`${aluno.nome} já está ${jaTem.status === 'espera' ? 'na fila de espera' : 'matriculado'} nesta turma.`);
 
-  // Aluno sem instrumento proprio precisa de um do acervo: confere CADA
-  // instrumento que a turma exige (pode ser mais de um — turma de banda
-  // precisa de bateria E teclado, nao um ou outro) antes de deixar entrar
-  // como ativo.
+  // Aluno que nao depende do acervo (tem o proprio, ou ja esta com um
+  // exemplar emprestado pelo instituto) nao compete por vaga de
+  // instrumento: confere CADA instrumento que a turma exige (pode ser mais
+  // de um — turma de banda precisa de bateria E teclado, nao um ou outro)
+  // antes de deixar entrar como ativo.
   turma.instrumentos.forEach((inst) => {
-    const traiOProprio = instrumentos.alunoTemInstrumentoProprio(aluno.id, inst.id);
-    if (traiOProprio) return;
+    const jaTemInstrumento = instrumentos.alunoJaTemInstrumento(aluno.id, inst.id);
+    if (jaTemInstrumento) return;
     const disp = instrumentos.vagasDisponiveis(inst.id, turma.horarios, {
       turmaIdIgnorar: turmaId,
       instrumentosPorAluno: turma.instrumentos_por_aluno,
     });
     const usandoAcervo = turma.matriculas.filter((m) => m.status === 'ativa'
-      && !instrumentos.alunoTemInstrumentoProprio(m.aluno_id, inst.id)).length;
+      && !instrumentos.alunoJaTemInstrumento(m.aluno_id, inst.id)).length;
     if (usandoAcervo >= disp.vagas_maximas) {
       throw new AppError(
         `Não há ${disp.instrumento} disponível neste horário para ${aluno.nome}. `
         + `Os ${disp.vagas_maximas} do acervo já estão com outros alunos. `
-        + 'Se o aluno tiver o próprio instrumento, marque isso no cadastro dele.'
+        + 'Se o aluno tiver o próprio instrumento, marque isso no cadastro dele — '
+        + 'ou, se ele já está com um exemplar emprestado do instituto, isso conta como se ele já tivesse o instrumento.'
       );
     }
   });
 
-  // Quem traz TODOS os instrumentos que a turma exige nao usa nada do
-  // acervo — entao a vaga que falta e so um numero na ficha, nao um limite
-  // de verdade. Em vez de mandar pra fila de espera por causa disso, deixa
-  // entrar e atualiza a quantidade de vagas da turma pra refletir o que
-  // aconteceu (assim "5/5" nao mente sobre quem cabe fisicamente na sala).
+  // Quem traz TODOS os instrumentos que a turma exige (proprio ou ja
+  // emprestado pelo instituto) nao usa nada do acervo — entao a vaga que
+  // falta e so um numero na ficha, nao um limite de verdade. Em vez de
+  // mandar pra fila de espera por causa disso, deixa entrar e atualiza a
+  // quantidade de vagas da turma pra refletir o que aconteceu (assim
+  // "5/5" nao mente sobre quem cabe fisicamente na sala).
   const cheia = turma.matriculados >= turma.vagas;
   const traiTudoQueUsa = turma.instrumentos.length > 0
-    && turma.instrumentos.every((inst) => instrumentos.alunoTemInstrumentoProprio(aluno.id, inst.id));
+    && turma.instrumentos.every((inst) => instrumentos.alunoJaTemInstrumento(aluno.id, inst.id));
   const furaVaga = cheia && traiTudoQueUsa;
 
   const status = (cheia && !furaVaga) ? 'espera' : 'ativa';
