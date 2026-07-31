@@ -374,58 +374,72 @@ window.Documentos = (function () {
 
   // ===================== Calendário de aulas (instrutor) =====================
 
-  const DIAS_SEMANA = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+  const DIAS_SEMANA_ABREV = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
-  /** Linhas dia/horário/turma de um instrutor, ordenadas pra impressão. */
-  function linhasCalendario(p) {
-    const linhas = [];
-    (p.turmas || []).forEach((t) => {
-      (t.horarios || []).forEach((h) => {
-        linhas.push({
-          dia: h.dia_semana, hora_inicio: h.hora_inicio, hora_fim: h.hora_fim,
-          turma: t.nome, curso: t.curso_nome, sala: t.sala, papel: t.papel,
-        });
-      });
-    });
-    return linhas.sort((a, b) => a.dia - b.dia || a.hora_inicio.localeCompare(b.hora_inicio));
+  /** 'YYYY-MM' de hoje até `meses` para trás/frente, pro seletor de período. */
+  function periodoDoMes(deMes, ateMes) {
+    const [a1, m1] = deMes.split('-').map(Number);
+    const [a2, m2] = ateMes.split('-').map(Number);
+    const de = `${deMes}-01`;
+    const ultimoDia = new Date(a2, m2, 0).getDate();
+    const ate = `${ateMes}-${String(ultimoDia).padStart(2, '0')}`;
+    return { de, ate };
   }
 
-  function corpoCalendarioInstrutor(p) {
-    const linhas = linhasCalendario(p);
+  function rotuloPeriodo(deMes, ateMes) {
+    const nome = (aaMm) => { const [a, m] = aaMm.split('-').map(Number); return `${MESES[m - 1]} de ${a}`; };
+    return deMes === ateMes ? nome(deMes) : `${nome(deMes)} a ${nome(ateMes)}`;
+  }
+
+  /** Corpo do calendário de um instrutor: uma linha por aula real do período, com os alunos da turma logo abaixo. */
+  function corpoCalendarioInstrutor(nome, encontros) {
     return `
-      <h2 style="margin-top:0">${esc(p.nome)}</h2>
-      ${linhas.length ? `
+      <h2 style="margin-top:0">${esc(nome)}</h2>
+      ${encontros.length ? `
       <table>
         <thead><tr><th>Dia</th><th>Horário</th><th>Turma</th><th>Curso</th><th>Sala</th><th>Função</th></tr></thead>
-        <tbody>${linhas.map((l) => `<tr>
-          <td>${DIAS_SEMANA[l.dia]}</td>
-          <td>${esc(l.hora_inicio)}${l.hora_fim ? ' às ' + esc(l.hora_fim) : ''}</td>
-          <td>${esc(l.turma)}</td>
-          <td>${esc(l.curso)}</td>
-          <td>${esc(l.sala || '—')}</td>
-          <td>${esc(l.papel)}</td>
+        <tbody>${encontros.map((e) => `<tr${e.suspensa ? ' style="opacity:.55"' : ''}>
+          <td>${DIAS_SEMANA_ABREV[e.dia_semana]} ${dataBR(e.data)}${e.suspensa ? ' <span class="dica">(suspensa)</span>' : ''}</td>
+          <td>${esc(e.hora_inicio)}${e.hora_fim ? ' às ' + esc(e.hora_fim) : ''}</td>
+          <td>${esc(e.turma_nome)}</td>
+          <td>${esc(e.curso_nome)}</td>
+          <td>${esc(e.sala || '—')}</td>
+          <td>${esc(e.papel || '—')}</td>
+        </tr>
+        <tr${e.suspensa ? ' style="opacity:.55"' : ''}>
+          <td></td>
+          <td colspan="5" style="font-size:11px;color:#555">${e.alunos.length ? esc(e.alunos.join(', ')) : 'Nenhum aluno matriculado.'}</td>
         </tr>`).join('')}</tbody>
-      </table>` : '<p class="dica">Sem turma com horário cadastrado no momento.</p>'}`;
+      </table>` : '<p class="dica">Nenhuma aula marcada neste período.</p>'}`;
   }
 
-  /** Calendário semanal das aulas de um instrutor, pronto pra imprimir e levar. */
-  async function calendarioInstrutor(profissionalId) {
-    let p; let ctx;
+  /** Calendário das aulas reais de um instrutor num período (um mês ou vários), pronto pra imprimir e levar. */
+  async function calendarioInstrutor(profissionalId, { deMes, ateMes } = {}) {
+    const mesAtual = new Date().toISOString().slice(0, 7);
+    const de = deMes || mesAtual; const ate = ateMes || de;
+    const { de: dataDe, ate: dataAte } = periodoDoMes(de, ate);
+
+    let p; let encontros; let ctx;
     try {
-      [p, ctx] = await Promise.all([
+      [p, encontros, ctx] = await Promise.all([
         API.get(`/api/agenda/profissionais/${profissionalId}`),
+        API.get(`/api/turmas/instrutores/${profissionalId}/encontros?de=${dataDe}&ate=${dataAte}`),
         contexto(),
       ]);
     } catch (e) { UI.erro(e.message); return; }
 
-    const corpo = `${cabecalho(ctx.cfg, 'Calendário de aulas')}${corpoCalendarioInstrutor(p)}
+    const corpo = `${cabecalho(ctx.cfg, 'Calendário de aulas', rotuloPeriodo(de, ate))}${corpoCalendarioInstrutor(p.nome, encontros)}
       <div class="rodape">emitido em ${dataBR(new Date().toISOString().slice(0, 10))}</div>`;
-    try { await UI.baixarPDF(pagina('Calendário de aulas', ctx.cfg, corpo), nomeArquivo('calendario-aulas', p.nome)); }
+    try { await UI.baixarPDF(pagina('Calendário de aulas', ctx.cfg, corpo), nomeArquivo(`calendario-aulas-${de}`, p.nome)); }
     catch (e) { UI.erro(e.message); }
   }
 
-  /** Um PDF só com o calendário de todos os instrutores (uma página cada). */
-  async function calendariosInstrutoresLote() {
+  /** Um PDF só com o calendário de todos os instrutores no período (uma página cada). */
+  async function calendariosInstrutoresLote({ deMes, ateMes } = {}) {
+    const mesAtual = new Date().toISOString().slice(0, 7);
+    const de = deMes || mesAtual; const ate = ateMes || de;
+    const { de: dataDe, ate: dataAte } = periodoDoMes(de, ate);
+
     let profissionais; let ctx;
     try {
       [profissionais, ctx] = await Promise.all([
@@ -434,18 +448,18 @@ window.Documentos = (function () {
       ]);
     } catch (e) { UI.erro(e.message); return; }
 
-    const comTurma = [];
+    const comAula = [];
     for (const pf of profissionais) {
-      let p;
-      try { p = await API.get(`/api/agenda/profissionais/${pf.id}`); } catch (_) { continue; }
-      if (p.turmas && p.turmas.length) comTurma.push(p);
+      let encontros;
+      try { encontros = await API.get(`/api/turmas/instrutores/${pf.id}/encontros?de=${dataDe}&ate=${dataAte}`); } catch (_) { continue; }
+      if (encontros.length) comAula.push({ nome: pf.nome, encontros });
     }
-    if (!comTurma.length) { UI.erro('Nenhum instrutor está escalado em turma no momento.'); return; }
+    if (!comAula.length) { UI.erro('Nenhum instrutor tem aula marcada neste período.'); return; }
 
-    const corpo = `${cabecalho(ctx.cfg, 'Calendário de aulas')}`
-      + comTurma.map((p, i) => `${i > 0 ? '<div class="quebra-pagina"></div>' : ''}${corpoCalendarioInstrutor(p)}`).join('')
+    const corpo = `${cabecalho(ctx.cfg, 'Calendário de aulas', rotuloPeriodo(de, ate))}`
+      + comAula.map((p, i) => `${i > 0 ? '<div class="quebra-pagina"></div>' : ''}${corpoCalendarioInstrutor(p.nome, p.encontros)}`).join('')
       + `<div class="rodape">emitido em ${dataBR(new Date().toISOString().slice(0, 10))}</div>`;
-    try { await UI.baixarPDF(pagina('Calendário de aulas', ctx.cfg, corpo, '.quebra-pagina { page-break-before: always; }'), nomeArquivo('calendario-aulas', 'todos-os-instrutores')); }
+    try { await UI.baixarPDF(pagina('Calendário de aulas', ctx.cfg, corpo, '.quebra-pagina { page-break-before: always; }'), nomeArquivo(`calendario-aulas-${de}`, 'todos-os-instrutores')); }
     catch (e) { UI.erro(e.message); }
   }
 

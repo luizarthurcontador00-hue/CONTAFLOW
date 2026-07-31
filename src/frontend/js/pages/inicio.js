@@ -187,6 +187,9 @@ window.PaginaInicio = (function () {
       <div class="painel-instituto mt-16">
         ${blocoAcervo(d.acervo)}
         ${blocoDinheiro(d.dinheiro)}
+      </div>
+      <div class="painel-instituto mt-16">
+        ${blocoObjetivos(d.objetivos)}
       </div>`;
   }
 
@@ -327,6 +330,29 @@ window.PaginaInicio = (function () {
       ${f.a_pagar > 0 ? `<div class="pi-alerta mt-16" data-ir="financeiro">
         ${UI.moeda(f.a_pagar)} em despesas a pagar${f.a_pagar_vencidas > 0 ? ` — <strong>${f.a_pagar_vencidas} já vencida(s)</strong>` : ''}.
       </div>` : ''}
+    </div>`;
+  }
+
+  function blocoObjetivos(o) {
+    return `<div class="card" style="grid-column: 1 / -1">
+      <h3 style="margin-top:0">🎯 Objetivos</h3>
+      ${!o.total_abertos
+        ? '<p class="muted pi-clicavel" data-ir="tarefas">Nenhum objetivo cadastrado. Cadastre metas do instituto em Tarefas → Objetivos.</p>'
+        : `<p class="dica pi-clicavel" data-ir="tarefas" style="margin-top:0">
+             ${o.total_abertos} objetivo(s) em aberto ·
+             <strong style="color:var(--sucesso)">${o.cabem_no_saldo} já dá(ão) pra fazer</strong> com o saldo em caixa de hoje.
+           </p>
+           <table class="tabela">
+             ${o.itens.map((it) => `<tr class="pi-clicavel" data-ir="tarefas">
+               <td>${UI.escapar(it.titulo)}</td>
+               <td style="text-align:right">${it.valor != null ? UI.moeda(it.valor) : '<span class="dica">sem valor</span>'}</td>
+               <td style="text-align:right;white-space:nowrap">
+                 ${it.cabe_agora === true ? '<span class="badge badge--ok">dá pra fazer</span>'
+                   : it.cabe_agora === false ? '<span class="badge badge--alerta">falta juntar</span>'
+                   : '<span class="badge badge--muted">meta</span>'}
+               </td>
+             </tr>`).join('')}
+           </table>`}
     </div>`;
   }
 

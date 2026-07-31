@@ -322,6 +322,23 @@ function painelInstituto() {
   const financeiro = require('./financeiroService');
   const saldoContas = financeiro.listarContasFinanceiras().reduce((s, c) => s + Number(c.saldo_atual), 0);
 
+  // ---------------------------- Objetivos ----------------------------
+  // Mesma logica da tela de Tarefas: do mais barato pro mais caro, soma
+  // ate onde o saldo em caixa cobre — pra saber de relance quantos objetivos
+  // ja da pra bancar sem abrir a tela.
+  const objetivosAbertos = db.prepare(
+    "SELECT id, titulo, valor FROM objetivos WHERE status = 'aberto' ORDER BY (valor IS NULL), valor, criado_em"
+  ).all();
+  let acumuladoObjetivos = 0;
+  const objetivos = objetivosAbertos.map((o) => {
+    let cabeAgora = null;
+    if (o.valor != null) {
+      cabeAgora = acumuladoObjetivos + Number(o.valor) <= saldoContas;
+      if (cabeAgora) acumuladoObjetivos += Number(o.valor);
+    }
+    return { id: o.id, titulo: o.titulo, valor: o.valor, cabe_agora: cabeAgora };
+  });
+
   return {
     hoje,
     ensino: {
@@ -371,6 +388,11 @@ function painelInstituto() {
       saldo_contas: arred(saldoContas),
       a_pagar: arred(aPagar),
       a_pagar_vencidas: aPagarVencidas,
+    },
+    objetivos: {
+      total_abertos: objetivosAbertos.length,
+      cabem_no_saldo: objetivos.filter((o) => o.cabe_agora).length,
+      itens: objetivos.slice(0, 6),
     },
   };
 }

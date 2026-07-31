@@ -790,12 +790,50 @@ function suspenderEncontro(agendamentoId, { suspender = true, motivo } = {}) {
   return obter(enc.turma_id);
 }
 
+/**
+ * Aulas de verdade (com data marcada) que um instrutor vai dar num período —
+ * pra imprimir o calendário do mês (ou de vários meses) com as datas reais,
+ * já com os alunos matriculados em cada turma logo abaixo.
+ */
+function encontrosDoInstrutor(profissionalId, { de, ate } = {}) {
+  const db = getDb();
+  const where = ['a.turma_id IS NOT NULL', 'a.profissional_id = @profissionalId'];
+  const params = { profissionalId: Number(profissionalId) };
+  if (de) { where.push('a.data >= @de'); params.de = de; }
+  if (ate) { where.push('a.data <= @ate'); params.ate = ate; }
+
+  const encontros = db.prepare(`
+    SELECT a.id, a.data, a.hora_inicio, a.hora_fim, a.suspensa, a.turma_id,
+      t.nome AS turma_nome, t.sala, c.nome AS curso_nome,
+      (SELECT papel FROM turmas_instrutores ti WHERE ti.turma_id = t.id AND ti.profissional_id = @profissionalId) AS papel
+    FROM agendamentos a
+    JOIN turmas t ON t.id = a.turma_id
+    JOIN cursos c ON c.id = t.curso_id
+    WHERE ${where.join(' AND ')}
+    ORDER BY a.data, a.hora_inicio
+  `).all(params);
+
+  const alunosPorTurma = new Map();
+  const buscarAlunos = db.prepare(`
+    SELECT cl.nome FROM matriculas m JOIN clientes cl ON cl.id = m.aluno_id
+    WHERE m.turma_id = ? AND m.status = 'ativa' ORDER BY cl.nome
+  `);
+  encontros.forEach((e) => {
+    if (!alunosPorTurma.has(e.turma_id)) {
+      alunosPorTurma.set(e.turma_id, buscarAlunos.all(e.turma_id).map((r) => r.nome));
+    }
+    e.alunos = alunosPorTurma.get(e.turma_id);
+    e.dia_semana = new Date(e.data + 'T12:00:00').getDay();
+  });
+  return encontros;
+}
+
 module.exports = {
   listar, obter, criar, atualizar, excluir,
   encerrar, renovar, historicoDaTurma,
   matricular, mudarStatusMatricula, removerMatricula,
   gerarEncontros, gerarEncontrosPendentes, limparEncontrosForaDoHorario,
   sugerirSubstitutos, definirInstrutorDoEncontro,
-  comInstrumentoProprio, progressoTurma, suspenderEncontro,
+  comInstrumentoProprio, progressoTurma, suspenderEncontro, encontrosDoInstrutor,
   STATUS_TURMA, STATUS_MATRICULA, DIAS,
 };

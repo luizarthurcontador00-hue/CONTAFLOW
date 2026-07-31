@@ -39,7 +39,9 @@ window.PaginaVoluntarios = (function () {
     container.querySelector('#vol-novo').addEventListener('click', () => formulario(null));
     container.querySelector('#vol-horas').addEventListener('click', horasVoluntariado);
     container.querySelector('#vol-atividades').addEventListener('click', () => atividades());
-    container.querySelector('#vol-calendarios').addEventListener('click', () => Documentos.calendariosInstrutoresLote());
+    container.querySelector('#vol-calendarios').addEventListener('click', () => {
+      selecionarPeriodo((periodo) => Documentos.calendariosInstrutoresLote(periodo));
+    });
     listar();
   }
 
@@ -92,8 +94,31 @@ window.PaginaVoluntarios = (function () {
       formTermo(pessoas.find((p) => String(p.id) === b.dataset.termo));
     }));
     alvo.querySelectorAll('[data-calendario]').forEach((b) => b.addEventListener('click', () => {
-      Documentos.calendarioInstrutor(b.dataset.calendario);
+      const id = b.dataset.calendario;
+      selecionarPeriodo((periodo) => Documentos.calendarioInstrutor(id, periodo));
     }));
+  }
+
+  /** Pede de qual mês até qual mês imprimir o calendário de aulas (pode ser só um). */
+  function selecionarPeriodo(aoEscolher) {
+    const mesAtual = new Date().toISOString().slice(0, 7);
+    Modal.abrir({
+      titulo: 'Calendário de aulas — período', tamanho: 'modal--pequeno', textoConfirmar: '🗓️ Gerar PDF',
+      corpoHTML: `
+        <p class="dica" style="margin-top:0">Traz as aulas de verdade marcadas nesse período (com data, turma e os alunos matriculados).</p>
+        <div class="form-grid">
+          <div class="campo"><label>De</label><input type="month" id="cp-de" value="${mesAtual}" /></div>
+          <div class="campo"><label>Até</label><input type="month" id="cp-ate" value="${mesAtual}" /></div>
+        </div>
+        <span class="dica">Deixe os dois iguais para um mês só.</span>`,
+      aoConfirmar: async (el) => {
+        const deMes = el.querySelector('#cp-de').value;
+        const ateMes = el.querySelector('#cp-ate').value;
+        if (!deMes || !ateMes) { UI.erro('Escolha o período.'); return false; }
+        if (ateMes < deMes) { UI.erro('O mês final não pode ser antes do inicial.'); return false; }
+        await aoEscolher({ deMes, ateMes });
+      },
+    });
   }
 
   /**

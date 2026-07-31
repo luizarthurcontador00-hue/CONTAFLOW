@@ -11,6 +11,7 @@ const router = express.Router();
 router.get('/alunos-em-risco', asyncHandler((req, res) => res.json(presencas.alunosEmRisco(Number(req.query.minimo) || 3))));
 router.get('/horas-voluntariado', asyncHandler((req, res) => res.json(presencas.horasVoluntariado(req.query))));
 router.get('/encontros', asyncHandler((req, res) => res.json(presencas.listarEncontros(req.query))));
+router.get('/instrutores/:profissionalId/encontros', asyncHandler((req, res) => res.json(turmas.encontrosDoInstrutor(req.params.profissionalId, req.query))));
 
 // ------------------- Atividades de voluntariado (fora da aula) -------------------
 router.get('/voluntarios/atividades', asyncHandler((req, res) => res.json(presencas.listarAtividades(req.query))));
