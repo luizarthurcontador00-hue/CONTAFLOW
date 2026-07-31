@@ -256,7 +256,7 @@ function painelInstituto() {
   // estraga o relatorio de impacto depois.
   const chamadasPendentes = db.prepare(`
     SELECT COUNT(*) c FROM agendamentos a
-    WHERE a.turma_id IS NOT NULL AND a.status != 'cancelado'
+    WHERE a.turma_id IS NOT NULL AND a.status != 'cancelado' AND a.suspensa = 0
       AND date(a.data) < date(?)
       AND NOT EXISTS (SELECT 1 FROM presencas pr WHERE pr.agendamento_id = a.id)
   `).get(hoje).c;

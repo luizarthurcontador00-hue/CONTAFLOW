@@ -95,6 +95,7 @@ function chamadasPendentes(db) {
       AND a.data < date('now','localtime')
       AND a.data >= date('now','localtime','-30 days')
       AND a.status != 'cancelado'
+      AND a.suspensa = 0
       AND NOT EXISTS (SELECT 1 FROM presencas p WHERE p.agendamento_id = a.id)
     ORDER BY a.data DESC
   `).all();
@@ -198,7 +199,7 @@ function aulasDeAmanha(db) {
     JOIN turmas t ON t.id = a.turma_id
     LEFT JOIN profissionais p ON p.id = a.profissional_id
     WHERE a.turma_id IS NOT NULL AND a.data = date('now','localtime','+1 day')
-      AND a.status NOT IN ('cancelado','atendido')
+      AND a.status NOT IN ('cancelado','atendido') AND a.suspensa = 0
     ORDER BY a.hora_inicio
   `).all();
   if (!linhas.length) return [];
