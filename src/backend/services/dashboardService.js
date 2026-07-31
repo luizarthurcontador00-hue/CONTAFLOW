@@ -230,7 +230,7 @@ function painelInstituto() {
   // ---------------------------- Aulas ----------------------------
   const aulasHoje = db.prepare(`
     SELECT a.id, a.hora_inicio, a.hora_fim, a.status, t.nome AS turma_nome,
-      c.nome AS curso_nome, p.nome AS instrutor_nome,
+      c.nome AS curso_nome, p.nome AS instrutor_nome, p.foto_path AS instrutor_foto,
       (SELECT COUNT(*) FROM presencas pr WHERE pr.agendamento_id = a.id) AS chamada_feita,
       (SELECT COUNT(*) FROM matriculas m WHERE m.turma_id = t.id AND m.status = 'ativa') AS alunos
     FROM agendamentos a
@@ -360,7 +360,7 @@ function painelInstituto() {
     aulas: {
       hoje: aulasHoje.map((a) => ({
         id: a.id, hora_inicio: a.hora_inicio, hora_fim: a.hora_fim, status: a.status,
-        turma: a.turma_nome, curso: a.curso_nome, instrutor: a.instrutor_nome,
+        turma: a.turma_nome, curso: a.curso_nome, instrutor: a.instrutor_nome, instrutor_foto: a.instrutor_foto,
         alunos: a.alunos, chamada_feita: a.chamada_feita > 0,
       })),
       proximos_7_dias: aulasSemana,

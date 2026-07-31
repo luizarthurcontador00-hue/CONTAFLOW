@@ -33,6 +33,22 @@ const uploadFoto = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
 });
 
+// ----------------------- Upload de foto de pessoa (aluno/voluntário) -----------------------
+const storagePessoa = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, paths.pessoasImgDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const nome = crypto.randomBytes(8).toString('hex') + '_' + Date.now() + ext;
+    cb(null, nome);
+  },
+});
+
+const uploadFotoPessoa = multer({
+  storage: storagePessoa,
+  fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+});
+
 // ----------------------- Upload de XML de NF-e -----------------------
 const storageXml = multer.diskStorage({
   destination: (req, file, cb) => cb(null, paths.notasDir),
@@ -100,4 +116,4 @@ const uploadWhatsappMidia = multer({
   limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB
 });
 
-module.exports = { uploadFoto, uploadXml, uploadPlanilha, uploadWhatsappMidia, uploadOfx };
+module.exports = { uploadFoto, uploadFotoPessoa, uploadXml, uploadPlanilha, uploadWhatsappMidia, uploadOfx };

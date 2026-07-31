@@ -494,7 +494,19 @@ function matricular(turmaId, { aluno_id, observacao }) {
     }
   });
 
-  const status = turma.matriculados >= turma.vagas ? 'espera' : 'ativa';
+  // Quem traz TODOS os instrumentos que a turma exige nao usa nada do
+  // acervo — entao a vaga que falta e so um numero na ficha, nao um limite
+  // de verdade. Em vez de mandar pra fila de espera por causa disso, deixa
+  // entrar e atualiza a quantidade de vagas da turma pra refletir o que
+  // aconteceu (assim "5/5" nao mente sobre quem cabe fisicamente na sala).
+  const cheia = turma.matriculados >= turma.vagas;
+  const traiTudoQueUsa = turma.instrumentos.length > 0
+    && turma.instrumentos.every((inst) => instrumentos.alunoTemInstrumentoProprio(aluno.id, inst.id));
+  const furaVaga = cheia && traiTudoQueUsa;
+
+  const status = (cheia && !furaVaga) ? 'espera' : 'ativa';
+  if (furaVaga) db.prepare('UPDATE turmas SET vagas = vagas + 1 WHERE id = ?').run(turmaId);
+
   const info = db.prepare(
     'INSERT INTO matriculas (turma_id, aluno_id, status, observacao) VALUES (?, ?, ?, ?)'
   ).run(turmaId, aluno.id, status, (observacao || '').trim() || null);

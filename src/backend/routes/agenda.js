@@ -1,7 +1,8 @@
 'use strict';
 
 const express = require('express');
-const { asyncHandler } = require('../utils/errors');
+const { asyncHandler, AppError } = require('../utils/errors');
+const { uploadFotoPessoa } = require('../middleware/upload');
 const ag = require('../services/agendaService');
 
 const router = express.Router();
@@ -12,6 +13,10 @@ router.get('/profissionais/:id', asyncHandler((req, res) => res.json(ag.obterPro
 router.post('/profissionais', asyncHandler((req, res) => res.status(201).json(ag.criarProfissional(req.body || {}))));
 router.put('/profissionais/:id', asyncHandler((req, res) => res.json(ag.atualizarProfissional(req.params.id, req.body || {}))));
 router.delete('/profissionais/:id', asyncHandler((req, res) => res.json(ag.excluirProfissional(req.params.id))));
+router.post('/profissionais/:id/foto', uploadFotoPessoa.single('foto'), asyncHandler((req, res) => {
+  if (!req.file) throw new AppError('Envie uma imagem.');
+  res.json(ag.atualizarFotoProfissional(req.params.id, req.file.filename));
+}));
 
 // Aulas recorrentes (aula fixa semanal)
 router.get('/aulas-recorrentes', asyncHandler((req, res) => res.json(ag.listarAulasRecorrentes())));

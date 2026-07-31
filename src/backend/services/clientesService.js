@@ -1,8 +1,11 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const { getDb } = require('../db/connection');
 const { AppError } = require('../utils/errors');
 const { arred } = require('./precificacaoService');
+const paths = require('../paths');
 
 function listar({ busca, incluir_inativos } = {}) {
   const db = getDb();
@@ -99,4 +102,21 @@ function excluir(id) {
   return { excluido: true };
 }
 
-module.exports = { listar, obter, criar, atualizar, excluir };
+function removerFotoArquivo(nomeArquivo) {
+  try {
+    const p = path.join(paths.pessoasImgDir, path.basename(nomeArquivo));
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+  } catch (_) { /* ignora falha ao remover arquivo antigo */ }
+}
+
+/** Troca a foto do cliente (aluno), removendo a anterior do disco. */
+function atualizarFoto(id, fotoPath) {
+  const db = getDb();
+  const atual = db.prepare('SELECT foto_path FROM clientes WHERE id = ?').get(id);
+  if (!atual) throw new AppError('Cliente nao encontrado.', 404);
+  if (atual.foto_path) removerFotoArquivo(atual.foto_path);
+  db.prepare('UPDATE clientes SET foto_path = ? WHERE id = ?').run(fotoPath, id);
+  return obter(id);
+}
+
+module.exports = { listar, obter, criar, atualizar, excluir, atualizarFoto };

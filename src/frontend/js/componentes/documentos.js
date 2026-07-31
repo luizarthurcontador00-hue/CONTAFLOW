@@ -179,7 +179,11 @@ window.Documentos = (function () {
       ${cabecalho(ctx.cfg, 'Ficha do aluno', `Emitida em ${dataBR(d.emitido_em)}`)}
 
       <table>
-        <tr><th style="width:110px">Nome</th><td colspan="3"><strong>${esc(a.nome)}</strong></td></tr>
+        <tr><th style="width:110px">Nome</th><td colspan="${a.foto_path ? 2 : 3}"><strong>${esc(a.nome)}</strong></td>
+          ${a.foto_path ? `<td rowspan="5" style="width:110px;text-align:center">
+            <img src="/uploads/pessoas/${encodeURIComponent(a.foto_path)}" alt="" style="width:90px;height:90px;object-fit:cover;border-radius:6px">
+          </td>` : ''}
+        </tr>
         <tr>
           <th>Nascimento</th><td>${dataBR(a.data_nascimento)}${a.idade != null ? ` <span class="dica">(${a.idade} anos)</span>` : ''}</td>
           <th style="width:110px">CPF</th><td>${esc(a.cpf || '—')}</td>

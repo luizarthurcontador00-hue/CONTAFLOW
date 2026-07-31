@@ -242,7 +242,10 @@ window.PaginaInicio = (function () {
           return `<tr class="pi-clicavel" data-ir="chamada">
             <td><strong>${UI.escapar(x.hora_inicio || '—')}</strong>${x.hora_fim ? `<div class="dica">até ${UI.escapar(x.hora_fim)}</div>` : ''}</td>
             <td>${UI.escapar(x.turma || '—')}<div class="dica">${UI.escapar(x.curso || '')}</div></td>
-            <td>${x.instrutor ? UI.escapar(x.instrutor) : '<span class="badge badge--erro">sem instrutor</span>'}</td>
+            <td>${x.instrutor ? `<div class="flex gap-12" style="align-items:center">
+              <div class="pi-avatar">${x.instrutor_foto ? `<img src="/uploads/pessoas/${encodeURIComponent(x.instrutor_foto)}" alt="">` : '👤'}</div>
+              <span>${UI.escapar(x.instrutor)}</span>
+            </div>` : '<span class="badge badge--erro">sem instrutor</span>'}</td>
             <td>${x.alunos}</td>
             <td>${x.chamada_feita
               ? '<span class="badge badge--ok">feita</span>'

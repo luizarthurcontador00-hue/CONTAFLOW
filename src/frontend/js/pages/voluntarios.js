@@ -191,6 +191,20 @@ window.PaginaVoluntarios = (function () {
         <div class="form-grid">
           <div class="campo col-2"><label>Nome *</label>
             <input id="vo-nome" value="${ed ? UI.escapar(pessoa.nome) : ''}" /></div>
+          <div class="campo col-2" id="vo-foto-campo">
+            <label>Foto</label>
+            ${ed ? `
+              <div class="flex gap-12" style="align-items:center">
+                <div class="foto-preview" id="vo-foto-preview" style="width:96px;height:96px;border-radius:8px;overflow:hidden;background:var(--fundo-alt,#f1f1f1);display:flex;align-items:center;justify-content:center;font-size:36px">
+                  ${pessoa.foto_path ? `<img src="/uploads/pessoas/${encodeURIComponent(pessoa.foto_path)}" alt="" style="width:100%;height:100%;object-fit:cover">` : '👤'}
+                </div>
+                <div>
+                  <input type="file" id="vo-foto-input" accept="image/*" style="display:none" />
+                  <button type="button" class="btn btn--secundario" id="vo-foto-btn">📷 Alterar foto</button>
+                </div>
+              </div>
+            ` : '<span class="dica">Salve o cadastro para adicionar uma foto.</span>'}
+          </div>
           <div class="campo"><label>Tipo</label>
             <select id="vo-tipo">
               <option value="voluntario" ${ed && pessoa.tipo === 'voluntario' ? 'selected' : ''}>Voluntário</option>
@@ -219,6 +233,27 @@ window.PaginaVoluntarios = (function () {
           </div>
         </div>`,
       aoAbrir: (el) => {
+        if (ed) {
+          const btnFoto = el.querySelector('#vo-foto-btn');
+          const inputFoto = el.querySelector('#vo-foto-input');
+          if (btnFoto && inputFoto) {
+            btnFoto.addEventListener('click', () => inputFoto.click());
+            inputFoto.addEventListener('change', async () => {
+              const arq = inputFoto.files[0];
+              inputFoto.value = '';
+              if (!arq) return;
+              const fd = new FormData();
+              fd.append('foto', arq);
+              try {
+                const atualizado = await API.post(`/api/agenda/profissionais/${pessoa.id}/foto`, fd);
+                pessoa.foto_path = atualizado.foto_path;
+                const prev = el.querySelector('#vo-foto-preview');
+                if (prev) prev.innerHTML = `<img src="/uploads/pessoas/${encodeURIComponent(atualizado.foto_path)}" alt="" style="width:100%;height:100%;object-fit:cover">`;
+                UI.sucesso('Foto atualizada.');
+              } catch (e) { UI.erro(e.message); }
+            });
+          }
+        }
         function desenhar() {
           const alvo = el.querySelector('#vo-faixas');
           if (!faixas.length) {

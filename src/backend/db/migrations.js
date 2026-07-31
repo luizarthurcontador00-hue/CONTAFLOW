@@ -1640,6 +1640,18 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 42,
+    name: 'foto-de-aluno-e-voluntario',
+    up(db) {
+      db.exec(`
+        -- Mesmo espirito da foto de produto: guarda so o nome do arquivo em
+        -- uploads/pessoas, pra sair na ficha do aluno e na escala do Panorama.
+        ALTER TABLE clientes ADD COLUMN foto_path TEXT;
+        ALTER TABLE profissionais ADD COLUMN foto_path TEXT;
+      `);
+    },
+  },
 ];
 
 /**

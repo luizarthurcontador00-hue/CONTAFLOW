@@ -1,8 +1,11 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const { getDb } = require('../db/connection');
 const { AppError } = require('../utils/errors');
 const { arred } = require('./precificacaoService');
+const paths = require('../paths');
 
 const STATUS = ['agendado', 'confirmado', 'atendido', 'cancelado', 'faltou'];
 const hoje = () => new Date().toISOString().slice(0, 10);
@@ -398,9 +401,27 @@ function gerarOcorrenciasPendentes() {
   return { geradas };
 }
 
+function removerFotoArquivo(nomeArquivo) {
+  try {
+    const p = path.join(paths.pessoasImgDir, path.basename(nomeArquivo));
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+  } catch (_) { /* ignora falha ao remover arquivo antigo */ }
+}
+
+/** Troca a foto do profissional (voluntário/contratado), removendo a anterior do disco. */
+function atualizarFotoProfissional(id, fotoPath) {
+  const db = getDb();
+  const atual = db.prepare('SELECT foto_path FROM profissionais WHERE id = ?').get(id);
+  if (!atual) throw new AppError('Profissional não encontrado.', 404);
+  if (atual.foto_path) removerFotoArquivo(atual.foto_path);
+  db.prepare('UPDATE profissionais SET foto_path = ? WHERE id = ?').run(fotoPath, id);
+  return obterProfissional(id);
+}
+
 module.exports = {
   STATUS,
   listarProfissionais, obterProfissional, criarProfissional, atualizarProfissional, excluirProfissional,
+  atualizarFotoProfissional,
   listar, obter, criar, atualizar, mudarStatus, excluir, faturar, resumoDia,
   listarAulasRecorrentes, criarAulaRecorrente, atualizarAulaRecorrente, excluirAulaRecorrente, gerarOcorrenciasPendentes,
 };

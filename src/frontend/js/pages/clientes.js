@@ -53,6 +53,20 @@ window.PaginaClientes = (function () {
       titulo: ed ? `Editar ${rotulo()}` : `Novo ${rotulo()}`, tamanho: 'modal--grande',
       corpoHTML: `<form id="fc" class="form-grid">
         <div class="campo col-2"><label>Nome *</label><input name="nome" value="${UI.escapar(c.nome || '')}" required /></div>
+        <div class="campo col-2" id="cli-foto-campo">
+          <label>Foto</label>
+          ${ed ? `
+            <div class="flex gap-12" style="align-items:center">
+              <div class="foto-preview" id="cli-foto-preview" style="width:96px;height:96px;border-radius:8px;overflow:hidden;background:var(--fundo-alt,#f1f1f1);display:flex;align-items:center;justify-content:center;font-size:36px">
+                ${c.foto_path ? `<img src="/uploads/pessoas/${encodeURIComponent(c.foto_path)}" alt="" style="width:100%;height:100%;object-fit:cover">` : '👤'}
+              </div>
+              <div>
+                <input type="file" id="cli-foto-input" accept="image/*" style="display:none" />
+                <button type="button" class="btn btn--secundario" id="cli-foto-btn">📷 Alterar foto</button>
+              </div>
+            </div>
+          ` : '<span class="dica">Salve o cadastro para adicionar uma foto.</span>'}
+        </div>
         <div class="campo"><label>Telefone</label><input name="telefone" value="${UI.escapar(c.telefone || '')}" /></div>
         <div class="campo"><label>CPF</label><input name="cpf" value="${UI.escapar(c.cpf || '')}" /></div>
         <div class="campo"><label>E-mail</label><input name="email" type="email" value="${UI.escapar(c.email || '')}" /></div>
@@ -84,6 +98,27 @@ window.PaginaClientes = (function () {
       textoConfirmar: 'Salvar',
       aoAbrir: async (el) => {
         UI.ligarMascaraDocumento(el.querySelector('[name="cpf"]'));
+        if (ed) {
+          const btnFoto = el.querySelector('#cli-foto-btn');
+          const inputFoto = el.querySelector('#cli-foto-input');
+          if (btnFoto && inputFoto) {
+            btnFoto.addEventListener('click', () => inputFoto.click());
+            inputFoto.addEventListener('change', async () => {
+              const arq = inputFoto.files[0];
+              inputFoto.value = '';
+              if (!arq) return;
+              const fd = new FormData();
+              fd.append('foto', arq);
+              try {
+                const atualizado = await API.post(`/api/clientes/${cliente.id}/foto`, fd);
+                c.foto_path = atualizado.foto_path;
+                const prev = el.querySelector('#cli-foto-preview');
+                if (prev) prev.innerHTML = `<img src="/uploads/pessoas/${encodeURIComponent(atualizado.foto_path)}" alt="" style="width:100%;height:100%;object-fit:cover">`;
+                UI.sucesso('Foto atualizada.');
+              } catch (e) { UI.erro(e.message); }
+            });
+          }
+        }
         const wrap = el.querySelector('#cli-instr-lista');
         if (!wrap) return;
         let instrumentos = [];
