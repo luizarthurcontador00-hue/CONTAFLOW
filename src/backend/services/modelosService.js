@@ -148,9 +148,11 @@ Por ser expressão da verdade, firmamos a presente declaração.
       ...MARCADORES_COMUNS,
     ],
     titulo_documento: 'DECLARAÇÃO DE MATRÍCULA',
-    padrao: `Declaramos, para os devidos fins, que {{aluno_nome}}, inscrito(a) no CPF sob o nº {{aluno_cpf}}, nascido(a) em {{aluno_nascimento}}, sob a responsabilidade de {{responsavel_nome}}, encontra-se regularmente matriculado(a) nesta instituição, participando das seguintes atividades:
+    padrao: `Declaramos, para os devidos fins, que {{aluno_nome}}, inscrito(a) no CPF sob o nº {{aluno_cpf}}, nascido(a) em {{aluno_nascimento}}, encontra-se regularmente matriculado(a) nesta instituição, participando das seguintes atividades:
 
 {{turmas}}
+
+Responsável (quando aluno(a) menor de idade): {{responsavel_nome}}
 
 As atividades são oferecidas gratuitamente, sem qualquer custo para o(a) participante ou sua família.
 

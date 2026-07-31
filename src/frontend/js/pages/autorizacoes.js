@@ -97,14 +97,27 @@ window.PaginaAutorizacoes = (function () {
     } catch (_) { cfg = {}; }
 
     const ehImagem = filtro.tipo === 'imagem';
+    // Aluno maior de idade autoriza por si mesmo — nao existe "responsavel
+    // legal" pra ele, e o termo nao pode falar "menor" nem pedir assinatura
+    // de quem nao vai assinar nada.
+    const menor = !!aluno.menor_de_idade;
     const titulo = ehImagem ? 'AUTORIZAÇÃO DE USO DE IMAGEM' : (filtro.tipo === 'saida' ? 'AUTORIZAÇÃO DE SAÍDA' : 'TERMO DE AUTORIZAÇÃO');
+    const abertura = menor ? 'Eu, responsável legal acima identificado,' : 'Eu, aluno(a) acima identificado(a),';
     const corpo = ehImagem
-      ? `autorizo o uso da imagem do(a) menor acima identificado(a) em fotografias e vídeos captados durante as
-         atividades da instituição, para fins exclusivamente institucionais e de divulgação das ações realizadas,
-         sem qualquer ônus e por prazo indeterminado, podendo esta autorização ser revogada a qualquer momento
-         mediante comunicação por escrito.`
-      : `autorizo o(a) menor acima identificado(a) a participar das atividades externas organizadas pela
-         instituição, ciente dos horários e locais informados previamente.`;
+      ? (menor
+          ? `autorizo o uso da imagem do(a) menor acima identificado(a) em fotografias e vídeos captados durante as
+             atividades da instituição, para fins exclusivamente institucionais e de divulgação das ações realizadas,
+             sem qualquer ônus e por prazo indeterminado, podendo esta autorização ser revogada a qualquer momento
+             mediante comunicação por escrito.`
+          : `autorizo o uso da minha imagem em fotografias e vídeos captados durante as atividades da instituição,
+             para fins exclusivamente institucionais e de divulgação das ações realizadas, sem qualquer ônus e por
+             prazo indeterminado, podendo esta autorização ser revogada a qualquer momento mediante comunicação
+             por escrito.`)
+      : (menor
+          ? `autorizo o(a) menor acima identificado(a) a participar das atividades externas organizadas pela
+             instituição, ciente dos horários e locais informados previamente.`
+          : `declaro estar ciente e de acordo em participar das atividades externas organizadas pela instituição,
+             nos horários e locais informados previamente.`);
 
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>${titulo}</title>
       <style>
@@ -122,12 +135,15 @@ window.PaginaAutorizacoes = (function () {
       <h2>${titulo}</h2>
       <div class="campo">Aluno(a): <strong>${UI.escapar(aluno.aluno_nome)}</strong></div>
       <div class="campo">Data de nascimento: ${aluno.data_nascimento ? UI.dataHora(aluno.data_nascimento) : '____/____/______'}</div>
+      <div class="campo">Documento: <span class="linha"></span></div>
+      ${menor ? `
       <div class="campo">Responsável: <span class="linha">${UI.escapar(aluno.responsavel_nome || '')}</span></div>
       <div class="campo">Documento do responsável: <span class="linha"></span></div>
-      <p style="margin-top:24px">Eu, responsável legal acima identificado, ${corpo}</p>
+      ` : ''}
+      <p style="margin-top:24px">${abertura} ${corpo}</p>
       <div class="campo" style="margin-top:32px">Local e data: <span class="linha"></span></div>
       <div class="duplo">
-        <div class="assinatura">Assinatura do responsável</div>
+        <div class="assinatura">Assinatura d${menor ? 'o responsável' : 'o(a) aluno(a)'}</div>
         <div class="assinatura">
           ${UI.escapar(assinante ? assinante.nome : (cfg.nome_loja || 'Pela instituição'))}
           ${assinante ? `<br><span style="font-size:11px;color:#555">${UI.escapar(assinante.cargo)}</span>` : ''}
