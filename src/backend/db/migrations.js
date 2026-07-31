@@ -1606,6 +1606,40 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 40,
+    name: 'turma-multiplos-instrumentos',
+    up(db) {
+      db.exec(`
+        -- Ate aqui uma turma so podia depender de UM instrumento. Uma turma
+        -- de banda (bateria + teclado + violao ao mesmo tempo) nao cabia
+        -- nesse modelo. turmas.instrumento_id fica no lugar (por
+        -- compatibilidade), mas para de ser escrito: quem manda agora e essa
+        -- tabela, com uma linha por instrumento que a turma precisa.
+        CREATE TABLE IF NOT EXISTS turmas_instrumentos (
+          turma_id       INTEGER NOT NULL REFERENCES turmas(id) ON DELETE CASCADE,
+          instrumento_id INTEGER NOT NULL REFERENCES instrumentos(id) ON DELETE CASCADE,
+          PRIMARY KEY (turma_id, instrumento_id)
+        );
+        INSERT INTO turmas_instrumentos (turma_id, instrumento_id)
+          SELECT id, instrumento_id FROM turmas WHERE instrumento_id IS NOT NULL;
+      `);
+    },
+  },
+  {
+    version: 41,
+    name: 'turma-suspensao-de-encontro',
+    up(db) {
+      db.exec(`
+        -- cursos.carga_horaria ja existe desde a v31 (e ja alimenta o
+        -- certificado). O que faltava era o dia de aula poder ser suspenso
+        -- (feriado, imprevisto, instrutor viajou) sem contar como aula dada
+        -- nem empurrar a previsao de termino errada da turma.
+        ALTER TABLE agendamentos ADD COLUMN suspensa INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE agendamentos ADD COLUMN motivo_suspensao TEXT;
+      `);
+    },
+  },
 ];
 
 /**

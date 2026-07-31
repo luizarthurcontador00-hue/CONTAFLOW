@@ -22,6 +22,8 @@ router.delete('/voluntarios/atividades/:id', asyncHandler((req, res) => res.json
 // --------------------------- Substituto ---------------------------
 router.get('/encontros/:agendamentoId/substitutos', asyncHandler((req, res) => res.json(turmas.sugerirSubstitutos(req.params.agendamentoId))));
 router.post('/encontros/:agendamentoId/instrutor', asyncHandler((req, res) => res.json(turmas.definirInstrutorDoEncontro(req.params.agendamentoId, (req.body || {}).profissional_id))));
+router.post('/encontros/:agendamentoId/suspender', asyncHandler((req, res) => res.json(turmas.suspenderEncontro(req.params.agendamentoId, { suspender: true, motivo: (req.body || {}).motivo }))));
+router.post('/encontros/:agendamentoId/reabrir', asyncHandler((req, res) => res.json(turmas.suspenderEncontro(req.params.agendamentoId, { suspender: false }))));
 
 // ------------------------------- Chamada -------------------------------
 router.get('/encontros/:agendamentoId/chamada', asyncHandler((req, res) => res.json(presencas.folhaDeChamada(req.params.agendamentoId))));
@@ -35,6 +37,7 @@ router.put('/:id', asyncHandler((req, res) => res.json(turmas.atualizar(req.para
 router.delete('/:id', asyncHandler((req, res) => res.json(turmas.excluir(req.params.id))));
 router.get('/:id/frequencia', asyncHandler((req, res) => res.json(presencas.frequenciaDaTurma(req.params.id))));
 router.get('/:id/folha-impressao', asyncHandler((req, res) => res.json(presencas.folhaParaImpressao(req.params.id, req.query))));
+router.get('/:id/progresso', asyncHandler((req, res) => res.json(turmas.progressoTurma(req.params.id))));
 
 // -------------------------- Periodo / renovacao --------------------------
 router.get('/:id/historico', asyncHandler((req, res) => res.json(turmas.historicoDaTurma(req.params.id))));

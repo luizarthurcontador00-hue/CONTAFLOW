@@ -19,19 +19,27 @@ const STATUS_TURMA = ['planejada', 'aberta', 'encerrada', 'cancelada'];
 const STATUS_MATRICULA = ['ativa', 'espera', 'trancada', 'concluida', 'desistente'];
 const DIAS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
+/** Instrumentos que a turma precisa (pode ser mais de um — ex.: turma de banda). */
+function instrumentosDaTurma(db, turmaId) {
+  return db.prepare(`
+    SELECT i.id, i.nome, i.quantidade_total
+    FROM turmas_instrumentos ti JOIN instrumentos i ON i.id = ti.instrumento_id
+    WHERE ti.turma_id = ? ORDER BY i.nome
+  `).all(turmaId);
+}
+
 function listar({ curso_id, status, instrumento_id } = {}) {
   const where = [];
   if (curso_id) where.push('t.curso_id = @curso_id');
   if (status) where.push('t.status = @status');
-  if (instrumento_id) where.push('t.instrumento_id = @instrumento_id');
+  if (instrumento_id) where.push('EXISTS (SELECT 1 FROM turmas_instrumentos ti WHERE ti.turma_id = t.id AND ti.instrumento_id = @instrumento_id)');
 
   const turmas = getDb().prepare(`
-    SELECT t.*, c.nome AS curso_nome, c.categoria AS curso_categoria, i.nome AS instrumento_nome,
+    SELECT t.*, c.nome AS curso_nome, c.categoria AS curso_categoria,
       (SELECT COUNT(*) FROM matriculas m WHERE m.turma_id = t.id AND m.status = 'ativa') AS matriculados,
       (SELECT COUNT(*) FROM matriculas m WHERE m.turma_id = t.id AND m.status = 'espera') AS na_espera
     FROM turmas t
     JOIN cursos c ON c.id = t.curso_id
-    LEFT JOIN instrumentos i ON i.id = t.instrumento_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY t.status, c.nome, t.nome
   `).all({ curso_id, status, instrumento_id });
@@ -44,6 +52,7 @@ function listar({ curso_id, status, instrumento_id } = {}) {
       FROM turmas_instrutores ti JOIN profissionais p ON p.id = ti.profissional_id
       WHERE ti.turma_id = ? ORDER BY ti.papel, p.nome
     `).all(t.id);
+    t.instrumentos = instrumentosDaTurma(db, t.id);
   });
   return turmas;
 }
@@ -51,15 +60,15 @@ function listar({ curso_id, status, instrumento_id } = {}) {
 function obter(id) {
   const db = getDb();
   const turma = db.prepare(`
-    SELECT t.*, c.nome AS curso_nome, c.categoria AS curso_categoria, i.nome AS instrumento_nome
+    SELECT t.*, c.nome AS curso_nome, c.categoria AS curso_categoria, c.carga_horaria AS curso_carga_horaria
     FROM turmas t
     JOIN cursos c ON c.id = t.curso_id
-    LEFT JOIN instrumentos i ON i.id = t.instrumento_id
     WHERE t.id = ?
   `).get(id);
   if (!turma) throw new AppError('Turma não encontrada.', 404);
 
   turma.horarios = db.prepare('SELECT * FROM turmas_horarios WHERE turma_id = ? ORDER BY dia_semana, hora_inicio').all(id);
+  turma.instrumentos = instrumentosDaTurma(db, id);
   turma.instrutores = db.prepare(`
     SELECT ti.*, p.nome, p.telefone, p.cor, p.tipo
     FROM turmas_instrutores ti JOIN profissionais p ON p.id = ti.profissional_id
@@ -89,7 +98,41 @@ function validarHorarios(horarios) {
   return lista;
 }
 
-function validar(dados) {
+/** Duração em horas de um horário (hora_fim - hora_inicio). */
+function duracaoHoras(h) {
+  const [hi, mi] = h.hora_inicio.split(':').map(Number);
+  const [hf, mf] = h.hora_fim.split(':').map(Number);
+  return (hf * 60 + mf - (hi * 60 + mi)) / 60;
+}
+
+/**
+ * A partir do início do período, dos horários semanais e da carga horária
+ * do curso, caminha dia a dia até acumular as horas necessárias e devolve a
+ * data do último encontro — essa é a data de fim projetada da turma. Datas
+ * em `suspensas` (Set de 'YYYY-MM-DD') não contam hora nenhuma, então um dia
+ * suspenso empurra a data de fim pra frente.
+ */
+function calcularFimAutomatico(periodoInicio, horarios, cargaHorariaHoras, suspensas) {
+  if (!cargaHorariaHoras || !horarios || !horarios.length) return null;
+  const suspensasSet = suspensas || new Set();
+  let acumulado = 0;
+  let ultimaData = null;
+  const d = new Date(periodoInicio + 'T12:00:00');
+  const limite = new Date(d);
+  limite.setFullYear(limite.getFullYear() + 5); // trava de seguranca contra horario impossivel
+  while (acumulado < cargaHorariaHoras && d <= limite) {
+    const iso = d.toISOString().slice(0, 10);
+    const doDia = horarios.filter((h) => Number(h.dia_semana) === d.getDay());
+    if (doDia.length && !suspensasSet.has(iso)) {
+      doDia.forEach((h) => { acumulado += duracaoHoras(h); });
+      ultimaData = iso;
+    }
+    d.setDate(d.getDate() + 1);
+  }
+  return ultimaData;
+}
+
+function validar(dados, horarios) {
   const db = getDb();
   const nome = (dados.nome || '').trim();
   if (!nome) throw new AppError('Informe o nome da turma.');
@@ -103,17 +146,22 @@ function validar(dados) {
 
   const inicio = String(dados.periodo_inicio || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(inicio)) throw new AppError('Informe a data de início do período da turma.');
-  const fim = String(dados.periodo_fim || '').trim() || null;
+  let fim = String(dados.periodo_fim || '').trim() || null;
   if (fim && fim < inicio) throw new AppError('O fim do período não pode ser antes do início.');
+  // Sem data de fim informada: se o curso tem carga horaria, calcula sozinho
+  // ate onde a turma vai, em vez de deixar "sem data de termino" por padrao.
+  if (!fim && curso.carga_horaria) fim = calcularFimAutomatico(inicio, horarios, curso.carga_horaria);
 
-  const instrumentoId = dados.instrumento_id ? Number(dados.instrumento_id) : null;
+  const instrumentosIds = Array.isArray(dados.instrumentos_ids)
+    ? [...new Set(dados.instrumentos_ids.map(Number).filter(Boolean))]
+    : (dados.instrumento_id ? [Number(dados.instrumento_id)] : []);
   const porAluno = Math.max(1, Number(dados.instrumentos_por_aluno) || 1);
   const status = STATUS_TURMA.includes(dados.status) ? dados.status : 'aberta';
 
   return {
     curso_id: cursoId,
     nome,
-    instrumento_id: instrumentoId,
+    instrumentos_ids: instrumentosIds,
     instrumentos_por_aluno: porAluno,
     vagas,
     sala: (dados.sala || '').trim() || null,
@@ -152,40 +200,48 @@ function comInstrumentoProprio(turmaId, instrumentoId) {
  * quando nao ha nenhum livre naquele horario.
  */
 function conferirAcervo(d, horarios, turmaIdIgnorar) {
-  if (!d.instrumento_id || d.vagas === 0) return null;
-  const disp = instrumentos.vagasDisponiveis(d.instrumento_id, horarios, {
-    turmaIdIgnorar,
-    instrumentosPorAluno: d.instrumentos_por_aluno,
+  if (!d.instrumentos_ids.length || d.vagas === 0) return [];
+  return d.instrumentos_ids.map((instrumentoId) => {
+    const disp = instrumentos.vagasDisponiveis(instrumentoId, horarios, {
+      turmaIdIgnorar,
+      instrumentosPorAluno: d.instrumentos_por_aluno,
+    });
+    if (disp.vagas_maximas === 0) {
+      const ocupando = disp.turmas_no_mesmo_horario.map((t) => t.nome).join(', ');
+      throw new AppError(
+        `Não há ${disp.instrumento} livre neste horário`
+        + (ocupando ? ` (todos comprometidos com: ${ocupando})` : '')
+        + (disp.emprestados ? `, ${disp.emprestados} emprestado(s)` : '')
+        + (disp.fora_de_uso ? `, ${disp.fora_de_uso} em manutenção/baixado` : '')
+        + '. Escolha outro horário, ou matricule apenas alunos que tenham o próprio instrumento.'
+      );
+    }
+    return disp;
   });
+}
 
-  if (disp.vagas_maximas === 0) {
-    const ocupando = disp.turmas_no_mesmo_horario.map((t) => t.nome).join(', ');
-    throw new AppError(
-      `Não há ${disp.instrumento} livre neste horário`
-      + (ocupando ? ` (todos comprometidos com: ${ocupando})` : '')
-      + (disp.emprestados ? `, ${disp.emprestados} emprestado(s)` : '')
-      + (disp.fora_de_uso ? `, ${disp.fora_de_uso} em manutenção/baixado` : '')
-      + '. Escolha outro horário, ou matricule apenas alunos que tenham o próprio instrumento.'
-    );
-  }
-  return disp;
+function gravarInstrumentos(db, turmaId, instrumentosIds) {
+  db.prepare('DELETE FROM turmas_instrumentos WHERE turma_id = ?').run(turmaId);
+  const ins = db.prepare('INSERT INTO turmas_instrumentos (turma_id, instrumento_id) VALUES (?, ?)');
+  (instrumentosIds || []).forEach((instId) => ins.run(turmaId, instId));
 }
 
 function criar(dados) {
   const db = getDb();
-  const d = validar(dados);
   const horarios = validarHorarios(dados.horarios);
+  const d = validar(dados, horarios);
   conferirAcervo(d, horarios, null);
 
   const criarTudo = db.transaction(() => {
     const info = db.prepare(`
-      INSERT INTO turmas (curso_id, nome, instrumento_id, instrumentos_por_aluno, vagas, sala,
+      INSERT INTO turmas (curso_id, nome, instrumentos_por_aluno, vagas, sala,
         periodo_inicio, periodo_fim, status, observacao)
-      VALUES (@curso_id, @nome, @instrumento_id, @instrumentos_por_aluno, @vagas, @sala,
+      VALUES (@curso_id, @nome, @instrumentos_por_aluno, @vagas, @sala,
         @periodo_inicio, @periodo_fim, @status, @observacao)
     `).run(d);
     const turmaId = info.lastInsertRowid;
     gravarHorarios(db, turmaId, horarios);
+    gravarInstrumentos(db, turmaId, d.instrumentos_ids);
     gravarInstrutores(db, turmaId, dados.instrutores);
     return turmaId;
   });
@@ -198,8 +254,9 @@ function criar(dados) {
 function atualizar(id, dados) {
   const db = getDb();
   const atual = obter(id);
-  const d = validar({ ...atual, ...dados });
   const horarios = dados.horarios ? validarHorarios(dados.horarios) : atual.horarios;
+  const instrumentosIdsAtuais = atual.instrumentos.map((i) => i.id);
+  const d = validar({ ...atual, instrumentos_ids: instrumentosIdsAtuais, ...dados }, horarios);
   conferirAcervo(d, horarios, id);
 
   // Reduzir vagas abaixo de quem ja esta matriculado deixaria aluno sem lugar.
@@ -210,12 +267,13 @@ function atualizar(id, dados) {
 
   const salvar = db.transaction(() => {
     db.prepare(`
-      UPDATE turmas SET curso_id=@curso_id, nome=@nome, instrumento_id=@instrumento_id,
+      UPDATE turmas SET curso_id=@curso_id, nome=@nome,
         instrumentos_por_aluno=@instrumentos_por_aluno, vagas=@vagas, sala=@sala,
         periodo_inicio=@periodo_inicio, periodo_fim=@periodo_fim, status=@status, observacao=@observacao
       WHERE id=@id
     `).run({ ...d, id });
     if (dados.horarios) gravarHorarios(db, id, horarios);
+    if (dados.instrumentos_ids) gravarInstrumentos(db, id, d.instrumentos_ids);
     if (dados.instrutores) gravarInstrutores(db, id, dados.instrutores);
   });
   salvar();
@@ -335,7 +393,7 @@ function renovar(id, dados = {}) {
     const nova = criar({
       curso_id: origem.curso_id,
       nome: (dados.nome || '').trim() || origem.nome,
-      instrumento_id: origem.instrumento_id,
+      instrumentos_ids: origem.instrumentos.map((i) => i.id),
       instrumentos_por_aluno: origem.instrumentos_por_aluno,
       vagas,
       sala: dados.sala !== undefined ? dados.sala : origem.sala,
@@ -414,16 +472,19 @@ function matricular(turmaId, { aluno_id, observacao }) {
   const jaTem = db.prepare("SELECT * FROM matriculas WHERE turma_id = ? AND aluno_id = ? AND status IN ('ativa','espera')").get(turmaId, aluno.id);
   if (jaTem) throw new AppError(`${aluno.nome} já está ${jaTem.status === 'espera' ? 'na fila de espera' : 'matriculado'} nesta turma.`);
 
-  // Aluno sem instrumento proprio precisa de um do acervo: confere se sobra
-  // algum naquele horario antes de deixar entrar como ativo.
-  const traiOProprio = instrumentos.alunoTemInstrumentoProprio(aluno.id, turma.instrumento_id);
-  if (turma.instrumento_id && !traiOProprio) {
-    const disp = instrumentos.vagasDisponiveis(turma.instrumento_id, turma.horarios, {
+  // Aluno sem instrumento proprio precisa de um do acervo: confere CADA
+  // instrumento que a turma exige (pode ser mais de um — turma de banda
+  // precisa de bateria E teclado, nao um ou outro) antes de deixar entrar
+  // como ativo.
+  turma.instrumentos.forEach((inst) => {
+    const traiOProprio = instrumentos.alunoTemInstrumentoProprio(aluno.id, inst.id);
+    if (traiOProprio) return;
+    const disp = instrumentos.vagasDisponiveis(inst.id, turma.horarios, {
       turmaIdIgnorar: turmaId,
       instrumentosPorAluno: turma.instrumentos_por_aluno,
     });
     const usandoAcervo = turma.matriculas.filter((m) => m.status === 'ativa'
-      && !instrumentos.alunoTemInstrumentoProprio(m.aluno_id, turma.instrumento_id)).length;
+      && !instrumentos.alunoTemInstrumentoProprio(m.aluno_id, inst.id)).length;
     if (usandoAcervo >= disp.vagas_maximas) {
       throw new AppError(
         `Não há ${disp.instrumento} disponível neste horário para ${aluno.nome}. `
@@ -431,7 +492,7 @@ function matricular(turmaId, { aluno_id, observacao }) {
         + 'Se o aluno tiver o próprio instrumento, marque isso no cadastro dele.'
       );
     }
-  }
+  });
 
   const status = turma.matriculados >= turma.vagas ? 'espera' : 'ativa';
   const info = db.prepare(
@@ -659,12 +720,82 @@ function gerarEncontrosPendentes() {
   return { geradas };
 }
 
+// ==================== Progresso e suspensão de encontro ====================
+
+/**
+ * % de conclusao da turma frente a carga horaria do curso: soma as horas de
+ * cada encontro ja passado (e nao suspenso) e compara com a carga horaria
+ * cadastrada. Sem carga horaria no curso, nao ha o que medir.
+ */
+function progressoTurma(id) {
+  const db = getDb();
+  const turma = obter(id);
+  if (!turma.curso_carga_horaria) {
+    return { carga_horaria: null, horas_dadas: 0, horas_restantes: null, percentual: null };
+  }
+  const hoje = new Date().toISOString().slice(0, 10);
+  const encontros = db.prepare(`
+    SELECT hora_inicio, hora_fim FROM agendamentos
+    WHERE turma_id = ? AND data <= ? AND suspensa = 0
+  `).all(id, hoje);
+  const horasDadas = encontros.reduce((s, e) => s + duracaoHoras(e), 0);
+  const cargaHoraria = Number(turma.curso_carga_horaria);
+  const percentual = Math.min(100, Math.round((horasDadas / cargaHoraria) * 100));
+  return {
+    carga_horaria: cargaHoraria,
+    horas_dadas: Math.round(horasDadas * 100) / 100,
+    horas_restantes: Math.max(0, Math.round((cargaHoraria - horasDadas) * 100) / 100),
+    percentual,
+  };
+}
+
+/**
+ * Suspende (ou reabre) um dia de aula — feriado, imprevisto, instrutor que
+ * viajou. Um encontro suspenso nao conta como aula dada nem entra na
+ * frequencia, e a previsao de termino da turma e recalculada na hora: um dia
+ * a menos empurra o fim mais pra frente (se o curso tiver carga horaria
+ * cadastrada). O calendario e regenerado pra criar o encontro extra que
+ * cobre a hora perdida.
+ */
+function suspenderEncontro(agendamentoId, { suspender = true, motivo } = {}) {
+  const db = getDb();
+  const enc = db.prepare('SELECT * FROM agendamentos WHERE id = ? AND turma_id IS NOT NULL').get(agendamentoId);
+  if (!enc) throw new AppError('Encontro não encontrado.', 404);
+  if (db.prepare('SELECT 1 FROM presencas WHERE agendamento_id = ?').get(agendamentoId)) {
+    throw new AppError('Este encontro já tem chamada registrada — não dá para suspender depois que a aula já aconteceu.');
+  }
+
+  const rodar = db.transaction(() => {
+    db.prepare('UPDATE agendamentos SET suspensa = ?, motivo_suspensao = ? WHERE id = ?')
+      .run(suspender ? 1 : 0, suspender ? ((motivo || '').trim() || null) : null, agendamentoId);
+
+    const turma = db.prepare('SELECT * FROM turmas WHERE id = ?').get(enc.turma_id);
+    const curso = db.prepare('SELECT carga_horaria FROM cursos WHERE id = ?').get(turma.curso_id);
+    if (curso.carga_horaria) {
+      const horarios = db.prepare('SELECT * FROM turmas_horarios WHERE turma_id = ?').all(enc.turma_id);
+      const suspensas = new Set(
+        db.prepare('SELECT data FROM agendamentos WHERE turma_id = ? AND suspensa = 1').all(enc.turma_id).map((r) => r.data)
+      );
+      const novoFim = calcularFimAutomatico(turma.periodo_inicio, horarios, curso.carga_horaria, suspensas);
+      db.prepare('UPDATE turmas SET periodo_fim = ? WHERE id = ?').run(novoFim, enc.turma_id);
+    }
+  });
+  rodar();
+
+  // Reabrir um dia pode encurtar a previsao de novo: tira do calendario o
+  // que passou a sobrar depois do periodo_fim recalculado (nunca mexe no que
+  // ja tem chamada registrada — isso limparEncontrosForaDoHorario ja garante).
+  limparEncontrosForaDoHorario(enc.turma_id);
+  gerarEncontros(enc.turma_id);
+  return obter(enc.turma_id);
+}
+
 module.exports = {
   listar, obter, criar, atualizar, excluir,
   encerrar, renovar, historicoDaTurma,
   matricular, mudarStatusMatricula, removerMatricula,
   gerarEncontros, gerarEncontrosPendentes, limparEncontrosForaDoHorario,
   sugerirSubstitutos, definirInstrutorDoEncontro,
-  comInstrumentoProprio,
+  comInstrumentoProprio, progressoTurma, suspenderEncontro,
   STATUS_TURMA, STATUS_MATRICULA, DIAS,
 };

@@ -106,19 +106,47 @@ window.PaginaChamada = (function () {
                 <div class="dica">${UI.escapar(e.curso_nome)}</div>
               </td>
               <td class="dica">${UI.escapar(e.instrutor_nome || '—')}</td>
-              <td>${e.chamada_registrada
-                ? `<span class="badge badge--ok">${e.presentes} presente(s)</span>`
-                : '<span class="badge badge--alerta">pendente</span>'}</td>
-              <td style="text-align:right">
-                <button class="btn ${e.chamada_registrada ? 'btn--secundario' : ''}" data-chamada="${e.id}">
-                  ${e.chamada_registrada ? 'Revisar' : 'Fazer chamada'}
-                </button>
+              <td>${e.suspensa
+                ? `<span class="badge badge--muted" title="${UI.escapar(e.motivo_suspensao || '')}">suspensa</span>`
+                : e.chamada_registrada
+                  ? `<span class="badge badge--ok">${e.presentes} presente(s)</span>`
+                  : '<span class="badge badge--alerta">pendente</span>'}</td>
+              <td style="text-align:right;white-space:nowrap">
+                ${e.suspensa
+                  ? `<button class="btn btn--secundario" data-reabrir="${e.id}">Reabrir</button>`
+                  : `<button class="btn ${e.chamada_registrada ? 'btn--secundario' : ''}" data-chamada="${e.id}">
+                       ${e.chamada_registrada ? 'Revisar' : 'Fazer chamada'}
+                     </button>
+                     ${!e.chamada_registrada ? `<button class="btn btn--secundario" data-suspender="${e.id}" title="Feriado, imprevisto...">Suspender</button>` : ''}`}
               </td>
             </tr>`).join('')}
         </tbody>
       </table></div>`;
 
     alvo.querySelectorAll('[data-chamada]').forEach((b) => b.addEventListener('click', () => abrirChamada(Number(b.dataset.chamada))));
+    alvo.querySelectorAll('[data-suspender]').forEach((b) => b.addEventListener('click', () => suspenderDia(Number(b.dataset.suspender))));
+    alvo.querySelectorAll('[data-reabrir]').forEach((b) => b.addEventListener('click', async () => {
+      try { await API.post(`/api/turmas/encontros/${b.dataset.reabrir}/reabrir`, {}); UI.sucesso('Dia reaberto.'); await listar(); }
+      catch (e) { UI.erro(e.message); }
+    }));
+  }
+
+  /** Suspende um dia de aula (feriado, imprevisto): não conta como aula dada e empurra a previsão de término da turma. */
+  function suspenderDia(agendamentoId) {
+    Modal.abrir({
+      titulo: 'Suspender dia de aula', tamanho: 'modal--pequeno', textoConfirmar: 'Suspender',
+      corpoHTML: `
+        <p class="dica" style="margin-top:0">Este dia deixa de contar como aula dada — não entra na frequência nem no progresso da turma,
+        e a previsão de término (quando a carga horária do curso está cadastrada) é recalculada automaticamente.</p>
+        <div class="campo"><label>Motivo</label><input id="sp-motivo" placeholder="Ex.: Feriado, instrutor viajou…" /></div>`,
+      aoConfirmar: async (el) => {
+        try {
+          await API.post(`/api/turmas/encontros/${agendamentoId}/suspender`, { motivo: el.querySelector('#sp-motivo').value });
+          UI.sucesso('Dia suspenso.');
+          await listar();
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
   }
 
   async function abrirChamada(agendamentoId) {

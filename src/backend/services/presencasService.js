@@ -22,6 +22,7 @@ function listarEncontros({ turma_id, de, ate } = {}) {
 
   return getDb().prepare(`
     SELECT a.id, a.data, a.hora_inicio, a.hora_fim, a.status, a.turma_id, a.profissional_id,
+      a.suspensa, a.motivo_suspensao,
       t.nome AS turma_nome, c.nome AS curso_nome, p.nome AS instrutor_nome,
       (SELECT COUNT(*) FROM presencas pr WHERE pr.agendamento_id = a.id) AS chamada_registrada,
       (SELECT COUNT(*) FROM presencas pr WHERE pr.agendamento_id = a.id AND pr.situacao = 'presente') AS presentes

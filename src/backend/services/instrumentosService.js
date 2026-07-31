@@ -17,7 +17,8 @@ const { AppError } = require('../utils/errors');
 function listar({ incluir_inativos } = {}) {
   return getDb().prepare(`
     SELECT i.*,
-      (SELECT COUNT(*) FROM turmas t WHERE t.instrumento_id = i.id AND t.status IN ('planejada','aberta')) AS turmas_usando,
+      (SELECT COUNT(*) FROM turmas_instrumentos ti JOIN turmas t ON t.id = ti.turma_id
+        WHERE ti.instrumento_id = i.id AND t.status IN ('planejada','aberta')) AS turmas_usando,
       (SELECT COUNT(*) FROM instrumentos_unidades u WHERE u.instrumento_id = i.id) AS unidades_cadastradas,
       (SELECT COUNT(*) FROM instrumentos_unidades u WHERE u.instrumento_id = i.id AND u.estado = 'emprestado') AS emprestados,
       (SELECT COUNT(*) FROM instrumentos_unidades u WHERE u.instrumento_id = i.id AND u.estado IN ('manutencao','baixado')) AS fora_de_uso
@@ -98,7 +99,10 @@ function atualizar(id, dados) {
 function excluir(id) {
   const db = getDb();
   obter(id);
-  const emUso = db.prepare("SELECT COUNT(*) c FROM turmas WHERE instrumento_id = ? AND status IN ('planejada','aberta')").get(id).c;
+  const emUso = db.prepare(`
+    SELECT COUNT(*) c FROM turmas_instrumentos ti JOIN turmas t ON t.id = ti.turma_id
+    WHERE ti.instrumento_id = ? AND t.status IN ('planejada','aberta')
+  `).get(id).c;
   if (emUso > 0) throw new AppError('Este instrumento está sendo usado por turmas abertas. Encerre as turmas antes de excluir.');
   db.prepare('DELETE FROM instrumentos WHERE id = ?').run(id);
   return { ok: true };
@@ -119,8 +123,8 @@ function horariosComprometidos(instrumentoId, turmaIdIgnorar) {
            (t.vagas * t.instrumentos_por_aluno) AS consumo
     FROM turmas_horarios h
     JOIN turmas t ON t.id = h.turma_id
-    WHERE t.instrumento_id = @instrumentoId
-      AND t.status IN ('planejada','aberta')
+    JOIN turmas_instrumentos ti ON ti.turma_id = t.id AND ti.instrumento_id = @instrumentoId
+    WHERE t.status IN ('planejada','aberta')
       AND (@turmaIdIgnorar IS NULL OR t.id != @turmaIdIgnorar)
   `).all({ instrumentoId, turmaIdIgnorar: turmaIdIgnorar || null });
 }
