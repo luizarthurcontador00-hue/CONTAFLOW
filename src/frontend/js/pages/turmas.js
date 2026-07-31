@@ -219,7 +219,7 @@ window.PaginaTurmas = (function () {
     const cor = p.percentual >= 100 ? 'var(--sucesso)' : 'var(--primaria)';
     alvo.innerHTML = `
       <div class="flex flex--between" style="align-items:center;font-size:12px;color:var(--texto-muted,#666)">
-        <span>Progresso do curso (${p.horas_dadas}h de ${p.carga_horaria}h)</span>
+        <span>Progresso do curso (${p.horas_dadas}h de ${p.carga_horaria}h)${p.horas_abonadas ? ` <span class="dica">— inclui ${p.horas_abonadas}h abonadas de antes do cadastro</span>` : ''}</span>
         <strong>${p.percentual}%</strong>
       </div>
       <div style="background:var(--borda,#e5e7eb);border-radius:6px;height:8px;overflow:hidden;margin-top:4px">
@@ -572,6 +572,13 @@ window.PaginaTurmas = (function () {
             <button class="btn btn--secundario mt-16" type="button" id="tf-add-instrutor">+ Adicionar instrutor</button>
           </div>
 
+          ${ed ? `
+          <div class="campo" style="border-top:1px solid var(--borda);padding-top:14px">
+            <label>Horas abonadas</label>
+            <input id="tf-horas-abonadas" type="number" min="0" step="0.5" value="${turma.horas_abonadas || 0}" />
+            <span class="dica">Turma que já tinha aula antes de entrar no sistema: informe aqui quantas horas já foram dadas antes do cadastro. Some direto no progresso do curso, sem precisar lançar chamada retroativa.</span></div>
+          ` : ''}
+
           <div class="campo col-2"><label>Observação</label>
             <textarea id="tf-obs" rows="2">${ed ? UI.escapar(turma.observacao || '') : ''}</textarea></div>
         </div>`,
@@ -674,6 +681,7 @@ window.PaginaTurmas = (function () {
         conferirVagas();
       },
       aoConfirmar: async (el) => {
+        const campoHorasAbonadas = el.querySelector('#tf-horas-abonadas');
         const corpo = {
           curso_id: el.querySelector('#tf-curso').value,
           nome: el.querySelector('#tf-nome').value,
@@ -687,6 +695,7 @@ window.PaginaTurmas = (function () {
           horarios,
           instrutores,
           status: el.querySelector('#tf-status').value,
+          ...(campoHorasAbonadas ? { horas_abonadas: campoHorasAbonadas.value } : {}),
         };
         try {
           if (ed) await API.put(`/api/turmas/${turma.id}`, corpo);

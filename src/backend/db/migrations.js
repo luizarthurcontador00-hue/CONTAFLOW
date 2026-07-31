@@ -1667,6 +1667,21 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 44,
+    name: 'turma-horas-abonadas',
+    up(db) {
+      db.exec(`
+        -- Turma antiga, cadastrada no sistema depois de já ter dado aula
+        -- (ex.: comecou em papel meses atras): o calendario so existe a
+        -- partir da data em que a turma entrou no sistema, entao o progresso
+        -- automatico (que soma os encontros do calendario) fica menor que a
+        -- realidade. Este numero e um abono manual de horas -- soma direto
+        -- no progresso, sem inventar encontro/chamada retroativos.
+        ALTER TABLE turmas ADD COLUMN horas_abonadas REAL NOT NULL DEFAULT 0;
+      `);
+    },
+  },
 ];
 
 /**

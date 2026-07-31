@@ -161,6 +161,11 @@ function validar(dados, horarios) {
   const porAluno = Math.max(1, Number(dados.instrumentos_por_aluno) || 1);
   const status = STATUS_TURMA.includes(dados.status) ? dados.status : 'aberta';
 
+  const horasAbonadas = Number(dados.horas_abonadas);
+  if (dados.horas_abonadas !== undefined && (Number.isNaN(horasAbonadas) || horasAbonadas < 0)) {
+    throw new AppError('As horas abonadas precisam ser um número maior ou igual a zero.');
+  }
+
   return {
     curso_id: cursoId,
     nome,
@@ -172,6 +177,7 @@ function validar(dados, horarios) {
     periodo_fim: fim,
     status,
     observacao: (dados.observacao || '').trim() || null,
+    horas_abonadas: Number.isNaN(horasAbonadas) ? 0 : horasAbonadas,
   };
 }
 
@@ -237,9 +243,9 @@ function criar(dados) {
   const criarTudo = db.transaction(() => {
     const info = db.prepare(`
       INSERT INTO turmas (curso_id, nome, instrumentos_por_aluno, vagas, sala,
-        periodo_inicio, periodo_fim, status, observacao)
+        periodo_inicio, periodo_fim, status, observacao, horas_abonadas)
       VALUES (@curso_id, @nome, @instrumentos_por_aluno, @vagas, @sala,
-        @periodo_inicio, @periodo_fim, @status, @observacao)
+        @periodo_inicio, @periodo_fim, @status, @observacao, @horas_abonadas)
     `).run(d);
     const turmaId = info.lastInsertRowid;
     gravarHorarios(db, turmaId, horarios);
@@ -271,7 +277,8 @@ function atualizar(id, dados) {
     db.prepare(`
       UPDATE turmas SET curso_id=@curso_id, nome=@nome,
         instrumentos_por_aluno=@instrumentos_por_aluno, vagas=@vagas, sala=@sala,
-        periodo_inicio=@periodo_inicio, periodo_fim=@periodo_fim, status=@status, observacao=@observacao
+        periodo_inicio=@periodo_inicio, periodo_fim=@periodo_fim, status=@status, observacao=@observacao,
+        horas_abonadas=@horas_abonadas
       WHERE id=@id
     `).run({ ...d, id });
     if (dados.horarios) gravarHorarios(db, id, horarios);
@@ -765,12 +772,17 @@ function progressoTurma(id) {
     SELECT hora_inicio, hora_fim FROM agendamentos
     WHERE turma_id = ? AND data <= ? AND suspensa = 0
   `).all(id, hoje);
-  const horasDadas = encontros.reduce((s, e) => s + duracaoHoras(e), 0);
+  // Turma antiga que ja tinha aula antes de entrar no sistema: o calendario
+  // so comeca a existir a partir de quando ela foi cadastrada, entao
+  // "horas_abonadas" e o credito manual pras aulas de antes (nao inventa
+  // encontro nem chamada retroativos, so soma no total).
+  const horasDadas = encontros.reduce((s, e) => s + duracaoHoras(e), 0) + Number(turma.horas_abonadas || 0);
   const cargaHoraria = Number(turma.curso_carga_horaria);
   const percentual = Math.min(100, Math.round((horasDadas / cargaHoraria) * 100));
   return {
     carga_horaria: cargaHoraria,
     horas_dadas: Math.round(horasDadas * 100) / 100,
+    horas_abonadas: Number(turma.horas_abonadas || 0),
     horas_restantes: Math.max(0, Math.round((cargaHoraria - horasDadas) * 100) / 100),
     percentual,
   };
