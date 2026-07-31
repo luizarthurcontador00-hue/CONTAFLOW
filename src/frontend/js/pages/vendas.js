@@ -12,6 +12,7 @@ window.PaginaVendas = (function () {
   };
   const FORMAS_DEVOLUCAO = { dinheiro: 'Dinheiro', pix: 'PIX', cartao_credito: 'Cartão crédito', cartao_debito: 'Cartão débito' };
   const arred = (v) => Math.round(Number(v) * 100) / 100;
+  const ehInstituto = () => window.__ramoServico === 'instituto';
 
   async function render(container) {
     const hoje = new Date().toISOString().slice(0, 10);
@@ -120,8 +121,8 @@ window.PaginaVendas = (function () {
     Modal.abrir({
       titulo: 'Detalhes da venda', tamanho: 'modal--grande', corpoHTML: corpo, mostrarConfirmar: false,
       aoAbrir: (el) => {
+        const foot = el.querySelector('.modal__foot');
         if (v.status === 'concluida') {
-          const foot = el.querySelector('.modal__foot');
           if (temDisponivel) {
             const btnDev = document.createElement('button');
             btnDev.className = 'btn btn--secundario'; btnDev.textContent = '↩️ Devolver / trocar item';
@@ -137,6 +138,20 @@ window.PaginaVendas = (function () {
             catch (e) { UI.erro(e.message); }
           });
           foot.insertBefore(btn, foot.firstChild);
+        }
+        if (ehInstituto()) {
+          // So no instituto (que nao usa venda de verdade) faz sentido apagar
+          // de vez: fora dele a venda cancelada continua valendo como
+          // registro/auditoria, mesmo sem efeito no estoque/financeiro.
+          const btnExcluir = document.createElement('button');
+          btnExcluir.className = 'btn btn--perigo'; btnExcluir.textContent = '🗑️ Excluir venda de teste';
+          btnExcluir.addEventListener('click', async () => {
+            const ok = await UI.confirmar('Excluir esta venda de teste? Isso apaga o registro de vez, sem volta.', { titulo: 'Excluir venda', textoConfirmar: 'Excluir' });
+            if (!ok) return;
+            try { await API.del(`/api/vendas/${v.id}`); UI.sucesso('Venda excluída.'); el.remove(); await listar(); }
+            catch (e) { UI.erro(e.message); }
+          });
+          foot.insertBefore(btnExcluir, foot.firstChild);
         }
         ligarAcoesFiscais(el, v.id);
       },

@@ -180,6 +180,31 @@ function criarVenda(dados) {
   return venda;
 }
 
+/**
+ * Reverte exatamente as movimentacoes geradas na venda (cobre produtos
+ * simples e componentes de kits, sem depender da composicao atual do kit —
+ * que pode ter mudado desde a venda) e os efeitos no financeiro. Usado
+ * tanto no cancelamento quanto na exclusao (que cancela antes de apagar).
+ */
+function reverterEfeitos(db, id) {
+  const movs = db.prepare(
+    "SELECT * FROM movimentacoes_estoque WHERE referencia_id = ? AND origem = 'venda' AND tipo = 'saida'"
+  ).all(id);
+  for (const m of movs) {
+    registrarMovimentacao(db, {
+      produto_id: m.produto_id,
+      tipo: 'entrada',
+      quantidade: m.quantidade,
+      custo_unitario: m.custo_unitario,
+      origem: 'estorno',
+      referencia_id: id,
+      observacao: 'Estorno da venda #' + id,
+    });
+  }
+  db.prepare("DELETE FROM contas_financeiras_mov WHERE origem = 'venda' AND referencia_id = ?").run(id);
+  db.prepare("UPDATE contas_receber SET status = 'cancelada' WHERE venda_id = ? AND status IN ('pendente','recebido')").run(id);
+}
+
 function cancelarVenda(id, motivo) {
   const db = getDb();
   const venda = db.prepare('SELECT * FROM vendas WHERE id = ?').get(id);
@@ -187,32 +212,32 @@ function cancelarVenda(id, motivo) {
   if (venda.status === 'cancelada') throw new AppError('Esta venda ja esta cancelada.');
 
   const tx = db.transaction(() => {
-    // Reverte exatamente as movimentacoes geradas na venda (cobre produtos
-    // simples e componentes de kits), sem depender da composicao atual do
-    // kit — que pode ter mudado desde a venda.
-    const movs = db.prepare(
-      "SELECT * FROM movimentacoes_estoque WHERE referencia_id = ? AND origem = 'venda' AND tipo = 'saida'"
-    ).all(id);
-    for (const m of movs) {
-      registrarMovimentacao(db, {
-        produto_id: m.produto_id,
-        tipo: 'entrada',
-        quantidade: m.quantidade,
-        custo_unitario: m.custo_unitario,
-        origem: 'estorno',
-        referencia_id: id,
-        observacao: 'Estorno da venda #' + id,
-      });
-    }
-    // Estorna os saldos das contas financeiras alimentados por esta venda.
-    db.prepare("DELETE FROM contas_financeiras_mov WHERE origem = 'venda' AND referencia_id = ?").run(id);
-    // Cancela contas a receber vinculadas (a prazo pendentes e o registro da parte a vista).
-    db.prepare("UPDATE contas_receber SET status = 'cancelada' WHERE venda_id = ? AND status IN ('pendente','recebido')").run(id);
+    reverterEfeitos(db, id);
     db.prepare("UPDATE vendas SET status = 'cancelada', observacao = COALESCE(observacao,'') || ? WHERE id = ?")
       .run(motivo ? ` | Cancelada: ${motivo}` : ' | Cancelada', id);
   });
   tx();
   return obterVenda(id);
+}
+
+/**
+ * Apaga a venda de vez — pensado para limpar venda de teste (ex.: quem
+ * testou o PDV antes de decidir usar o modo instituto, que nao usa venda).
+ * Se ainda estiver concluida, reverte estoque e financeiro antes de apagar
+ * (mesma logica do cancelamento); o resto (itens, pagamentos, devolucoes,
+ * vinculo com contas a receber e notas) e resolvido pelas chaves
+ * estrangeiras (ON DELETE CASCADE/SET NULL).
+ */
+function excluirVenda(id) {
+  const db = getDb();
+  const venda = db.prepare('SELECT * FROM vendas WHERE id = ?').get(id);
+  if (!venda) throw new AppError('Venda nao encontrada.', 404);
+
+  const tx = db.transaction(() => {
+    if (venda.status !== 'cancelada') reverterEfeitos(db, id);
+    db.prepare('DELETE FROM vendas WHERE id = ?').run(id);
+  });
+  tx();
 }
 
 function obterVenda(id) {
@@ -254,6 +279,7 @@ module.exports = {
   buscarProduto,
   criarVenda,
   cancelarVenda,
+  excluirVenda,
   obterVenda,
   listarVendas,
 };

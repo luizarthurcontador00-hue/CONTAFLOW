@@ -33,4 +33,9 @@ router.post('/:id/cancelar', asyncHandler((req, res) => {
   res.json(vendas.cancelarVenda(req.params.id, req.body && req.body.motivo));
 }));
 
+router.delete('/:id', asyncHandler((req, res) => {
+  vendas.excluirVenda(req.params.id);
+  res.status(204).end();
+}));
+
 module.exports = router;

@@ -17,6 +17,10 @@ window.PaginaConfiguracoes = (function () {
     ['aparencia', '🎨 Aparência'],
     ['google', '📅 Google Agenda'],
     ['avisos', '🔔 Avisos automáticos'],
+    // So no instituto: quem migrou de comercio/servico pode ter vendas de
+    // teste do PDV que nunca vai usar de verdade — aqui da pra apagar sem
+    // precisar reabrir o modulo de Vendas (que fica escondido do instituto).
+    ...(ehInstituto() ? [['manutencao', '🧹 Dados de teste']] : []),
   ];
 
   async function render(container) {
@@ -49,6 +53,7 @@ window.PaginaConfiguracoes = (function () {
     else if (abaAtual === 'aparencia') renderAparencia(alvo, cfg, container);
     else if (abaAtual === 'google') renderGoogleAgenda(alvo);
     else if (abaAtual === 'avisos') renderAvisos(alvo);
+    else if (abaAtual === 'manutencao') renderManutencao(alvo);
     else renderLoja(alvo, cfg, container);
   }
 
@@ -569,6 +574,56 @@ window.PaginaConfiguracoes = (function () {
     });
 
     carregar();
+  }
+
+  // ------------------------ Dados de teste (instituto) ------------------------
+  /**
+   * O modulo de Vendas fica escondido do menu no instituto (nao existe venda
+   * sem fins lucrativos), mas quem migrou de comercio/servico para instituto
+   * pode ter vendas de teste do PDV que nunca vai usar de verdade. Como a
+   * tela de Vendas nao e mais navegavel, essa e a unica porta pra apagar
+   * esse resto sem reabrir o modulo inteiro.
+   */
+  async function renderManutencao(alvo) {
+    alvo.innerHTML = `
+      <div class="card" style="max-width:780px">
+        <h3 style="margin-top:0">🧹 Vendas de teste</h3>
+        <p class="dica">Vendas feitas no PDV antes de configurar o instituto (que não usa venda). Excluir aqui devolve o estoque e desfaz qualquer lançamento financeiro gerado — e apaga o registro de vez, sem volta.</p>
+        <div id="mnt-lista" class="mt-16">Carregando…</div>
+      </div>`;
+
+    let vendas;
+    try { vendas = await API.get('/api/vendas'); }
+    catch (e) { alvo.querySelector('#mnt-lista').innerHTML = UI.escapar(e.message); return; }
+
+    desenharListaVendas(alvo, vendas);
+  }
+
+  function desenharListaVendas(alvo, vendas) {
+    const lista = alvo.querySelector('#mnt-lista');
+    if (!vendas.length) { lista.innerHTML = '<p class="muted">Nenhuma venda no sistema. 👍</p>'; return; }
+    lista.innerHTML = `<table class="tabela">
+      <thead><tr><th>#</th><th>Data</th><th>Itens</th><th>Total</th><th>Status</th><th></th></tr></thead>
+      <tbody>${vendas.map((v) => `<tr>
+        <td>${v.id}</td>
+        <td>${UI.dataHora(v.data)}</td>
+        <td>${v.total_itens}</td>
+        <td>${UI.moeda(v.valor_total)}</td>
+        <td>${v.status === 'concluida' ? '<span class="badge badge--ok">Concluída</span>' : '<span class="badge badge--muted">Cancelada</span>'}</td>
+        <td style="text-align:right"><button class="btn btn--perigo" data-mnt-excluir="${v.id}">🗑️ Excluir</button></td>
+      </tr>`).join('')}</tbody></table>`;
+
+    lista.querySelectorAll('[data-mnt-excluir]').forEach((b) => b.addEventListener('click', async () => {
+      const ok = await UI.confirmar('Excluir esta venda de teste? Devolve o estoque e desfaz o financeiro dela; o registro some de vez.', { titulo: 'Excluir venda', textoConfirmar: 'Excluir' });
+      if (!ok) return;
+      try {
+        await API.del(`/api/vendas/${b.dataset.mntExcluir}`);
+        UI.sucesso('Venda excluída.');
+        const restantes = vendas.filter((v) => String(v.id) !== b.dataset.mntExcluir);
+        vendas.length = 0; vendas.push(...restantes);
+        desenharListaVendas(alvo, vendas);
+      } catch (e) { UI.erro(e.message); }
+    }));
   }
 
   return { titulo: 'Configurações', render };
