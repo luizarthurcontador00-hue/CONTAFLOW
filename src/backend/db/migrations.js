@@ -1564,6 +1564,48 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 38,
+    name: 'tarefas-fixas',
+    up(db) {
+      db.exec(`
+        -- Tarefa que se repete todo mes (ex.: prestar contas, pagar boleto de
+        -- aluguel, fazer a folha de pagamento) — mesmo espirito da conta fixa
+        -- do financeiro: o modelo fica aqui, e uma tarefa de verdade e gerada
+        -- a cada mes pra entrar no quadro normal.
+        CREATE TABLE IF NOT EXISTS tarefas_fixas (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          titulo          TEXT NOT NULL,
+          descricao       TEXT,
+          responsavel_id  INTEGER REFERENCES profissionais(id) ON DELETE SET NULL,
+          dia_mes         INTEGER NOT NULL,
+          ativa           INTEGER NOT NULL DEFAULT 1,
+          criada_em       TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        ALTER TABLE tarefas ADD COLUMN tarefa_fixa_id INTEGER REFERENCES tarefas_fixas(id) ON DELETE SET NULL;
+      `);
+    },
+  },
+  {
+    version: 39,
+    name: 'objetivos',
+    up(db) {
+      db.exec(`
+        -- Objetivo pra acompanhar (ex.: abrir CNPJ, comprar instrumento,
+        -- abrir turma nova). Valor e opcional: so entra na conta de "o que
+        -- da pra fazer com o saldo em caixa" quem tiver valor cadastrado.
+        CREATE TABLE IF NOT EXISTS objetivos (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          titulo        TEXT NOT NULL,
+          descricao     TEXT,
+          valor         REAL,
+          status        TEXT NOT NULL DEFAULT 'aberto', -- aberto | concluido | cancelado
+          criado_em     TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+          concluido_em  TEXT
+        );
+      `);
+    },
+  },
 ];
 
 /**

@@ -133,6 +133,7 @@ function createApp() {
   montarRota(app, '/api/crm', './routes/crm');
   montarRota(app, '/api/lembretes', './routes/lembretes');
   montarRota(app, '/api/tarefas', './routes/tarefas');
+  montarRota(app, '/api/objetivos', './routes/objetivos');
   montarRota(app, '/api/whatsapp', './routes/whatsapp');
   montarRota(app, '/api/ordens', './routes/ordens');
   montarRota(app, '/api/agenda', './routes/agenda');
