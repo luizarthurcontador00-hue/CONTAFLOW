@@ -352,10 +352,15 @@ function painelInstituto() {
       alunos_ativos: alunosAtivos,
       alunos_novos_mes: alunosNovosMes,
       fila_espera: filaEspera,
-      turmas: turmas.map((t) => ({
-        id: t.id, nome: t.nome, curso: t.curso_nome, vagas: t.vagas,
-        matriculados: t.matriculados, na_fila: t.na_fila, instrutores: t.instrutores,
-      })),
+      turmas: turmas.map((t) => {
+        // eslint-disable-next-line global-require
+        const progresso = require('./turmasService').progressoTurma(t.id);
+        return {
+          id: t.id, nome: t.nome, curso: t.curso_nome, vagas: t.vagas,
+          matriculados: t.matriculados, na_fila: t.na_fila, instrutores: t.instrutores,
+          progresso_pct: progresso.percentual,
+        };
+      }),
     },
     aulas: {
       hoje: aulasHoje.map((a) => ({

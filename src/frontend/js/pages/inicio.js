@@ -274,14 +274,21 @@ window.PaginaInicio = (function () {
         <div class="flex gap-12" style="flex-wrap:wrap">${avisos.join(' ')}</div>
       </div>
       <div class="rolagem mt-16"><table class="tabela">
-        <thead><tr><th>Turma</th><th>Ocupação</th><th style="width:140px"></th></tr></thead>
+        <thead><tr><th>Turma</th><th>Ocupação</th><th style="width:140px"></th><th>Progresso do curso</th></tr></thead>
         <tbody>${e.turmas.map((t) => {
           const pct = t.vagas > 0 ? Math.min(100, Math.round((t.matriculados / t.vagas) * 100)) : 0;
           const cor = pct >= 100 ? 'var(--perigo)' : pct >= 80 ? 'var(--alerta,#b45309)' : 'var(--sucesso)';
+          const progresso = t.progresso_pct;
+          const corProgresso = progresso >= 100 ? 'var(--sucesso)' : 'var(--primaria)';
           return `<tr class="pi-clicavel" data-ir="turmas">
             <td>${UI.escapar(t.nome)}<div class="dica">${UI.escapar(t.curso || '—')}${t.na_fila ? ` · ${t.na_fila} na fila` : ''}${t.instrutores ? '' : ' · <strong style="color:var(--perigo)">sem instrutor</strong>'}</div></td>
             <td style="white-space:nowrap">${t.matriculados}/${t.vagas}</td>
             <td><div class="pi-barra"><span style="width:${pct}%;background:${cor}"></span></div></td>
+            <td style="white-space:nowrap">${progresso == null ? '<span class="dica">—</span>'
+              : `<div class="flex gap-12" style="align-items:center">
+                  <div class="pi-barra" style="width:60px"><span style="width:${progresso}%;background:${corProgresso}"></span></div>
+                  <span class="dica">${progresso}%</span>
+                </div>`}</td>
           </tr>`;
         }).join('')}</tbody>
       </table></div>
