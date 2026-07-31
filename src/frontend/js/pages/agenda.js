@@ -4,6 +4,9 @@
  * Agenda: agendamentos do dia por profissional, com status, faturamento
  * (gera a venda do serviço) e envio de confirmação por WhatsApp.
  * Cadastro da equipe (profissionais) no mesmo módulo.
+ * No instituto a agenda só mostra as aulas (geradas pelas turmas ou avulsas):
+ * sem faturar, sem "equipe" (isso é a página Voluntários) e sem aula fixa
+ * separada, porque a recorrência já vem da turma.
  */
 window.PaginaAgenda = (function () {
   let dia = new Date().toISOString().slice(0, 10);
@@ -27,9 +30,11 @@ window.PaginaAgenda = (function () {
   // Num instituto sem fins lucrativos a aula nao vira venda: nao ha o que
   // faturar, nem valor ou servico a cobrar do aluno.
   const ehInstituto = () => window.__ramoServico === 'instituto';
-  const rCliente = (m) => (ehProfessor() ? (m ? 'Aluno' : 'aluno') : (m ? 'Cliente' : 'cliente'));
-  const rServico = (m) => (ehProfessor() ? (m ? 'Matéria' : 'matéria') : (m ? 'Serviço' : 'serviço'));
-  const rAula = (m) => (ehProfessor() ? (m ? 'Aula' : 'aula') : (m ? 'Agendamento' : 'agendamento'));
+  const rCliente = (m) => ((ehProfessor() || ehInstituto()) ? (m ? 'Aluno' : 'aluno') : (m ? 'Cliente' : 'cliente'));
+  const rServico = (m) => (ehInstituto() ? (m ? 'Atividade' : 'atividade') : ehProfessor() ? (m ? 'Matéria' : 'matéria') : (m ? 'Serviço' : 'serviço'));
+  const rAula = (m) => ((ehProfessor() || ehInstituto()) ? (m ? 'Aula' : 'aula') : (m ? 'Agendamento' : 'agendamento'));
+  const rProf = (m) => (ehInstituto() ? (m ? 'Instrutor' : 'instrutor') : (m ? 'Profissional' : 'profissional'));
+  const rProfs = () => (ehInstituto() ? 'instrutores' : 'profissionais');
 
   function badge(s) { const [t, c] = STATUS[s] || [s, 'muted']; return `<span class="badge badge--${c}">${t}</span>`; }
   function mudarDia(delta) {
@@ -59,13 +64,14 @@ window.PaginaAgenda = (function () {
       API.get('/api/clientes').catch(() => []),
       API.get('/api/produtos?eh_servico=1').catch(() => []),
     ]);
-    await API.post('/api/agenda/aulas-recorrentes/gerar-pendentes', {}).catch(() => {});
+    if (!ehInstituto()) await API.post('/api/agenda/aulas-recorrentes/gerar-pendentes', {}).catch(() => {});
+    if (ehInstituto() && vista === 'recorrentes') vista = 'dia';
 
     container.innerHTML = `
       <div class="subtabs">
         <button class="subtab ${vista === 'dia' ? 'subtab--ativa' : ''}" data-vista="dia">📋 Dia</button>
         <button class="subtab ${vista === 'mes' ? 'subtab--ativa' : ''}" data-vista="mes">📆 Mês</button>
-        <button class="subtab ${vista === 'recorrentes' ? 'subtab--ativa' : ''}" data-vista="recorrentes">🔁 ${rAula(true)} fixa</button>
+        ${ehInstituto() ? '' : `<button class="subtab ${vista === 'recorrentes' ? 'subtab--ativa' : ''}" data-vista="recorrentes">🔁 ${rAula(true)} fixa</button>`}
       </div>
       <div id="ag-corpo"></div>`;
     container.querySelectorAll('[data-vista]').forEach((b) => b.addEventListener('click', () => {
@@ -92,11 +98,11 @@ window.PaginaAgenda = (function () {
           <button class="btn btn--secundario" id="ag-hoje">Hoje</button>
         </div>
         <select id="ag-prof-filtro">
-          <option value="">Todos os profissionais</option>
+          <option value="">Todos os ${rProfs()}</option>
           ${profissionais.map((p) => `<option value="${p.id}" ${String(filtroProf) === String(p.id) ? 'selected' : ''}>${UI.escapar(p.nome)}</option>`).join('')}
         </select>
         <div class="cresce"></div>
-        <button class="btn btn--secundario" id="ag-equipe">👥 Equipe</button>
+        ${ehInstituto() ? '' : '<button class="btn btn--secundario" id="ag-equipe">👥 Equipe</button>'}
         <button class="btn" id="ag-novo">+ Nov${rAula() === 'aula' ? 'a' : 'o'} ${rAula()}</button>
       </div>
       <div id="ag-resumo"></div>
@@ -107,7 +113,8 @@ window.PaginaAgenda = (function () {
     alvo.querySelector('#ag-hoje').addEventListener('click', () => { dia = new Date().toISOString().slice(0, 10); renderDia(); });
     alvo.querySelector('#ag-data').addEventListener('change', (e) => { dia = e.target.value || dia; renderDia(); });
     alvo.querySelector('#ag-prof-filtro').addEventListener('change', (e) => { filtroProf = e.target.value; listar(); });
-    alvo.querySelector('#ag-equipe').addEventListener('click', gerenciarEquipe);
+    const btnEquipe = alvo.querySelector('#ag-equipe');
+    if (btnEquipe) btnEquipe.addEventListener('click', gerenciarEquipe);
     alvo.querySelector('#ag-novo').addEventListener('click', () => abrirForm());
 
     await listar();
@@ -180,11 +187,11 @@ window.PaginaAgenda = (function () {
           <button class="btn btn--secundario" id="ag-mes-hoje">Hoje</button>
         </div>
         <select id="ag-prof-filtro-mes">
-          <option value="">Todos os profissionais</option>
+          <option value="">Todos os ${rProfs()}</option>
           ${profissionais.map((p) => `<option value="${p.id}" ${String(filtroProf) === String(p.id) ? 'selected' : ''}>${UI.escapar(p.nome)}</option>`).join('')}
         </select>
         <div class="cresce"></div>
-        <button class="btn btn--secundario" id="ag-equipe-mes">👥 Equipe</button>
+        ${ehInstituto() ? '' : '<button class="btn btn--secundario" id="ag-equipe-mes">👥 Equipe</button>'}
         <button class="btn" id="ag-novo-mes">+ Nov${rAula() === 'aula' ? 'a' : 'o'} ${rAula()}</button>
       </div>
       <div id="ag-calendario"><div class="card">Carregando…</div></div>`;
@@ -193,7 +200,8 @@ window.PaginaAgenda = (function () {
     alvo.querySelector('#ag-mes-prox').addEventListener('click', () => { mesAtual = mudarMes(mesAtual, 1); renderMes(); });
     alvo.querySelector('#ag-mes-hoje').addEventListener('click', () => { mesAtual = new Date().toISOString().slice(0, 7); renderMes(); });
     alvo.querySelector('#ag-prof-filtro-mes').addEventListener('change', (e) => { filtroProf = e.target.value; carregarCalendario(); });
-    alvo.querySelector('#ag-equipe-mes').addEventListener('click', gerenciarEquipe);
+    const btnEquipeMes = alvo.querySelector('#ag-equipe-mes');
+    if (btnEquipeMes) btnEquipeMes.addEventListener('click', gerenciarEquipe);
     alvo.querySelector('#ag-novo-mes').addEventListener('click', () => abrirForm());
 
     await carregarCalendario();
@@ -395,13 +403,14 @@ window.PaginaAgenda = (function () {
           <div class="campo"><label>Data *</label><input name="data" type="date" value="${a.data || dia}" required /></div>
           <div class="campo"><label>Hora início *</label><input name="hora_inicio" type="time" value="${a.hora_inicio || '09:00'}" required /></div>
           <div class="campo"><label>Hora fim <span class="dica">(automático pela duração)</span></label><input name="hora_fim" type="time" value="${a.hora_fim || ''}" /></div>
-          <div class="campo"><label>Profissional</label><select name="profissional_id">
+          <div class="campo"><label>${rProf(true)}</label><select name="profissional_id">
             <option value="">—</option>${profissionais.map((p) => `<option value="${p.id}" ${String(a.profissional_id) === String(p.id) ? 'selected' : ''}>${UI.escapar(p.nome)}</option>`).join('')}
           </select></div>
+          ${ehInstituto() ? '' : `
           <div class="campo"><label>${rServico(true)}</label><select name="produto_id" id="ag-serv">
             <option value="">— selecione —</option>${servicos.map((s) => `<option value="${s.id}" data-preco="${s.preco_venda}" ${String(a.produto_id) === String(s.id) ? 'selected' : ''}>${UI.escapar(s.nome)}</option>`).join('')}
           </select><span class="dica">Necessário para faturar o atendimento.</span></div>
-          <div class="campo"><label>Valor (R$)</label><input name="valor" id="ag-valor" type="number" step="0.01" min="0" value="${a.valor != null ? a.valor : ''}" /></div>
+          <div class="campo"><label>Valor (R$)</label><input name="valor" id="ag-valor" type="number" step="0.01" min="0" value="${a.valor != null ? a.valor : ''}" /></div>`}
           <div class="campo"><label>${rCliente(true)} (cadastrado)</label><select name="cliente_id" id="ag-cli">
             <option value="">— avulso —</option>${clientes.map((c) => `<option value="${c.id}" data-tel="${UI.escapar(c.telefone || '')}" ${String(a.cliente_id) === String(c.id) ? 'selected' : ''}>${UI.escapar(c.nome)}</option>`).join('')}
           </select></div>
@@ -413,7 +422,7 @@ window.PaginaAgenda = (function () {
       aoAbrir: (el) => {
         const serv = el.querySelector('#ag-serv');
         const valor = el.querySelector('#ag-valor');
-        serv.addEventListener('change', () => {
+        if (serv && valor) serv.addEventListener('change', () => {
           const opt = serv.selectedOptions[0];
           if (opt && opt.dataset.preco && !valor.value) valor.value = opt.dataset.preco;
         });

@@ -56,7 +56,7 @@ window.PaginaClientes = (function () {
         <div class="campo"><label>Telefone</label><input name="telefone" value="${UI.escapar(c.telefone || '')}" /></div>
         <div class="campo"><label>CPF</label><input name="cpf" value="${UI.escapar(c.cpf || '')}" /></div>
         <div class="campo"><label>E-mail</label><input name="email" type="email" value="${UI.escapar(c.email || '')}" /></div>
-        <div class="campo"><label>Limite de crédito (fiado) R$</label><input name="limite_credito" type="number" step="0.01" min="0" value="${c.limite_credito != null ? c.limite_credito : 0}" /></div>
+        ${ehInstituto() ? '' : `<div class="campo"><label>Limite de crédito (fiado) R$</label><input name="limite_credito" type="number" step="0.01" min="0" value="${c.limite_credito != null ? c.limite_credito : 0}" /></div>`}
         ${window.__ramoServico === 'instituto' ? `
         <div class="campo"><label>Natureza do cadastro</label>
           <select name="natureza">
