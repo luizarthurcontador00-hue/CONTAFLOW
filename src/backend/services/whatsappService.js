@@ -1063,6 +1063,14 @@ function iniciarAgendador() {
   if (timerAgendador) return;
   timerAgendador = setInterval(() => {
     processarAgendadasDevidas().catch((e) => console.error('[whatsapp] erro no agendador de mensagens:', descreverErro(e)));
+    // Avisos automaticos do instituto (aula de amanha, instrumento atrasado).
+    try {
+      // eslint-disable-next-line global-require
+      require('./avisosWhatsappService').processar()
+        .catch((e) => console.error('[avisos] erro ao processar avisos automaticos:', e.message));
+    } catch (e) {
+      console.error('[avisos] modulo de avisos indisponivel:', e.message);
+    }
   }, 60000);
   if (timerAgendador.unref) timerAgendador.unref(); // nao mantem o processo vivo so por causa desse timer
 }

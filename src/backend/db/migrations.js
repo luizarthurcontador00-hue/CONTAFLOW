@@ -1385,6 +1385,80 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 33,
+    name: 'instituto-lista-espera-atas-e-autorizacoes',
+    up(db) {
+      db.exec(`
+        -- Quem procurou o instituto quando NAO havia turma aberta do curso.
+        -- Sem isso essa pessoa se perde: e captacao de aluno praticamente de
+        -- graca, porque ela ja demonstrou interesse.
+        CREATE TABLE IF NOT EXISTS lista_espera (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          aluno_id      INTEGER REFERENCES clientes(id) ON DELETE SET NULL, -- ja cadastrado
+          nome          TEXT,                                              -- ainda nao cadastrado
+          telefone      TEXT,
+          responsavel_nome TEXT,
+          curso_id      INTEGER REFERENCES cursos(id) ON DELETE CASCADE,
+          preferencia   TEXT,                                              -- "manha", "noite", "sabado"...
+          observacao    TEXT,
+          status        TEXT NOT NULL DEFAULT 'aguardando', -- aguardando | contatado | matriculado | desistiu
+          contatado_em  TEXT,
+          matricula_id  INTEGER REFERENCES matriculas(id) ON DELETE SET NULL,
+          criado_em     TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_lista_espera_curso ON lista_espera(curso_id);
+        CREATE INDEX IF NOT EXISTS idx_lista_espera_status ON lista_espera(status);
+
+        -- Ata de reuniao: associacao precisa registrar o que foi deliberado.
+        CREATE TABLE IF NOT EXISTS atas (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          titulo       TEXT NOT NULL,
+          data         TEXT NOT NULL DEFAULT (date('now','localtime')),
+          hora         TEXT,
+          local        TEXT,
+          pauta        TEXT,
+          deliberacoes TEXT,
+          observacao   TEXT,
+          criado_em    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_atas_data ON atas(data);
+
+        CREATE TABLE IF NOT EXISTS atas_participantes (
+          id        INTEGER PRIMARY KEY AUTOINCREMENT,
+          ata_id    INTEGER NOT NULL REFERENCES atas(id) ON DELETE CASCADE,
+          membro_id INTEGER REFERENCES membros_instituto(id) ON DELETE SET NULL,
+          nome      TEXT NOT NULL,   -- guarda o nome mesmo se o membro sair depois
+          presente  INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE INDEX IF NOT EXISTS idx_atas_participantes ON atas_participantes(ata_id);
+
+        -- Termo de autorizacao (uso de imagem, saida). Menor de idade sem
+        -- termo assinado e um risco real para o instituto.
+        CREATE TABLE IF NOT EXISTS autorizacoes (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          aluno_id     INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+          tipo         TEXT NOT NULL DEFAULT 'imagem', -- imagem | saida | outro
+          entregue     INTEGER NOT NULL DEFAULT 0,
+          data_entrega TEXT,
+          observacao   TEXT,
+          criado_em    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+          UNIQUE (aluno_id, tipo)
+        );
+        CREATE INDEX IF NOT EXISTS idx_autorizacoes_aluno ON autorizacoes(aluno_id);
+
+        -- Avisos ja enviados por WhatsApp, para nao repetir o mesmo lembrete
+        -- (confirmacao de aula, cobranca de instrumento atrasado).
+        CREATE TABLE IF NOT EXISTS avisos_enviados (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          tipo       TEXT NOT NULL,      -- aula_amanha | emprestimo_atrasado
+          referencia TEXT NOT NULL,      -- chave do que foi avisado (ex.: "encontro:12:aluno:3")
+          enviado_em TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+          UNIQUE (tipo, referencia)
+        );
+      `);
+    },
+  },
 ];
 
 /**

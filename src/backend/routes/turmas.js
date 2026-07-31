@@ -12,6 +12,10 @@ router.get('/alunos-em-risco', asyncHandler((req, res) => res.json(presencas.alu
 router.get('/horas-voluntariado', asyncHandler((req, res) => res.json(presencas.horasVoluntariado(req.query))));
 router.get('/encontros', asyncHandler((req, res) => res.json(presencas.listarEncontros(req.query))));
 
+// --------------------------- Substituto ---------------------------
+router.get('/encontros/:agendamentoId/substitutos', asyncHandler((req, res) => res.json(turmas.sugerirSubstitutos(req.params.agendamentoId))));
+router.post('/encontros/:agendamentoId/instrutor', asyncHandler((req, res) => res.json(turmas.definirInstrutorDoEncontro(req.params.agendamentoId, (req.body || {}).profissional_id))));
+
 // ------------------------------- Chamada -------------------------------
 router.get('/encontros/:agendamentoId/chamada', asyncHandler((req, res) => res.json(presencas.folhaDeChamada(req.params.agendamentoId))));
 router.post('/encontros/:agendamentoId/chamada', asyncHandler((req, res) => res.json(presencas.registrarChamada(req.params.agendamentoId, req.body || {}))));

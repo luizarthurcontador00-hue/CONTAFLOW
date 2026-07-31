@@ -13,6 +13,7 @@ window.PaginaConfiguracoes = (function () {
     ['fiscal', '🧾 Fiscal'],
     ['aparencia', '🎨 Aparência'],
     ['google', '📅 Google Agenda'],
+    ['avisos', '🔔 Avisos automáticos'],
   ];
 
   async function render(container) {
@@ -40,6 +41,7 @@ window.PaginaConfiguracoes = (function () {
     else if (abaAtual === 'fiscal') renderFiscal(alvo, cfg);
     else if (abaAtual === 'aparencia') renderAparencia(alvo, cfg, container);
     else if (abaAtual === 'google') renderGoogleAgenda(alvo);
+    else if (abaAtual === 'avisos') renderAvisos(alvo);
     else renderLoja(alvo, cfg, container);
   }
 
@@ -400,6 +402,64 @@ window.PaginaConfiguracoes = (function () {
     });
 
     atualizarStatusGoogle();
+  }
+
+  // ------------------------ Avisos automáticos ------------------------
+  function renderAvisos(alvo) {
+    alvo.innerHTML = `
+      <div class="card" style="max-width:640px">
+        <h3 style="margin-top:0">🔔 Avisos automáticos por WhatsApp</h3>
+        <p class="dica">O sistema pode avisar sozinho os responsáveis. Nada é enviado sem você ligar aqui — e cada aviso sai uma única vez por pessoa.</p>
+        <p class="dica" style="color:var(--alerta)">⚠️ É uma automação sobre o WhatsApp Web. Use com moderação: disparo em massa não solicitado pode fazer o WhatsApp bloquear o número do instituto.</p>
+
+        <div class="campo mt-16">
+          <label class="flex gap-12" style="align-items:center">
+            <input type="checkbox" id="av-aula" /> Confirmar a aula do dia seguinte
+          </label>
+          <span class="dica">Manda uma mensagem ao responsável na véspera, perguntando se o aluno vem. É o que mais reduz falta.</span>
+        </div>
+
+        <div class="campo mt-16">
+          <label class="flex gap-12" style="align-items:center">
+            <input type="checkbox" id="av-emprestimo" /> Cobrar instrumento não devolvido
+          </label>
+          <span class="dica">Uma vez por dia enquanto o empréstimo estiver atrasado.</span>
+        </div>
+
+        <div class="campo mt-16" style="max-width:200px">
+          <label>Horário do envio</label>
+          <input type="time" id="av-hora" />
+          <span class="dica">Os avisos saem a partir deste horário.</span>
+        </div>
+
+        <div id="av-previa" class="dica mt-16"></div>
+        <div class="campo mt-16"><button class="btn" type="button" id="av-salvar">Salvar</button></div>
+      </div>`;
+
+    async function carregar() {
+      let d;
+      try { d = await API.get('/api/avisos/whatsapp'); } catch (e) { UI.erro(e.message); return; }
+      alvo.querySelector('#av-aula').checked = !!d.aulaAtivo;
+      alvo.querySelector('#av-emprestimo').checked = !!d.emprestimoAtivo;
+      alvo.querySelector('#av-hora').value = d.hora || '09:00';
+      alvo.querySelector('#av-previa').innerHTML = (d.aulaAtivo || d.emprestimoAtivo)
+        ? `Agora mesmo sairiam: <strong>${d.aulas_amanha}</strong> aviso(s) de aula e <strong>${d.emprestimos_atrasados}</strong> cobrança(s) de instrumento.`
+        : '';
+    }
+
+    alvo.querySelector('#av-salvar').addEventListener('click', async () => {
+      try {
+        await API.put('/api/avisos/whatsapp', {
+          aulaAtivo: alvo.querySelector('#av-aula').checked,
+          emprestimoAtivo: alvo.querySelector('#av-emprestimo').checked,
+          hora: alvo.querySelector('#av-hora').value,
+        });
+        UI.sucesso('Avisos automáticos salvos.');
+        carregar();
+      } catch (e) { UI.erro(e.message); }
+    });
+
+    carregar();
   }
 
   return { titulo: 'Configurações', render };

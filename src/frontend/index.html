@@ -30,6 +30,7 @@
             <a href="#/instrumentos" data-rota="instrumentos" data-perfil="servico" class="nav-item" title="Instrumentos"><span class="nav-item__icone">🎸</span><span class="nav-item__texto">Instrumentos</span></a>
             <a href="#/voluntarios" data-rota="voluntarios" data-perfil="servico" class="nav-item" title="Voluntários"><span class="nav-item__icone">🙋</span><span class="nav-item__texto">Voluntários</span></a>
             <a href="#/membros" data-rota="membros" data-perfil="servico" class="nav-item" title="Diretoria"><span class="nav-item__icone">🏛️</span><span class="nav-item__texto">Diretoria</span></a>
+            <a href="#/autorizacoes" data-rota="autorizacoes" data-perfil="servico" class="nav-item" title="Autorizações"><span class="nav-item__icone">📄</span><span class="nav-item__texto">Autorizações</span></a>
           </div>
         </div>
 
@@ -44,6 +45,7 @@
             <a href="#/agenda" data-rota="agenda" data-perfil="servico" class="nav-item" title="Agenda"><span class="nav-item__icone">📅</span><span class="nav-item__texto">Agenda</span></a>
             <a href="#/turmas" data-rota="turmas" data-perfil="servico" class="nav-item" title="Turmas"><span class="nav-item__icone">🎓</span><span class="nav-item__texto">Turmas</span></a>
             <a href="#/chamada" data-rota="chamada" data-perfil="servico" class="nav-item" title="Chamada"><span class="nav-item__icone">✔️</span><span class="nav-item__texto">Chamada</span></a>
+            <a href="#/lista-espera" data-rota="lista-espera" data-perfil="servico" class="nav-item" title="Lista de espera"><span class="nav-item__icone">🙋</span><span class="nav-item__texto">Lista de espera</span></a>
             <a href="#/ordens" data-rota="ordens" class="nav-item" title="Ordens & Orçamentos"><span class="nav-item__icone">🛠️</span><span class="nav-item__texto">Ordens/Orçam.</span></a>
             <a href="#/crm" data-rota="crm" data-perfil="servico" class="nav-item" title="CRM"><span class="nav-item__icone">📇</span><span class="nav-item__texto">CRM</span></a>
             <a href="#/viagens" data-rota="viagens" data-perfil="servico" class="nav-item" title="Calendário de Viagens"><span class="nav-item__icone">✈️</span><span class="nav-item__texto">Viagens</span></a>
@@ -73,6 +75,8 @@
           <div class="nav-submenu">
             <a href="#/dashboard" data-rota="dashboard" class="nav-item" title="Dashboard"><span class="nav-item__icone">📊</span><span class="nav-item__texto">Dashboard</span></a>
             <a href="#/relatorios" data-rota="relatorios" class="nav-item" title="Relatórios"><span class="nav-item__icone">📄</span><span class="nav-item__texto">Relatórios</span></a>
+            <a href="#/impacto" data-rota="impacto" data-perfil="servico" class="nav-item" title="Relatório de impacto"><span class="nav-item__icone">🌱</span><span class="nav-item__texto">Impacto</span></a>
+            <a href="#/atas" data-rota="atas" data-perfil="servico" class="nav-item" title="Atas de reunião"><span class="nav-item__icone">📝</span><span class="nav-item__texto">Atas</span></a>
           </div>
         </div>
 
@@ -96,7 +100,7 @@
       <header class="topbar">
         <h1 id="titulo-pagina">Central de Gestão</h1>
         <div class="flex gap-12" style="align-items:center">
-          <a href="#/lembretes" id="aviso-lembretes" class="badge badge--muted" style="display:none;cursor:pointer" title="Ver lembretes"></a>
+          <button id="sino-avisos" class="sino" type="button" title="Avisos"><span class="sino__icone">🔔</span></button>
           <div id="licenca-badge" class="badge badge--muted" style="display:none;cursor:pointer" title="Ver licença"></div>
           <div id="status-banco" class="badge badge--muted">conectando…</div>
         </div>
@@ -143,11 +147,16 @@
   <script src="js/pages/instrumentos.js"></script>
   <script src="js/pages/voluntarios.js"></script>
   <script src="js/pages/membros.js"></script>
+  <script src="js/pages/listaEspera.js"></script>
+  <script src="js/pages/atas.js"></script>
+  <script src="js/pages/autorizacoes.js"></script>
+  <script src="js/pages/impacto.js"></script>
   <script src="js/pages/turmas.js"></script>
   <script src="js/pages/chamada.js"></script>
   <script src="js/pages/arrecadacao.js"></script>
   <script src="js/pages/configuracoes.js"></script>
   <script src="js/pages/backup.js"></script>
+  <script src="js/componentes/avisos.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

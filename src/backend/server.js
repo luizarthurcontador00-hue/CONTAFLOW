@@ -142,6 +142,9 @@ function createApp() {
   montarRota(app, '/api/turmas', './routes/turmas');
   montarRota(app, '/api/arrecadacao', './routes/arrecadacao');
   montarRota(app, '/api/membros', './routes/membros');
+  montarRota(app, '/api/lista-espera', './routes/listaEspera');
+  montarRota(app, '/api/avisos', './routes/avisos');
+  montarRota(app, '/api/instituto', './routes/instituto');
   montarRota(app, '/api/dashboard', './routes/dashboard');
   montarRota(app, '/api/relatorios', './routes/relatorios');
   montarRota(app, '/api/backup', './routes/backup');

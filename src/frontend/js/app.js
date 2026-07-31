@@ -14,6 +14,10 @@
     instrumentos: { titulo: 'Instrumentos', pagina: () => window.PaginaInstrumentos },
     voluntarios: { titulo: 'Voluntários', pagina: () => window.PaginaVoluntarios },
     membros: { titulo: 'Diretoria', pagina: () => window.PaginaMembros },
+    'lista-espera': { titulo: 'Lista de espera', pagina: () => window.PaginaListaEspera },
+    autorizacoes: { titulo: 'Autorizações', pagina: () => window.PaginaAutorizacoes },
+    atas: { titulo: 'Atas', pagina: () => window.PaginaAtas },
+    impacto: { titulo: 'Relatório de impacto', pagina: () => window.PaginaImpacto },
     turmas: { titulo: 'Turmas', pagina: () => window.PaginaTurmas },
     chamada: { titulo: 'Chamada', pagina: () => window.PaginaChamada },
     arrecadacao: { titulo: 'Arrecadação', pagina: () => window.PaginaArrecadacao },
@@ -55,7 +59,7 @@
     produtos: 'comercio', compras: 'comercio', fornecedores: 'comercio', precificacao: 'comercio', sacolas: 'comercio',
     servicos: 'servico', agenda: 'servico', ordens: 'servico', comissoes: 'servico', crm: 'servico', viagens: 'servico',
     cursos: 'servico', instrumentos: 'servico', voluntarios: 'servico', turmas: 'servico', chamada: 'servico',
-    membros: 'servico',
+    membros: 'servico', 'lista-espera': 'servico', autorizacoes: 'servico', atas: 'servico', impacto: 'servico',
     arrecadacao: 'servico',
   };
   // Rotas exclusivas de um ramo especifico (so aparecem alem do filtro de perfil).
@@ -63,6 +67,7 @@
     crm: 'agencia_viagem', viagens: 'agencia_viagem',
     cursos: 'instituto', instrumentos: 'instituto', voluntarios: 'instituto',
     turmas: 'instituto', chamada: 'instituto', arrecadacao: 'instituto', membros: 'instituto',
+    'lista-espera': 'instituto', autorizacoes: 'instituto', atas: 'instituto', impacto: 'instituto',
   };
   // Num instituto sem fins lucrativos nao existe venda: o que entra e oferta,
   // e o que sai e despesa. Estes modulos saem do menu por completo.
@@ -86,6 +91,7 @@
     // Regras compostas (dependem tambem do ramo, nao so do perfil).
     ['ordens', 'agenda', 'crm', 'viagens', 'pdv', 'vendas', 'comissoes', 'dashboard',
       'cursos', 'instrumentos', 'voluntarios', 'turmas', 'chamada', 'arrecadacao', 'membros',
+      'lista-espera', 'autorizacoes', 'atas', 'impacto',
       'produtos', 'sacolas', 'precificacao', 'compras', 'fornecedores'].forEach((nome) => {
       const link = document.querySelector(`.nav-item[data-rota="${nome}"]`);
       if (link) link.style.display = rotaVisivel(nome) ? '' : 'none';
@@ -204,21 +210,11 @@
     }
   }
 
-  // ----------------------- Aviso de lembretes vencidos/de hoje -----------------------
+  // Os lembretes agora entram no sino de avisos do topo, junto com tudo o
+  // mais que precisa de atencao (instrumento nao devolvido, chamada pendente,
+  // aluno sumindo...). Mantemos o nome da funcao porque outras telas chamam.
   async function atualizarAvisoLembretes() {
-    const badge = document.getElementById('aviso-lembretes');
-    if (!badge) return;
-    try {
-      const vencidos = await API.get('/api/lembretes/vencidos');
-      if (vencidos.length) {
-        badge.style.display = '';
-        badge.className = 'badge badge--alerta';
-        badge.textContent = `🔔 ${vencidos.length} lembrete(s)`;
-        badge.title = vencidos.map((l) => l.titulo).join(', ');
-      } else {
-        badge.style.display = 'none';
-      }
-    } catch (_) { badge.style.display = 'none'; }
+    if (window.Avisos) await Avisos.atualizar();
   }
   window.__atualizarAvisoLembretes = atualizarAvisoLembretes;
 
@@ -375,8 +371,7 @@
     await window.__verificarLicenca();
     if (!location.hash) location.hash = '#/inicio';
     verificarConexao();
-    atualizarAvisoLembretes();
-    setInterval(atualizarAvisoLembretes, 5 * 60 * 1000);
+    if (window.Avisos) Avisos.iniciar();
     const cfg = await carregarPerfil();
     if (cfg.onboarding_ok !== '1') {
       await abrirOnboarding();

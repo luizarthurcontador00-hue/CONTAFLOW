@@ -440,6 +440,74 @@ function limparEncontrosForaDoHorario(turmaId) {
   return { removidos };
 }
 
+/**
+ * Quem poderia cobrir este encontro se o instrutor titular faltar.
+ *
+ * Usa a disponibilidade que os voluntarios ja informaram no cadastro: cruza
+ * o dia da semana e o horario do encontro com as faixas de cada um. Quem ja
+ * e da turma aparece primeiro (conhece os alunos); quem esta ocupado em
+ * outra turma no mesmo horario e descartado.
+ */
+function sugerirSubstitutos(agendamentoId) {
+  const db = getDb();
+  const enc = db.prepare(`
+    SELECT a.*, t.nome AS turma_nome FROM agendamentos a
+    JOIN turmas t ON t.id = a.turma_id WHERE a.id = ?
+  `).get(agendamentoId);
+  if (!enc) throw new AppError('Encontro não encontrado.', 404);
+
+  const diaSemana = new Date(enc.data + 'T12:00:00').getDay();
+  const horaFim = enc.hora_fim || enc.hora_inicio;
+
+  const candidatos = db.prepare(`
+    SELECT DISTINCT p.id, p.nome, p.tipo, p.telefone,
+      (SELECT 1 FROM turmas_instrutores ti WHERE ti.turma_id = @turmaId AND ti.profissional_id = p.id) AS ja_e_da_turma,
+      (SELECT ti.papel FROM turmas_instrutores ti WHERE ti.turma_id = @turmaId AND ti.profissional_id = p.id) AS papel
+    FROM profissionais p
+    JOIN voluntarios_disponibilidade d ON d.profissional_id = p.id
+    WHERE p.ativo = 1
+      AND d.dia_semana = @diaSemana
+      AND d.hora_inicio <= @horaInicio AND d.hora_fim >= @horaFim
+      AND p.id != COALESCE(@titularId, -1)
+      -- descarta quem ja esta dando outra aula no mesmo horario
+      AND NOT EXISTS (
+        SELECT 1 FROM agendamentos o
+        WHERE o.data = @data AND o.id != @agendamentoId AND o.profissional_id = p.id
+          AND o.status NOT IN ('cancelado')
+          AND o.hora_inicio < @horaFim AND COALESCE(o.hora_fim, o.hora_inicio) > @horaInicio
+      )
+    ORDER BY ja_e_da_turma DESC, p.nome
+  `).all({
+    turmaId: enc.turma_id,
+    diaSemana,
+    horaInicio: enc.hora_inicio,
+    horaFim,
+    titularId: enc.profissional_id,
+    data: enc.data,
+    agendamentoId,
+  });
+
+  return {
+    encontro: {
+      id: enc.id, data: enc.data, hora_inicio: enc.hora_inicio, hora_fim: enc.hora_fim,
+      turma_nome: enc.turma_nome,
+    },
+    candidatos,
+  };
+}
+
+/** Troca quem vai dar a aula neste encontro (cobertura de falta). */
+function definirInstrutorDoEncontro(agendamentoId, profissionalId) {
+  const db = getDb();
+  const enc = db.prepare('SELECT * FROM agendamentos WHERE id = ? AND turma_id IS NOT NULL').get(agendamentoId);
+  if (!enc) throw new AppError('Encontro não encontrado.', 404);
+  if (profissionalId && !db.prepare('SELECT 1 FROM profissionais WHERE id = ?').get(Number(profissionalId))) {
+    throw new AppError('Instrutor não encontrado.');
+  }
+  db.prepare('UPDATE agendamentos SET profissional_id = ? WHERE id = ?').run(profissionalId ? Number(profissionalId) : null, agendamentoId);
+  return { ok: true };
+}
+
 /** Gera os encontros de todas as turmas ativas (chamado no boot do sistema). */
 function gerarEncontrosPendentes() {
   const db = getDb();
@@ -453,6 +521,7 @@ module.exports = {
   listar, obter, criar, atualizar, excluir,
   matricular, mudarStatusMatricula, removerMatricula,
   gerarEncontros, gerarEncontrosPendentes, limparEncontrosForaDoHorario,
+  sugerirSubstitutos, definirInstrutorDoEncontro,
   comInstrumentoProprio,
   STATUS_TURMA, STATUS_MATRICULA, DIAS,
 };
