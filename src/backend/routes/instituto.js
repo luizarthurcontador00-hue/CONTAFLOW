@@ -3,8 +3,15 @@
 const express = require('express');
 const { asyncHandler } = require('../utils/errors');
 const inst = require('../services/institutoService');
+const modelos = require('../services/modelosService');
 
 const router = express.Router();
+
+// ------------------------ Modelos de documento ------------------------
+router.get('/modelos', asyncHandler((req, res) => res.json(modelos.listar())));
+router.get('/modelos/:chave', asyncHandler((req, res) => res.json(modelos.obter(req.params.chave))));
+router.put('/modelos/:chave', asyncHandler((req, res) => res.json(modelos.salvar(req.params.chave, (req.body || {}).corpo))));
+router.post('/modelos/:chave/restaurar', asyncHandler((req, res) => res.json(modelos.restaurarPadrao(req.params.chave))));
 
 // ------------------------------- Atas -------------------------------
 router.get('/atas', asyncHandler((req, res) => res.json(inst.listarAtas(req.query))));

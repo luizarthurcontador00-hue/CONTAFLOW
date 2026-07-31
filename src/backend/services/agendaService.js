@@ -20,10 +20,10 @@ function criarProfissional(dados) {
   const nome = (dados.nome || '').trim();
   if (!nome) throw new AppError('Informe o nome do profissional.');
   const info = db.prepare(
-    'INSERT INTO profissionais (nome, telefone, cor, comissao_pct, tipo, email, documento, observacao) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO profissionais (nome, telefone, cor, comissao_pct, tipo, email, documento, endereco, observacao) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
   ).run(nome, dados.telefone || null, dados.cor || '#2563eb', Number(dados.comissao_pct || 0),
     dados.tipo === 'voluntario' ? 'voluntario' : 'contratado',
-    dados.email || null, dados.documento || null, dados.observacao || null);
+    dados.email || null, dados.documento || null, dados.endereco || null, dados.observacao || null);
   const id = info.lastInsertRowid;
   if (dados.disponibilidade) salvarDisponibilidade(db, id, dados.disponibilidade);
   return obterProfissional(id);
@@ -66,7 +66,7 @@ function atualizarProfissional(id, dados) {
   if (!atual) throw new AppError('Profissional nao encontrado.', 404);
   const nome = dados.nome !== undefined ? (dados.nome || '').trim() : atual.nome;
   if (!nome) throw new AppError('Informe o nome do profissional.');
-  db.prepare('UPDATE profissionais SET nome=?, telefone=?, cor=?, comissao_pct=?, ativo=?, tipo=?, email=?, documento=?, observacao=? WHERE id=?').run(
+  db.prepare('UPDATE profissionais SET nome=?, telefone=?, cor=?, comissao_pct=?, ativo=?, tipo=?, email=?, documento=?, endereco=?, observacao=? WHERE id=?').run(
     nome,
     dados.telefone !== undefined ? dados.telefone : atual.telefone,
     dados.cor !== undefined ? dados.cor : atual.cor,
@@ -75,6 +75,7 @@ function atualizarProfissional(id, dados) {
     dados.tipo !== undefined ? (dados.tipo === 'voluntario' ? 'voluntario' : 'contratado') : atual.tipo,
     dados.email !== undefined ? dados.email : atual.email,
     dados.documento !== undefined ? dados.documento : atual.documento,
+    dados.endereco !== undefined ? dados.endereco : atual.endereco,
     dados.observacao !== undefined ? dados.observacao : atual.observacao,
     id
   );

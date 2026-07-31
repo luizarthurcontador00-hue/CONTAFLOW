@@ -1543,6 +1543,27 @@ const migrations = [
       `);
     },
   },
+
+  {
+    version: 37,
+    name: 'modelos-de-documento',
+    up(db) {
+      db.exec(`
+        -- Cada instituto tem o seu texto (o do estatuto, o que o contador
+        -- pediu, o que a prefeitura aceita). Guardar so o que foi editado:
+        -- quem nao mexer continua no texto padrao do sistema.
+        CREATE TABLE IF NOT EXISTS modelos_documento (
+          chave         TEXT PRIMARY KEY,
+          corpo         TEXT NOT NULL,
+          atualizado_em TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+
+        -- O termo de adesao pede o endereco do voluntario ("residente e
+        -- domiciliado em"), que ate agora nao existia no cadastro.
+        ALTER TABLE profissionais ADD COLUMN endereco TEXT;
+      `);
+    },
+  },
 ];
 
 /**

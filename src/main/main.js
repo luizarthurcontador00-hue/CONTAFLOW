@@ -184,6 +184,16 @@ async function criarJanela() {
   // rodando em segundo plano. So fecha de verdade via "Sair" na bandeja.
   mainWindow.on('close', (e) => {
     if (appEncerrando) return;
+    // Janela ja escondida e mesmo assim chegou um pedido de fechamento? Nao
+    // foi o usuario clicando no "X" (nao da pra clicar no X de uma janela
+    // escondida) — foi o instalador, o atualizador ou o Windows desligando.
+    // Nesse caso o certo e sair de verdade: senao o instalador nao consegue
+    // substituir os arquivos e para em "Feche a janela e clique em Repetir".
+    if (!mainWindow.isVisible()) {
+      e.preventDefault();
+      sairDeVerdade();
+      return;
+    }
     e.preventDefault();
     mainWindow.hide();
     if (!avisoTrayMostrado && tray && process.platform === 'win32') {
@@ -282,6 +292,10 @@ app.whenReady().then(async () => {
 // do Windows etc.) marca "encerrando de verdade" antes das janelas fecharem,
 // pra nao ficar preso escondendo a janela em vez de deixar sair.
 app.on('before-quit', () => { appEncerrando = true; });
+
+// Windows desligando/reiniciando: nao adianta esconder pra bandeja, a sessao
+// esta acabando de qualquer jeito.
+app.on('session-end', () => { appEncerrando = true; sairDeVerdade(); });
 
 // Com a janela so minimizando pra bandeja (ver "close" em criarJanela), isso
 // so dispara mesmo num encerramento de verdade — serve de rede de seguranca

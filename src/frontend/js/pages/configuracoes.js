@@ -13,7 +13,7 @@ window.PaginaConfiguracoes = (function () {
   const abas = () => [
     ['loja', ehInstituto() ? 'Instituto' : 'Loja'],
     ['pix', '💠 PIX'],
-    ...(ehInstituto() ? [] : [['fiscal', '🧾 Fiscal']]),
+    ...(ehInstituto() ? [['documentos', '📄 Documentos']] : [['fiscal', '🧾 Fiscal']]),
     ['aparencia', '🎨 Aparência'],
     ['google', '📅 Google Agenda'],
     ['avisos', '🔔 Avisos automáticos'],
@@ -44,6 +44,7 @@ window.PaginaConfiguracoes = (function () {
   function trocarAba(container, cfg) {
     const alvo = container.querySelector('#cfg-conteudo');
     if (abaAtual === 'pix') renderPix(alvo, cfg);
+    else if (abaAtual === 'documentos') renderModelos(alvo);
     else if (abaAtual === 'fiscal') renderFiscal(alvo, cfg);
     else if (abaAtual === 'aparencia') renderAparencia(alvo, cfg, container);
     else if (abaAtual === 'google') renderGoogleAgenda(alvo);
@@ -92,6 +93,9 @@ window.PaginaConfiguracoes = (function () {
           <div class="campo"><label>Telefone</label><input name="loja_telefone" value="${UI.escapar(cfg.loja_telefone || '')}" /></div>
           <div class="campo"><label>CNPJ / CPF</label><input name="loja_cnpj" value="${UI.escapar(cfg.loja_cnpj || '')}" /></div>
           <div class="campo col-2"><label>Endereço</label><input name="loja_endereco" value="${UI.escapar(cfg.loja_endereco || '')}" /></div>
+          <div class="campo col-2"><label>Cidade</label>
+            <input name="loja_cidade" value="${UI.escapar(cfg.loja_cidade || '')}" placeholder="Ex.: Caldas Novas - GO" />
+            <span class="dica">Abre os documentos assinados ("Caldas Novas - GO, 31 de julho de 2026").</span></div>
           ${inst ? '' : `
           <div class="campo col-2"><label>Mensagem no rodapé do cupom</label>
             <input name="loja_rodape_cupom" value="${UI.escapar(cfg.loja_rodape_cupom || 'Obrigado pela preferência!')}" /></div>
@@ -162,6 +166,85 @@ window.PaginaConfiguracoes = (function () {
   }
 
   // ------------------------------ PIX ------------------------------
+  // ------------------------ Modelos de documento ------------------------
+
+  /**
+   * O texto de cada documento fica editável: cada instituto tem a redação
+   * que o estatuto, o contador ou a prefeitura pedem. Os dados entram por
+   * marcadores, preenchidos na hora de emitir.
+   */
+  async function renderModelos(alvo) {
+    alvo.innerHTML = '<div class="card">Carregando…</div>';
+    let modelos = [];
+    try { modelos = await API.get('/api/instituto/modelos'); }
+    catch (e) { alvo.innerHTML = `<div class="card"><p class="dica">${UI.escapar(e.message)}</p></div>`; return; }
+
+    alvo.innerHTML = `
+      <p class="dica">Escreva aqui o texto que o seu instituto usa. Onde entrar um dado, use o marcador
+      correspondente — o sistema troca pelo valor na hora de gerar o PDF. Deixe uma linha em branco entre
+      parágrafos e use <code>**texto**</code> para negrito.</p>
+      ${modelos.map((m) => `
+        <div class="card mt-16" data-modelo="${m.chave}">
+          <div class="flex flex--between" style="align-items:flex-start;flex-wrap:wrap;gap:8px">
+            <div class="cresce">
+              <h3 style="margin:0">${UI.escapar(m.titulo)}
+                ${m.personalizado ? '<span class="badge badge--ok">seu texto</span>' : '<span class="badge badge--muted">texto padrão</span>'}</h3>
+              <p class="dica" style="margin:4px 0 0">${UI.escapar(m.descricao)}</p>
+            </div>
+          </div>
+          <details class="mt-16">
+            <summary class="dica" style="cursor:pointer">Marcadores disponíveis (${m.marcadores.length})</summary>
+            <div class="mt-16" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:6px">
+              ${m.marcadores.map((mk) => `
+                <div class="dica"><code class="marcador" data-inserir="${m.chave}" data-valor="{{${mk.marcador}}}"
+                  style="cursor:pointer">{{${mk.marcador}}}</code> ${UI.escapar(mk.descricao)}</div>`).join('')}
+            </div>
+            <p class="dica mt-16">Clique num marcador para inseri-lo onde o cursor estiver.</p>
+          </details>
+          <div class="campo mt-16">
+            <textarea data-corpo="${m.chave}" rows="14" style="font-family:Menlo,Consolas,monospace;font-size:12.5px;line-height:1.6">${UI.escapar(m.corpo)}</textarea>
+          </div>
+          <div class="flex gap-12" style="flex-wrap:wrap">
+            <button class="btn" data-salvar="${m.chave}">Salvar modelo</button>
+            <button class="btn btn--secundario" data-restaurar="${m.chave}" ${m.personalizado ? '' : 'disabled'}>Restaurar padrão</button>
+            <div class="cresce"></div>
+            ${m.atualizado_em ? `<span class="dica" style="align-self:center">editado em ${UI.escapar(m.atualizado_em)}</span>` : ''}
+          </div>
+        </div>`).join('')}`;
+
+    alvo.querySelectorAll('[data-inserir]').forEach((c) => c.addEventListener('click', () => {
+      const area = alvo.querySelector(`[data-corpo="${c.dataset.inserir}"]`);
+      if (!area) return;
+      const pos = area.selectionStart ?? area.value.length;
+      area.value = area.value.slice(0, pos) + c.dataset.valor + area.value.slice(area.selectionEnd ?? pos);
+      area.focus();
+      area.selectionStart = pos + c.dataset.valor.length;
+      area.selectionEnd = area.selectionStart;
+    }));
+
+    alvo.querySelectorAll('[data-salvar]').forEach((b) => b.addEventListener('click', async () => {
+      const chave = b.dataset.salvar;
+      const corpo = alvo.querySelector(`[data-corpo="${chave}"]`).value;
+      try {
+        const r = await API.put(`/api/instituto/modelos/${chave}`, { corpo });
+        if (r.avisos && r.avisos.length) {
+          UI.erro(`Modelo salvo, mas há marcador que o sistema não conhece: ${r.avisos.map((a) => `{{${a}}}`).join(', ')}. Ele vai sair como "—" no PDF.`);
+        } else {
+          UI.sucesso('Modelo salvo.');
+        }
+        renderModelos(alvo);
+      } catch (e) { UI.erro(e.message); }
+    }));
+
+    alvo.querySelectorAll('[data-restaurar]').forEach((b) => b.addEventListener('click', async () => {
+      const ok = await UI.confirmar('Voltar ao texto padrão do sistema? O texto que você escreveu será perdido.',
+        { titulo: 'Restaurar padrão', textoConfirmar: 'Restaurar' });
+      if (!ok) return;
+      try { await API.post(`/api/instituto/modelos/${b.dataset.restaurar}/restaurar`, {}); UI.sucesso('Texto padrão restaurado.'); renderModelos(alvo); }
+      catch (e) { UI.erro(e.message); }
+    }));
+  }
+
   function renderPix(alvo, cfg) {
     alvo.innerHTML = `
       <div class="card" style="max-width:640px">

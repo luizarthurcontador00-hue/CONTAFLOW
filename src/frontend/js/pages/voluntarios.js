@@ -65,6 +65,7 @@ window.PaginaVoluntarios = (function () {
               <td>${p.tipo === 'voluntario' ? '<span class="badge badge--ok">Voluntário</span>' : '<span class="badge badge--muted">Contratado</span>'}</td>
               <td class="dica">${UI.escapar(p.telefone || p.email || '—')}</td>
               <td style="text-align:right;white-space:nowrap">
+                ${p.tipo === 'voluntario' ? `<button class="btn btn--secundario" data-termo="${p.id}">📜 Termo</button>` : ''}
                 <button class="btn btn--secundario" data-ver="${p.id}">Ver</button>
                 <button class="btn btn--secundario" data-editar="${p.id}">Editar</button>
               </td>
@@ -80,6 +81,41 @@ window.PaginaVoluntarios = (function () {
       try { detalhe(await API.get(`/api/agenda/profissionais/${b.dataset.ver}`)); }
       catch (e) { UI.erro(e.message); }
     }));
+    alvo.querySelectorAll('[data-termo]').forEach((b) => b.addEventListener('click', () => {
+      formTermo(pessoas.find((p) => String(p.id) === b.dataset.termo));
+    }));
+  }
+
+  /**
+   * Termo de adesão ao serviço voluntário (Lei 9.608/1998) — o papel que
+   * se assina na entrada. Pede as três coisas que só a coordenação sabe:
+   * o que a pessoa vai fazer, quanto tempo por semana e desde quando.
+   */
+  function formTermo(pessoa) {
+    if (!pessoa) return;
+    const hoje = new Date().toISOString().slice(0, 10);
+    Modal.abrir({
+      titulo: `Termo de adesão — ${pessoa.nome}`, tamanho: 'modal--pequeno', textoConfirmar: '📜 Gerar termo',
+      corpoHTML: `
+        <p class="dica" style="margin-top:0">Documento assinado pelas duas partes na entrada do voluntário.
+        Sai em duas vias. O texto pode ser ajustado em <strong>Configurações → Documentos</strong>.</p>
+        <div class="campo"><label>Atividade que vai exercer *</label>
+          <input id="tv-atividade" placeholder="Ex.: instrutor(a) de violão" /></div>
+        <div class="campo mt-16"><label>Dedicação combinada</label>
+          <input id="tv-carga" placeholder="Ex.: 4 horas semanais" /></div>
+        <div class="campo mt-16"><label>Início *</label>
+          <input type="date" id="tv-inicio" value="${hoje}" /></div>
+        ${pessoa.documento ? '' : '<div class="dica mt-16">⚠️ Esta pessoa está sem documento no cadastro — o termo vai sair com um tracinho no lugar do CPF/RG.</div>'}`,
+      aoConfirmar: async (el) => {
+        const atividade = el.querySelector('#tv-atividade').value.trim();
+        if (!atividade) { UI.erro('Informe a atividade que o voluntário vai exercer.'); return false; }
+        await Documentos.termoVoluntariado(pessoa, {
+          atividade,
+          carga_semanal: el.querySelector('#tv-carga').value.trim(),
+          inicio: el.querySelector('#tv-inicio').value,
+        });
+      },
+    });
   }
 
   function detalhe(p) {
@@ -131,9 +167,12 @@ window.PaginaVoluntarios = (function () {
             <input id="vo-email" value="${ed ? UI.escapar(pessoa.email || '') : ''}" /></div>
           <div class="campo"><label>Documento</label>
             <input id="vo-documento" value="${ed ? UI.escapar(pessoa.documento || '') : ''}" placeholder="CPF ou RG" />
-            <span class="dica">Aparece na declaração de horas de voluntariado.</span></div>
+            <span class="dica">Aparece na declaração de horas e no termo de adesão.</span></div>
           <div class="campo"><label>Cor na agenda</label>
             <input type="color" id="vo-cor" value="${ed ? UI.escapar(pessoa.cor || '#2563eb') : '#2563eb'}" style="width:80px;height:38px;padding:2px" /></div>
+          <div class="campo col-2"><label>Endereço</label>
+            <input id="vo-endereco" value="${ed ? UI.escapar(pessoa.endereco || '') : ''}" placeholder="Rua, número, bairro" />
+            <span class="dica">Usado no "residente e domiciliado em" do termo de adesão.</span></div>
           <div class="campo col-2"><label>Observação</label>
             <textarea id="vo-obs" rows="2">${ed ? UI.escapar(pessoa.observacao || '') : ''}</textarea></div>
 
@@ -181,6 +220,7 @@ window.PaginaVoluntarios = (function () {
           telefone: el.querySelector('#vo-telefone').value,
           email: el.querySelector('#vo-email').value,
           documento: el.querySelector('#vo-documento').value,
+          endereco: el.querySelector('#vo-endereco').value,
           cor: el.querySelector('#vo-cor').value,
           observacao: el.querySelector('#vo-obs').value,
           disponibilidade: faixas,

@@ -72,16 +72,90 @@ window.Documentos = (function () {
       ${subtitulo ? `<p class="dica" style="margin-top:0">${subtitulo}</p>` : ''}`;
   }
 
-  function assinaturaHTML(cfg, assinante) {
-    return `<div class="assinatura">
-      ${esc(assinante ? assinante.nome : (cfg.nome_loja || 'Responsável pela instituição'))}
-      ${assinante ? `<br><span style="font-size:11px;color:#555">${esc(assinante.cargo)}</span>` : ''}
-    </div>`;
-  }
-
   function pagina(titulo, cfg, corpo, extraCss = '') {
     return `<!doctype html><html><head><meta charset="utf-8"><title>${titulo}</title>
       <style>${ESTILO_BASE}${extraCss}</style></head><body>${corpo}</body></html>`;
+  }
+
+  // ======================= Modelos editáveis =======================
+  // O texto dos documentos fica em Configurações → Documentos. Aqui só
+  // preenchemos os marcadores e transformamos em HTML imprimível.
+
+  async function modelo(chave) {
+    return API.get(`/api/instituto/modelos/${chave}`);
+  }
+
+  /** Linha de assinatura pronta, com nome e cargo embaixo. */
+  function linhaAssinatura(nome, cargo) {
+    return `<div class="assinatura">${esc(nome || '—')}`
+      + `${cargo ? `<br><span style="font-size:11px;color:#555">${esc(cargo)}</span>` : ''}</div>`;
+  }
+
+  /**
+   * Converte o texto do modelo em HTML: linha em branco separa parágrafo,
+   * **texto** vira negrito. O conteúdo dos marcadores é escapado; o resto é
+   * o texto que o próprio instituto escreveu.
+   */
+  function textoParaHTML(texto) {
+    const blocos = String(texto || '').replace(/\r/g, '').split(/\n{2,}/);
+    return blocos.map((bloco) => {
+      const t = bloco.trim();
+      if (!t) return '';
+      // Blocos especiais montados pelo sistema (assinatura, destaque) já vêm
+      // como HTML e não devem virar parágrafo comum.
+      if (/^<(div|center|destaque|h\d|table)/i.test(t)) {
+        return t.replace(/<destaque>(.*?)<\/destaque>/gis, '<p class="destaque">$1</p>')
+          .replace(/<center>(.*?)<\/center>/gis, '<p class="centro">$1</p>');
+      }
+      const comMarcacao = t
+        .replace(/<destaque>(.*?)<\/destaque>/gis, '</p><p class="destaque">$1</p><p>')
+        .replace(/<center>(.*?)<\/center>/gis, '</p><p class="centro">$1</p><p>')
+        .replace(/\*\*(.+?)\*\*/gs, '<strong>$1</strong>')
+        .replace(/\n/g, '<br>');
+      return `<p>${comMarcacao}</p>`;
+    }).join('\n').replace(/<p>\s*<\/p>/g, '');
+  }
+
+  function preencher(corpo, dados) {
+    return String(corpo || '').replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_, chave) => {
+      const v = dados[chave.toLowerCase()];
+      return v == null || v === '' ? '—' : String(v);
+    });
+  }
+
+  /** Dados que todo documento tem: o instituto, a data e quem assina. */
+  function dadosComuns(ctx) {
+    const hoje = new Date().toISOString().slice(0, 10);
+    return {
+      instituto_nome: esc(ctx.cfg.nome_loja || 'Instituto'),
+      instituto_cnpj: esc(ctx.cfg.loja_cnpj || ''),
+      instituto_endereco: esc(ctx.cfg.loja_endereco || ''),
+      instituto_telefone: esc(ctx.cfg.loja_telefone || ''),
+      instituto_cidade: esc(ctx.cfg.loja_cidade || ''),
+      data_extenso: porExtenso(hoje),
+      data: dataBR(hoje),
+      assinante_nome: esc(ctx.assinante ? ctx.assinante.nome : (ctx.cfg.nome_loja || '')),
+      assinante_cargo: esc(ctx.assinante ? ctx.assinante.cargo : ''),
+      assinatura_instituto: linhaAssinatura(
+        ctx.assinante ? ctx.assinante.nome : (ctx.cfg.nome_loja || 'Responsável pela instituição'),
+        ctx.assinante ? ctx.assinante.cargo : ''
+      ),
+    };
+  }
+
+  /** Monta o PDF de um modelo já preenchido. */
+  async function emitirModelo(chave, dados, arquivo, extraCss = '') {
+    let m; let ctx;
+    try { [m, ctx] = await Promise.all([modelo(chave), contexto()]); }
+    catch (e) { UI.erro(e.message); return; }
+
+    const corpo = `
+      ${cabecalho(ctx.cfg, '')}
+      <h2 class="titulo-doc">${esc(m.titulo_documento)}</h2>
+      ${textoParaHTML(preencher(m.corpo, { ...dadosComuns(ctx), ...dados }))}`;
+
+    try { await UI.baixarPDF(pagina(m.titulo, ctx.cfg, corpo, ESTILO_DECLARACAO + extraCss), arquivo); }
+    catch (e) { UI.erro(e.message); }
   }
 
   function nomeArquivo(prefixo, nome) {
@@ -270,35 +344,32 @@ window.Documentos = (function () {
     body { font-family: Georgia, serif; padding:56px; line-height:1.9; }
     .cabecalho { border-bottom:none; justify-content:center; text-align:center; display:block; margin-bottom:34px; }
     .cabecalho h1 { font-size:19px; }
-    h2 { font-size:16px; text-align:center; margin:26px 0; letter-spacing:.5px; }
-    p { text-align: justify; }
-    .local-data { margin-top:34px; text-align:center; font-size:13px; }
+    .titulo-doc { font-size:16px; text-align:center; margin:26px 0; letter-spacing:.5px; }
+    p { text-align: justify; margin: 10px 0; }
+    p.centro { text-align:center; font-size:15px; }
+    p.destaque { text-align:center; font-size:22px; font-weight:bold; margin:12px 0; }
+    .assinatura { margin-top:56px; }
   `;
 
   async function declaracaoMatricula(alunoId) {
-    let d; let ctx;
-    try { [d, ctx] = await Promise.all([API.get(`/api/instituto/declaracao-matricula/${alunoId}`), contexto()]); }
+    let d;
+    try { d = await API.get(`/api/instituto/declaracao-matricula/${alunoId}`); }
     catch (e) { UI.erro(e.message); return; }
 
     const a = d.aluno;
     const turmas = d.matriculas.map((m) => {
       const carga = m.carga_horaria ? `, com carga horária de ${m.carga_horaria} hora(s)` : '';
-      return `<li><strong>${esc(m.curso_nome)}</strong> — turma ${esc(m.turma_nome)}${m.horarios ? `, ${esc(m.horarios)}` : ''}${carga}, desde ${porExtenso(m.data_matricula || m.periodo_inicio)}.</li>`;
+      return `<li>${esc(m.curso_nome)} — turma ${esc(m.turma_nome)}${m.horarios ? `, ${esc(m.horarios)}` : ''}${carga}, `
+        + `desde ${porExtenso(m.data_matricula || m.periodo_inicio)}.</li>`;
     }).join('');
 
-    const corpo = `
-      ${cabecalho(ctx.cfg, '')}
-      <h2>DECLARAÇÃO DE MATRÍCULA</h2>
-      <p>Declaramos, para os devidos fins, que <strong>${esc(a.nome)}</strong>${a.cpf ? `, inscrito(a) no CPF sob o nº ${esc(a.cpf)}` : ''}${a.data_nascimento ? `, nascido(a) em ${porExtenso(a.data_nascimento)}` : ''}${a.responsavel_nome ? `, sob a responsabilidade de ${esc(a.responsavel_nome)}` : ''},
-      encontra-se regularmente matriculado(a) nesta instituição, participando das seguintes atividades:</p>
-      <ul>${turmas}</ul>
-      <p>As atividades são oferecidas gratuitamente, sem qualquer custo para o(a) participante ou sua família.</p>
-      <p>Por ser expressão da verdade, firmamos a presente declaração.</p>
-      <div class="local-data">${porExtenso(d.emitido_em)}.</div>
-      ${assinaturaHTML(ctx.cfg, ctx.assinante)}`;
-
-    try { await UI.baixarPDF(pagina('Declaração de matrícula', ctx.cfg, corpo, ESTILO_DECLARACAO), nomeArquivo('declaracao-matricula', a.nome)); }
-    catch (e) { UI.erro(e.message); }
+    await emitirModelo('declaracao_matricula', {
+      aluno_nome: `<strong>${esc(a.nome)}</strong>`,
+      aluno_cpf: esc(a.cpf || ''),
+      aluno_nascimento: porExtenso(a.data_nascimento),
+      responsavel_nome: esc(a.responsavel_nome || ''),
+      turmas: `<ul>${turmas}</ul>`,
+    }, nomeArquivo('declaracao-matricula', a.nome));
   }
 
   /**
@@ -306,51 +377,65 @@ window.Documentos = (function () {
    * pessoa que montou o palco doou o tempo dela igual a quem deu aula.
    */
   async function declaracaoVoluntariado(pessoa, de, ate) {
-    const ctx = await contexto();
     const partes = [];
     if (pessoa.aulas_dadas > 0) partes.push(`ministrado <strong>${pessoa.aulas_dadas} aula(s)</strong>`);
-    if (pessoa.atividades > 0) partes.push(`participado de <strong>${pessoa.atividades} atividade(s)</strong> de apoio (eventos, manutenção e organização)`);
+    if (pessoa.atividades > 0) partes.push('participado de '
+      + `<strong>${pessoa.atividades} atividade(s)</strong> de apoio (eventos, manutenção e organização)`);
     const feito = partes.length ? partes.join(' e ') : 'colaborado com as atividades da instituição';
 
-    const corpo = `
-      ${cabecalho(ctx.cfg, '')}
-      <h2>DECLARAÇÃO DE TRABALHO VOLUNTÁRIO</h2>
-      <p>Declaramos, para os devidos fins, que <strong>${esc(pessoa.nome)}</strong>${pessoa.documento ? `, portador(a) do documento ${esc(pessoa.documento)},` : ''}
-      prestou serviço voluntário nesta instituição no período de ${porExtenso(de)} a ${porExtenso(ate)},
-      tendo ${feito}, totalizando <strong>${esc(String(pessoa.horas || 0))} hora(s)</strong> de dedicação.</p>
-      <p>O trabalho voluntário aqui declarado não gera vínculo empregatício nem obrigação de natureza
-      trabalhista, previdenciária ou afim, nos termos da Lei nº 9.608/1998.</p>
-      <p>Por ser expressão da verdade, firmamos a presente declaração.</p>
-      <div class="local-data">${porExtenso(new Date().toISOString().slice(0, 10))}.</div>
-      ${assinaturaHTML(ctx.cfg, ctx.assinante)}`;
+    await emitirModelo('declaracao_voluntariado', {
+      voluntario_nome: `<strong>${esc(pessoa.nome)}</strong>`,
+      voluntario_documento: esc(pessoa.documento || ''),
+      voluntario_telefone: esc(pessoa.telefone || ''),
+      voluntario_email: esc(pessoa.email || ''),
+      voluntario_endereco: esc(pessoa.endereco || ''),
+      periodo_de: porExtenso(de),
+      periodo_ate: porExtenso(ate),
+      horas: esc(String(pessoa.horas || 0)),
+      aulas: pessoa.aulas_dadas || 0,
+      atividades: pessoa.atividades || 0,
+      resumo_atividades: feito,
+      assinatura_pessoa: linhaAssinatura(pessoa.nome, pessoa.documento ? `CPF: ${pessoa.documento}` : 'Voluntário(a)'),
+    }, nomeArquivo('declaracao-voluntariado', pessoa.nome));
+  }
 
-    try { await UI.baixarPDF(pagina('Declaração de voluntariado', ctx.cfg, corpo, ESTILO_DECLARACAO), nomeArquivo('declaracao-voluntariado', pessoa.nome)); }
-    catch (e) { UI.erro(e.message); }
+  /** Termo assinado quando o voluntário entra (Lei 9.608/1998). */
+  async function termoVoluntariado(pessoa, extras = {}) {
+    await emitirModelo('termo_voluntariado', {
+      voluntario_nome: `<strong>${esc(pessoa.nome)}</strong>`,
+      voluntario_documento: esc(pessoa.documento || ''),
+      voluntario_telefone: esc(pessoa.telefone || ''),
+      voluntario_email: esc(pessoa.email || ''),
+      voluntario_endereco: esc(pessoa.endereco || ''),
+      atividade: esc(extras.atividade || ''),
+      carga_semanal: esc(extras.carga_semanal || ''),
+      inicio: extras.inicio ? porExtenso(extras.inicio) : '',
+      assinatura_pessoa: linhaAssinatura(pessoa.nome, pessoa.documento ? `CPF: ${pessoa.documento}` : 'Voluntário(a)'),
+    }, nomeArquivo('termo-voluntariado', pessoa.nome));
   }
 
   async function certificado(alunoId, turmaId) {
-    let d; let ctx;
-    try { [d, ctx] = await Promise.all([API.get(`/api/instituto/certificado/${alunoId}/${turmaId}`), contexto()]); }
+    let d;
+    try { d = await API.get(`/api/instituto/certificado/${alunoId}/${turmaId}`); }
     catch (e) { UI.erro(e.message); return; }
 
     const m = d.matricula;
-    const carga = m.carga_horaria ? `, com carga horária de <strong>${m.carga_horaria} hora(s)</strong>` : '';
-    const freq = m.frequencia.percentual != null ? `, com frequência de <strong>${m.frequencia.percentual}%</strong>` : '';
-
-    const corpo = `
-      ${cabecalho(ctx.cfg, '')}
-      <h2>CERTIFICADO</h2>
-      <p style="text-align:center;font-size:15px">Certificamos que</p>
-      <p style="text-align:center;font-size:22px;margin:10px 0"><strong>${esc(d.aluno.nome)}</strong></p>
-      <p>concluiu o curso de <strong>${esc(m.curso_nome)}</strong>, turma ${esc(m.turma_nome)}${carga}${freq},
-      realizado no período de ${porExtenso(m.periodo_inicio)}${m.periodo_fim ? ` a ${porExtenso(m.periodo_fim)}` : ''}${m.instrutores ? `, sob orientação de ${esc(m.instrutores)}` : ''}.</p>
-      <div class="local-data">${porExtenso(d.emitido_em)}.</div>
-      ${assinaturaHTML(ctx.cfg, ctx.assinante)}`;
-
-    const css = ESTILO_DECLARACAO + '@page { size: A4 landscape; margin: 18mm; } body { padding:34px; }';
-    try { await UI.baixarPDF(pagina('Certificado', ctx.cfg, corpo, css), nomeArquivo('certificado', d.aluno.nome)); }
-    catch (e) { UI.erro(e.message); }
+    await emitirModelo('certificado', {
+      aluno_nome: esc(d.aluno.nome),
+      curso: esc(m.curso_nome),
+      turma: esc(m.turma_nome),
+      carga_horaria: m.carga_horaria || '',
+      frequencia: m.frequencia.percentual != null ? `${m.frequencia.percentual}%` : '',
+      periodo_inicio: porExtenso(m.periodo_inicio),
+      periodo_fim: porExtenso(m.periodo_fim),
+      instrutores: esc(m.instrutores || ''),
+    }, nomeArquivo('certificado', d.aluno.nome),
+    '@page { size: A4 landscape; margin: 18mm; } body { padding:34px; }');
   }
 
-  return { fichaDoAluno, folhaDeChamada, declaracaoMatricula, declaracaoVoluntariado, certificado, porExtenso, dataBR };
+  return {
+    fichaDoAluno, folhaDeChamada,
+    declaracaoMatricula, declaracaoVoluntariado, termoVoluntariado, certificado,
+    porExtenso, dataBR,
+  };
 })();
