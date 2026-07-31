@@ -253,6 +253,143 @@ function excluir(id) {
   return { ok: true, nome: turma.nome };
 }
 
+// ====================== Encerramento e renovacao ======================
+
+/**
+ * Encerra a turma no fim do periodo: as matriculas ativas viram "concluida"
+ * e a fila de espera e dispensada (a turma nao existe mais para chamar
+ * ninguem). Os encontros futuros sem chamada saem do calendario; os
+ * passados ficam, porque sao o historico do que aconteceu.
+ */
+function encerrar(id, { data_fim } = {}) {
+  const db = getDb();
+  const turma = obter(id);
+  if (turma.status === 'encerrada') throw new AppError('Esta turma já está encerrada.');
+
+  const fim = String(data_fim || '').trim() || new Date().toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fim)) throw new AppError('Informe uma data de encerramento válida.');
+
+  const fechar = db.transaction(() => {
+    db.prepare("UPDATE turmas SET status = 'encerrada', periodo_fim = ? WHERE id = ?").run(fim, id);
+    db.prepare(`
+      UPDATE matriculas SET status = 'concluida', data_saida = ?
+      WHERE turma_id = ? AND status = 'ativa'
+    `).run(fim, id);
+    db.prepare("UPDATE matriculas SET status = 'desistente', data_saida = ? WHERE turma_id = ? AND status = 'espera'").run(fim, id);
+    db.prepare(`
+      DELETE FROM agendamentos WHERE turma_id = ? AND date(data) > date(?)
+        AND NOT EXISTS (SELECT 1 FROM presencas p WHERE p.agendamento_id = agendamentos.id)
+    `).run(id, fim);
+  });
+  fechar();
+  return obter(id);
+}
+
+/**
+ * Renova a turma para o periodo seguinte: cria uma turma nova com o mesmo
+ * curso, horarios, instrutores e acervo, e leva junto os alunos escolhidos.
+ *
+ * A turma anterior e encerrada (a nao ser que se peca o contrario), para o
+ * historico de cada semestre ficar separado — que e o ponto de ter periodo.
+ */
+function renovar(id, dados = {}) {
+  const db = getDb();
+  const origem = obter(id);
+
+  const inicio = String(dados.periodo_inicio || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(inicio)) throw new AppError('Informe a data de início do novo período.');
+  const fim = String(dados.periodo_fim || '').trim() || null;
+  if (fim && fim < inicio) throw new AppError('O fim do período não pode ser antes do início.');
+
+  // Quem vai junto: por padrao, todo mundo que estava ativo.
+  const ativos = origem.matriculas.filter((m) => m.status === 'ativa').map((m) => m.aluno_id);
+  const levar = Array.isArray(dados.alunos) ? dados.alunos.map(Number).filter((a) => ativos.includes(a)) : ativos;
+
+  const vagas = dados.vagas !== undefined && dados.vagas !== '' ? Number(dados.vagas) : origem.vagas;
+  if (levar.length > vagas) {
+    throw new AppError(`Você escolheu ${levar.length} aluno(s) para continuar, mas a turma nova tem ${vagas} vaga(s).`);
+  }
+
+  // A ORDEM importa: a turma velha precisa fechar ANTES de a nova nascer.
+  // Enquanto ela estiver aberta no mesmo dia e horario, ela segura os
+  // instrumentos do acervo e a turma nova nao teria violao para ninguem.
+  // Tudo numa transacao so: se a criacao falhar, a origem nao fica encerrada
+  // sem substituta.
+  const executar = db.transaction(() => {
+    if (dados.encerrar_origem !== false) {
+      const fimOrigem = (dados.data_fim_origem || '').trim() || inicio;
+      db.prepare("UPDATE turmas SET status = 'encerrada', periodo_fim = ? WHERE id = ?").run(fimOrigem, id);
+      db.prepare("UPDATE matriculas SET status = 'concluida', data_saida = ? WHERE turma_id = ? AND status = 'ativa'").run(fimOrigem, id);
+      db.prepare("UPDATE matriculas SET status = 'desistente', data_saida = ? WHERE turma_id = ? AND status = 'espera'").run(fimOrigem, id);
+      db.prepare(`
+        DELETE FROM agendamentos WHERE turma_id = ? AND date(data) >= date(?)
+          AND NOT EXISTS (SELECT 1 FROM presencas p WHERE p.agendamento_id = agendamentos.id)
+      `).run(id, inicio);
+    }
+
+    const nova = criar({
+      curso_id: origem.curso_id,
+      nome: (dados.nome || '').trim() || origem.nome,
+      instrumento_id: origem.instrumento_id,
+      instrumentos_por_aluno: origem.instrumentos_por_aluno,
+      vagas,
+      sala: dados.sala !== undefined ? dados.sala : origem.sala,
+      periodo_inicio: inicio,
+      periodo_fim: fim,
+      status: 'aberta',
+      observacao: origem.observacao,
+      horarios: origem.horarios.map((h) => ({ dia_semana: h.dia_semana, hora_inicio: h.hora_inicio, hora_fim: h.hora_fim })),
+      instrutores: origem.instrutores.map((i) => ({ profissional_id: i.profissional_id, papel: i.papel })),
+    });
+
+    db.prepare('UPDATE turmas SET turma_origem_id = ?, periodo_rotulo = ? WHERE id = ?')
+      .run(id, (dados.periodo_rotulo || '').trim() || null, nova.id);
+
+    const naoCouberam = [];
+    levar.forEach((alunoId) => {
+      try { matricular(nova.id, { aluno_id: alunoId }); }
+      catch (e) {
+        const p = db.prepare('SELECT nome FROM clientes WHERE id = ?').get(alunoId);
+        naoCouberam.push({ aluno_id: alunoId, nome: p && p.nome, motivo: e.message });
+      }
+    });
+    return { novaId: nova.id, naoCouberam };
+  });
+
+  const { novaId, naoCouberam } = executar();
+
+  return {
+    turma: obter(novaId),
+    origem: obter(id),
+    alunos_levados: levar.length - naoCouberam.length,
+    nao_couberam: naoCouberam,
+  };
+}
+
+/** As gerações da turma: de onde ela veio e o que veio dela. */
+function historicoDaTurma(id) {
+  const db = getDb();
+  obter(id);
+  const linha = db.prepare(`
+    WITH RECURSIVE anteriores(id) AS (
+      SELECT turma_origem_id FROM turmas WHERE id = @id AND turma_origem_id IS NOT NULL
+      UNION
+      SELECT t.turma_origem_id FROM turmas t JOIN anteriores a ON t.id = a.id WHERE t.turma_origem_id IS NOT NULL
+    ),
+    seguintes(id) AS (
+      SELECT id FROM turmas WHERE turma_origem_id = @id
+      UNION
+      SELECT t.id FROM turmas t JOIN seguintes s ON t.turma_origem_id = s.id
+    )
+    SELECT t.id, t.nome, t.periodo_inicio, t.periodo_fim, t.periodo_rotulo, t.status,
+      (SELECT COUNT(*) FROM matriculas m WHERE m.turma_id = t.id AND m.status IN ('ativa','concluida')) AS alunos
+    FROM turmas t
+    WHERE t.id = @id OR t.id IN (SELECT id FROM anteriores) OR t.id IN (SELECT id FROM seguintes)
+    ORDER BY date(t.periodo_inicio), t.id
+  `).all({ id: Number(id) });
+  return linha.map((t) => ({ ...t, atual: Number(t.id) === Number(id) }));
+}
+
 // ============================== Matriculas ==============================
 
 /**
@@ -519,6 +656,7 @@ function gerarEncontrosPendentes() {
 
 module.exports = {
   listar, obter, criar, atualizar, excluir,
+  encerrar, renovar, historicoDaTurma,
   matricular, mudarStatusMatricula, removerMatricula,
   gerarEncontros, gerarEncontrosPendentes, limparEncontrosForaDoHorario,
   sugerirSubstitutos, definirInstrutorDoEncontro,

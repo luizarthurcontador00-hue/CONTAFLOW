@@ -143,6 +143,125 @@ function registrarAutorizacao(alunoId, { tipo, entregue, data_entrega, observaca
   return getDb().prepare('SELECT * FROM autorizacoes WHERE aluno_id = ? AND tipo = ?').get(alunoId, t);
 }
 
+// ============================ Ficha do aluno ============================
+
+/**
+ * Tudo o que o instituto sabe sobre uma pessoa, num lugar so: dados, quem
+ * responde por ela, em que turmas esta (e esteve), como anda a frequencia,
+ * que instrumento levou para casa e quais termos ja entregou.
+ *
+ * Hoje isso esta espalhado por cinco telas — e a secretaria precisa disso
+ * junto quando a mae liga.
+ */
+function fichaDoAluno(alunoId) {
+  const db = getDb();
+  const aluno = db.prepare(`
+    SELECT c.*,
+      CAST((julianday('now','localtime') - julianday(c.data_nascimento)) / 365.25 AS INTEGER) AS idade
+    FROM clientes c WHERE c.id = ?
+  `).get(alunoId);
+  if (!aluno) throw new AppError('Pessoa não encontrada.', 404);
+
+  const matriculas = db.prepare(`
+    SELECT m.id, m.status, m.data_matricula, m.data_saida, m.observacao,
+      t.id AS turma_id, t.nome AS turma_nome, t.sala, t.periodo_inicio, t.periodo_fim, t.periodo_rotulo,
+      t.status AS turma_status, cu.nome AS curso_nome, cu.categoria AS curso_categoria, cu.carga_horaria,
+      (SELECT GROUP_CONCAT(p.nome, ', ') FROM turmas_instrutores ti
+        JOIN profissionais p ON p.id = ti.profissional_id WHERE ti.turma_id = t.id) AS instrutores
+    FROM matriculas m
+    JOIN turmas t ON t.id = m.turma_id
+    JOIN cursos cu ON cu.id = t.curso_id
+    WHERE m.aluno_id = ?
+    ORDER BY (m.status = 'ativa') DESC, date(t.periodo_inicio) DESC
+  `).all(alunoId);
+
+  const DIAS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+  matriculas.forEach((m) => {
+    m.horarios = db.prepare('SELECT * FROM turmas_horarios WHERE turma_id = ? ORDER BY dia_semana, hora_inicio').all(m.turma_id)
+      .map((h) => `${DIAS[h.dia_semana] || h.dia_semana} ${h.hora_inicio}–${h.hora_fim}`).join(' · ');
+
+    const f = db.prepare(`
+      SELECT COUNT(*) AS encontros,
+        SUM(CASE WHEN pr.situacao = 'presente' THEN 1 ELSE 0 END) AS presencas,
+        SUM(CASE WHEN pr.situacao = 'falta' THEN 1 ELSE 0 END) AS faltas,
+        SUM(CASE WHEN pr.situacao = 'justificada' THEN 1 ELSE 0 END) AS justificadas
+      FROM presencas pr JOIN agendamentos a ON a.id = pr.agendamento_id
+      WHERE a.turma_id = ? AND pr.aluno_id = ?
+    `).get(m.turma_id, alunoId);
+    m.frequencia = {
+      encontros: f.encontros || 0,
+      presencas: f.presencas || 0,
+      faltas: f.faltas || 0,
+      justificadas: f.justificadas || 0,
+      percentual: f.encontros ? Math.round((f.presencas / f.encontros) * 100) : null,
+    };
+  });
+
+  const emprestimos = db.prepare(`
+    SELECT e.*, u.numero, i.nome AS instrumento_nome
+    FROM emprestimos_instrumento e
+    JOIN instrumentos_unidades u ON u.id = e.unidade_id
+    JOIN instrumentos i ON i.id = u.instrumento_id
+    WHERE e.aluno_id = ? ORDER BY date(e.data_emprestimo) DESC
+  `).all(alunoId);
+
+  const proprios = db.prepare(`
+    SELECT ap.*, i.nome AS instrumento_nome
+    FROM alunos_instrumentos_proprios ap JOIN instrumentos i ON i.id = ap.instrumento_id
+    WHERE ap.aluno_id = ?
+  `).all(alunoId);
+
+  const autorizacoes = db.prepare('SELECT * FROM autorizacoes WHERE aluno_id = ?').all(alunoId);
+
+  const totalEncontros = matriculas.reduce((s, m) => s + m.frequencia.encontros, 0);
+  const totalPresencas = matriculas.reduce((s, m) => s + m.frequencia.presencas, 0);
+
+  return {
+    aluno,
+    matriculas,
+    emprestimos: emprestimos.map((e) => ({ ...e, em_aberto: !e.data_devolucao })),
+    instrumentos_proprios: proprios,
+    autorizacoes,
+    resumo: {
+      turmas_ativas: matriculas.filter((m) => m.status === 'ativa').length,
+      turmas_no_historico: matriculas.length,
+      encontros: totalEncontros,
+      presencas: totalPresencas,
+      frequencia_geral: totalEncontros ? Math.round((totalPresencas / totalEncontros) * 100) : null,
+      instrumento_em_casa: emprestimos.filter((e) => !e.data_devolucao).length,
+    },
+    emitido_em: new Date().toISOString().slice(0, 10),
+  };
+}
+
+/**
+ * Dados da declaracao de matricula: o documento que a escola, o posto ou o
+ * programa social pede para comprovar que a pessoa frequenta o instituto.
+ */
+function declaracaoMatricula(alunoId, { turma_id } = {}) {
+  const ficha = fichaDoAluno(alunoId);
+  const ativas = ficha.matriculas.filter((m) => m.status === 'ativa');
+  const escolhidas = turma_id ? ativas.filter((m) => String(m.turma_id) === String(turma_id)) : ativas;
+  if (!escolhidas.length) {
+    throw new AppError(`${ficha.aluno.nome} não tem matrícula ativa para declarar.`);
+  }
+  return { aluno: ficha.aluno, matriculas: escolhidas, emitido_em: ficha.emitido_em };
+}
+
+/**
+ * Dados do certificado de conclusao: so faz sentido para quem concluiu a
+ * turma. A carga horaria vem do curso; a frequencia, da chamada.
+ */
+function certificadoConclusao(alunoId, turmaId) {
+  const ficha = fichaDoAluno(alunoId);
+  const m = ficha.matriculas.find((x) => String(x.turma_id) === String(turmaId));
+  if (!m) throw new AppError('Esta pessoa não esteve nesta turma.', 404);
+  if (m.status !== 'concluida') {
+    throw new AppError('O certificado é para quem concluiu a turma. Marque a matrícula como concluída (ou encerre a turma) antes de emitir.');
+  }
+  return { aluno: ficha.aluno, matricula: m, emitido_em: ficha.emitido_em };
+}
+
 // ========================= Relatorio de impacto =========================
 
 /**
@@ -227,5 +346,6 @@ function relatorioImpacto({ de, ate } = {}) {
 module.exports = {
   listarAtas, obterAta, criarAta, atualizarAta, excluirAta,
   listarAutorizacoes, registrarAutorizacao, TIPOS_AUTORIZACAO,
+  fichaDoAluno, declaracaoMatricula, certificadoConclusao,
   relatorioImpacto,
 };

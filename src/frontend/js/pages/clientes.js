@@ -165,6 +165,53 @@ window.PaginaClientes = (function () {
         });
         foot.insertBefore(bDel, foot.firstChild);
         foot.insertBefore(bEdit, foot.firstChild);
+
+        // No instituto, a secretaria precisa dos papéis do aluno na mão.
+        if (ehInstituto()) {
+          const bFicha = document.createElement('button');
+          bFicha.className = 'btn btn--secundario'; bFicha.textContent = '📄 Ficha em PDF';
+          bFicha.addEventListener('click', () => Documentos.fichaDoAluno(c.id));
+          const bDocs = document.createElement('button');
+          bDocs.className = 'btn btn--secundario'; bDocs.textContent = '🧾 Documentos';
+          bDocs.addEventListener('click', () => menuDocumentos(c));
+          foot.insertBefore(bDocs, foot.firstChild);
+          foot.insertBefore(bFicha, foot.firstChild);
+        }
+      },
+    });
+  }
+
+  /** Escolhe qual documento emitir para o aluno (declaração ou certificado). */
+  async function menuDocumentos(cliente) {
+    let ficha;
+    try { ficha = await API.get(`/api/instituto/ficha-aluno/${cliente.id}`); }
+    catch (e) { UI.erro(e.message); return; }
+
+    const ativas = ficha.matriculas.filter((m) => m.status === 'ativa');
+    const concluidas = ficha.matriculas.filter((m) => m.status === 'concluida');
+
+    Modal.abrir({
+      titulo: `Documentos — ${cliente.nome}`, tamanho: 'modal--pequeno', mostrarConfirmar: false,
+      corpoHTML: `
+        <div class="campo">
+          <label>Declaração de matrícula</label>
+          ${ativas.length
+            ? `<p class="dica" style="margin-top:0">Comprova que o aluno frequenta o instituto (${ativas.map((m) => UI.escapar(m.curso_nome)).join(', ')}).</p>
+               <button class="btn" id="doc-matricula">📄 Emitir declaração</button>`
+            : '<p class="dica" style="margin-top:0">Só sai para quem tem matrícula ativa. Este aluno não está em nenhuma turma aberta.</p>'}
+        </div>
+        <div class="campo mt-16" style="border-top:1px solid var(--borda);padding-top:16px">
+          <label>Certificado de conclusão</label>
+          ${concluidas.length
+            ? `<select id="doc-turma">${concluidas.map((m) => `<option value="${m.turma_id}">${UI.escapar(m.curso_nome)} — ${UI.escapar(m.turma_nome)}</option>`).join('')}</select>
+               <button class="btn mt-16" id="doc-certificado">🎓 Emitir certificado</button>`
+            : '<p class="dica" style="margin-top:0">Sai para turma concluída. Encerre a turma (ou marque a matrícula como concluída) para liberar.</p>'}
+        </div>`,
+      aoAbrir: (el) => {
+        const bm = el.querySelector('#doc-matricula');
+        if (bm) bm.addEventListener('click', () => Documentos.declaracaoMatricula(cliente.id));
+        const bc = el.querySelector('#doc-certificado');
+        if (bc) bc.addEventListener('click', () => Documentos.certificado(cliente.id, el.querySelector('#doc-turma').value));
       },
     });
   }

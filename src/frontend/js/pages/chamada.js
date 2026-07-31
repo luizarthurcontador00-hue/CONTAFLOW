@@ -18,6 +18,7 @@ window.PaginaChamada = (function () {
         <div class="cresce"></div>
         <button class="btn btn--secundario" id="ch-hoje">Hoje</button>
         <button class="btn btn--secundario" id="ch-risco">⚠️ Alunos em risco</button>
+        <button class="btn" id="ch-imprimir">🖨️ Folha para imprimir</button>
       </div>
       <div class="card"><div id="ch-lista">Carregando…</div></div>`;
 
@@ -35,8 +36,36 @@ window.PaginaChamada = (function () {
       listar();
     });
     container.querySelector('#ch-risco').addEventListener('click', alunosEmRisco);
+    container.querySelector('#ch-imprimir').addEventListener('click', folhaParaImprimir);
 
     listar();
+  }
+
+  /**
+   * Gera a folha em branco do mês para o instrutor levar e preencher a mão.
+   * Depois ele (ou a secretaria) digita a chamada aqui no computador.
+   */
+  function folhaParaImprimir() {
+    if (!turmas.length) { UI.erro('Não há turma aberta para gerar a folha.'); return; }
+    const mesAtual = new Date().toISOString().slice(0, 7);
+    Modal.abrir({
+      titulo: 'Folha de chamada para imprimir', tamanho: 'modal--pequeno', textoConfirmar: '🖨️ Gerar PDF',
+      corpoHTML: `
+        <p class="dica" style="margin-top:0">Sai uma folha por turma, com os alunos nas linhas e as datas das aulas do mês nas colunas —
+        para o instrutor levar impressa e marcar à mão. Depois é só digitar a chamada aqui.</p>
+        <div class="campo"><label>Turma *</label>
+          <select id="fi-turma">
+            ${turmas.map((t) => `<option value="${t.id}" ${String(filtro.turma_id) === String(t.id) ? 'selected' : ''}>${UI.escapar(t.nome)}</option>`).join('')}
+          </select></div>
+        <div class="campo mt-16"><label>Mês *</label>
+          <input type="month" id="fi-mes" value="${mesAtual}" /></div>`,
+      aoConfirmar: async (el) => {
+        const turmaId = el.querySelector('#fi-turma').value;
+        const mes = el.querySelector('#fi-mes').value;
+        if (!turmaId || !mes) { UI.erro('Escolha a turma e o mês.'); return false; }
+        await Documentos.folhaDeChamada(turmaId, mes);
+      },
+    });
   }
 
   async function listar() {

@@ -111,6 +111,74 @@ function registrarChamada(agendamentoId, { presencas, profissional_id }) {
   return folhaDeChamada(agendamentoId);
 }
 
+/**
+ * Folha em branco para o instrutor levar impressa e preencher a mao — os
+ * alunos nas linhas, as datas dos encontros nas colunas.
+ *
+ * O instrutor esta com o violao na mao, nao com o notebook: a chamada de
+ * papel e o que garante que o dado exista para ser digitado depois.
+ */
+function folhaParaImpressao(turmaId, { mes, de, ate } = {}) {
+  const db = getDb();
+  const turma = db.prepare(`
+    SELECT t.*, c.nome AS curso_nome, c.carga_horaria
+    FROM turmas t JOIN cursos c ON c.id = t.curso_id WHERE t.id = ?
+  `).get(turmaId);
+  if (!turma) throw new AppError('Turma não encontrada.', 404);
+
+  let inicio = de;
+  let fim = ate;
+  if (mes && /^\d{4}-\d{2}$/.test(mes)) {
+    const [a, m] = mes.split('-').map(Number);
+    inicio = `${mes}-01`;
+    fim = `${mes}-${String(new Date(a, m, 0).getDate()).padStart(2, '0')}`;
+  }
+  if (!inicio || !fim) {
+    const hoje = new Date();
+    const ym = hoje.toISOString().slice(0, 7);
+    inicio = `${ym}-01`;
+    fim = `${ym}-${String(new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate()).padStart(2, '0')}`;
+  }
+
+  const DIAS_CURTO = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+  const encontros = db.prepare(`
+    SELECT a.id, a.data, a.hora_inicio, a.hora_fim,
+      (SELECT COUNT(*) FROM presencas pr WHERE pr.agendamento_id = a.id) AS ja_tem_chamada
+    FROM agendamentos a
+    WHERE a.turma_id = ? AND a.status != 'cancelado'
+      AND date(a.data) BETWEEN date(?) AND date(?)
+    ORDER BY a.data, a.hora_inicio
+  `).all(turmaId, inicio, fim).map((e) => {
+    const d = new Date(e.data + 'T00:00:00');
+    return {
+      ...e,
+      dia: String(d.getDate()).padStart(2, '0'),
+      mes_curto: String(d.getMonth() + 1).padStart(2, '0'),
+      dia_semana: DIAS_CURTO[d.getDay()],
+      ja_tem_chamada: e.ja_tem_chamada > 0,
+    };
+  });
+
+  const alunos = db.prepare(`
+    SELECT cl.id, cl.nome, cl.telefone, cl.responsavel_nome, cl.responsavel_telefone
+    FROM matriculas m JOIN clientes cl ON cl.id = m.aluno_id
+    WHERE m.turma_id = ? AND m.status = 'ativa'
+    ORDER BY cl.nome COLLATE NOCASE
+  `).all(turmaId);
+
+  const instrutores = db.prepare(`
+    SELECT p.nome, ti.papel FROM turmas_instrutores ti
+    JOIN profissionais p ON p.id = ti.profissional_id
+    WHERE ti.turma_id = ? ORDER BY ti.papel, p.nome
+  `).all(turmaId);
+
+  const DIAS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+  const horarios = db.prepare('SELECT * FROM turmas_horarios WHERE turma_id = ? ORDER BY dia_semana, hora_inicio').all(turmaId)
+    .map((h) => `${DIAS[h.dia_semana] || h.dia_semana} ${h.hora_inicio}–${h.hora_fim}`);
+
+  return { turma, periodo: { de: inicio, ate: fim }, horarios, instrutores, encontros, alunos };
+}
+
 /** Frequencia por aluno numa turma: quantos encontros teve, quantos foi. */
 function frequenciaDaTurma(turmaId) {
   const db = getDb();
@@ -180,28 +248,147 @@ function alunosEmRisco(minimoFaltas = 3) {
     .sort((a, b) => b.faltas_seguidas - a.faltas_seguidas);
 }
 
+// ========================= Horas de voluntariado =========================
+
+const TIPOS_ATIVIDADE = {
+  evento: 'Evento / apresentação',
+  manutencao: 'Manutenção do acervo',
+  administrativo: 'Administrativo',
+  captacao: 'Captação de recursos',
+  reuniao: 'Reunião',
+  outro: 'Outro',
+};
+
 /**
  * Horas de voluntariado por pessoa no periodo — base da declaracao que o
  * voluntario costuma precisar.
+ *
+ * Conta as aulas dadas E as atividades fora da sala (evento, manutencao,
+ * administrativo). Quem monta o palco do recital doou o tempo dele igual a
+ * quem deu aula; antes so o segundo aparecia.
  */
 function horasVoluntariado({ de, ate } = {}) {
-  return getDb().prepare(`
-    SELECT p.id, p.nome, p.tipo, p.documento,
+  const db = getDb();
+  const p = { de: de || null, ate: ate || null };
+
+  const porAula = db.prepare(`
+    SELECT p.id, p.nome, p.tipo, p.documento, p.telefone,
       COUNT(a.id) AS aulas_dadas,
       ROUND(SUM(
         (CAST(substr(a.hora_fim,1,2) AS REAL) * 60 + CAST(substr(a.hora_fim,4,2) AS REAL))
         - (CAST(substr(a.hora_inicio,1,2) AS REAL) * 60 + CAST(substr(a.hora_inicio,4,2) AS REAL))
-      ) / 60.0, 1) AS horas
+      ) / 60.0, 1) AS horas_aula
     FROM agendamentos a
     JOIN profissionais p ON p.id = a.profissional_id
     WHERE a.turma_id IS NOT NULL AND a.status = 'atendido' AND a.hora_fim IS NOT NULL
       AND (@de IS NULL OR a.data >= @de) AND (@ate IS NULL OR a.data <= @ate)
-    GROUP BY p.id, p.nome, p.tipo, p.documento
-    ORDER BY horas DESC, p.nome
-  `).all({ de: de || null, ate: ate || null });
+    GROUP BY p.id, p.nome, p.tipo, p.documento, p.telefone
+  `).all(p);
+
+  const porAtividade = db.prepare(`
+    SELECT p.id, p.nome, p.tipo, p.documento, p.telefone,
+      COUNT(v.id) AS atividades,
+      ROUND(SUM(v.horas), 1) AS horas_atividade
+    FROM voluntarios_atividades v
+    JOIN profissionais p ON p.id = v.profissional_id
+    WHERE (@de IS NULL OR v.data >= @de) AND (@ate IS NULL OR v.data <= @ate)
+    GROUP BY p.id, p.nome, p.tipo, p.documento, p.telefone
+  `).all(p);
+
+  const mapa = new Map();
+  const somar = (r, campo, valor, contagem, campoContagem) => {
+    const atual = mapa.get(r.id) || {
+      id: r.id, nome: r.nome, tipo: r.tipo, documento: r.documento, telefone: r.telefone,
+      aulas_dadas: 0, atividades: 0, horas_aula: 0, horas_atividade: 0,
+    };
+    atual[campo] = Number(valor || 0);
+    atual[campoContagem] = Number(contagem || 0);
+    mapa.set(r.id, atual);
+  };
+  porAula.forEach((r) => somar(r, 'horas_aula', r.horas_aula, r.aulas_dadas, 'aulas_dadas'));
+  porAtividade.forEach((r) => somar(r, 'horas_atividade', r.horas_atividade, r.atividades, 'atividades'));
+
+  return Array.from(mapa.values())
+    .map((v) => ({ ...v, horas: Number((v.horas_aula + v.horas_atividade).toFixed(1)) }))
+    .filter((v) => v.horas > 0 || v.aulas_dadas > 0 || v.atividades > 0)
+    .sort((a, b) => b.horas - a.horas || a.nome.localeCompare(b.nome));
+}
+
+/** Quanto tempo a atividade durou: pelos horarios, ou pelo valor informado. */
+function horasDaAtividade({ hora_inicio, hora_fim, horas }) {
+  const ini = String(hora_inicio || '').trim();
+  const fim = String(hora_fim || '').trim();
+  if (/^\d{2}:\d{2}$/.test(ini) && /^\d{2}:\d{2}$/.test(fim)) {
+    const min = (h) => Number(h.slice(0, 2)) * 60 + Number(h.slice(3, 5));
+    const total = min(fim) - min(ini);
+    if (total <= 0) throw new AppError('O horário de término precisa ser depois do de início.');
+    return Number((total / 60).toFixed(2));
+  }
+  const informadas = Number(horas);
+  if (!(informadas > 0)) throw new AppError('Informe o horário de início e fim, ou quantas horas foram.');
+  return Number(informadas.toFixed(2));
+}
+
+function listarAtividades({ profissional_id, de, ate } = {}) {
+  const where = [];
+  if (profissional_id) where.push('v.profissional_id = @profissional_id');
+  if (de) where.push('v.data >= @de');
+  if (ate) where.push('v.data <= @ate');
+  return getDb().prepare(`
+    SELECT v.*, p.nome AS voluntario_nome
+    FROM voluntarios_atividades v JOIN profissionais p ON p.id = v.profissional_id
+    ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+    ORDER BY v.data DESC, v.id DESC
+  `).all({ profissional_id: profissional_id ? Number(profissional_id) : null, de: de || null, ate: ate || null });
+}
+
+function registrarAtividade(dados) {
+  const db = getDb();
+  const profissionalId = Number(dados.profissional_id);
+  const pessoa = db.prepare('SELECT * FROM profissionais WHERE id = ?').get(profissionalId);
+  if (!pessoa) throw new AppError('Selecione um voluntário válido.');
+
+  const data = String(dados.data || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) throw new AppError('Informe a data da atividade.');
+
+  const horas = horasDaAtividade(dados);
+  const tipo = Object.keys(TIPOS_ATIVIDADE).includes(dados.tipo) ? dados.tipo : 'outro';
+
+  const info = db.prepare(`
+    INSERT INTO voluntarios_atividades (profissional_id, data, hora_inicio, hora_fim, horas, tipo, descricao)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(profissionalId, data,
+    String(dados.hora_inicio || '').trim() || null,
+    String(dados.hora_fim || '').trim() || null,
+    horas, tipo, (dados.descricao || '').trim() || null);
+
+  return db.prepare('SELECT * FROM voluntarios_atividades WHERE id = ?').get(info.lastInsertRowid);
+}
+
+function atualizarAtividade(id, dados) {
+  const db = getDb();
+  const atual = db.prepare('SELECT * FROM voluntarios_atividades WHERE id = ?').get(id);
+  if (!atual) throw new AppError('Atividade não encontrada.', 404);
+  const mesclado = { ...atual, ...dados };
+  const horas = horasDaAtividade(mesclado);
+  const tipo = Object.keys(TIPOS_ATIVIDADE).includes(mesclado.tipo) ? mesclado.tipo : 'outro';
+  db.prepare(`
+    UPDATE voluntarios_atividades SET data=?, hora_inicio=?, hora_fim=?, horas=?, tipo=?, descricao=?
+    WHERE id=?
+  `).run(mesclado.data,
+    String(mesclado.hora_inicio || '').trim() || null,
+    String(mesclado.hora_fim || '').trim() || null,
+    horas, tipo, (mesclado.descricao || '').trim() || null, id);
+  return db.prepare('SELECT * FROM voluntarios_atividades WHERE id = ?').get(id);
+}
+
+function excluirAtividade(id) {
+  getDb().prepare('DELETE FROM voluntarios_atividades WHERE id = ?').run(id);
+  return { ok: true };
 }
 
 module.exports = {
-  listarEncontros, folhaDeChamada, registrarChamada,
+  listarEncontros, folhaDeChamada, registrarChamada, folhaParaImpressao,
   frequenciaDaTurma, alunosEmRisco, horasVoluntariado, SITUACOES,
+  listarAtividades, registrarAtividade, atualizarAtividade, excluirAtividade, TIPOS_ATIVIDADE,
 };

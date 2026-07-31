@@ -19,6 +19,11 @@ router.get('/autorizacoes', asyncHandler((req, res) => res.json(inst.listarAutor
 }))));
 router.post('/autorizacoes/:alunoId', asyncHandler((req, res) => res.json(inst.registrarAutorizacao(req.params.alunoId, req.body || {}))));
 
+// ---------------------- Ficha e documentos do aluno ----------------------
+router.get('/ficha-aluno/:id', asyncHandler((req, res) => res.json(inst.fichaDoAluno(req.params.id))));
+router.get('/declaracao-matricula/:id', asyncHandler((req, res) => res.json(inst.declaracaoMatricula(req.params.id, req.query))));
+router.get('/certificado/:alunoId/:turmaId', asyncHandler((req, res) => res.json(inst.certificadoConclusao(req.params.alunoId, req.params.turmaId))));
+
 // ------------------------ Relatorio de impacto ------------------------
 router.get('/impacto', asyncHandler((req, res) => res.json(inst.relatorioImpacto(req.query))));
 

@@ -12,6 +12,13 @@ router.get('/alunos-em-risco', asyncHandler((req, res) => res.json(presencas.alu
 router.get('/horas-voluntariado', asyncHandler((req, res) => res.json(presencas.horasVoluntariado(req.query))));
 router.get('/encontros', asyncHandler((req, res) => res.json(presencas.listarEncontros(req.query))));
 
+// ------------------- Atividades de voluntariado (fora da aula) -------------------
+router.get('/voluntarios/atividades', asyncHandler((req, res) => res.json(presencas.listarAtividades(req.query))));
+router.get('/voluntarios/atividades/tipos', asyncHandler((req, res) => res.json(presencas.TIPOS_ATIVIDADE)));
+router.post('/voluntarios/atividades', asyncHandler((req, res) => res.status(201).json(presencas.registrarAtividade(req.body || {}))));
+router.put('/voluntarios/atividades/:id', asyncHandler((req, res) => res.json(presencas.atualizarAtividade(req.params.id, req.body || {}))));
+router.delete('/voluntarios/atividades/:id', asyncHandler((req, res) => res.json(presencas.excluirAtividade(req.params.id))));
+
 // --------------------------- Substituto ---------------------------
 router.get('/encontros/:agendamentoId/substitutos', asyncHandler((req, res) => res.json(turmas.sugerirSubstitutos(req.params.agendamentoId))));
 router.post('/encontros/:agendamentoId/instrutor', asyncHandler((req, res) => res.json(turmas.definirInstrutorDoEncontro(req.params.agendamentoId, (req.body || {}).profissional_id))));
@@ -27,6 +34,12 @@ router.get('/:id', asyncHandler((req, res) => res.json(turmas.obter(req.params.i
 router.put('/:id', asyncHandler((req, res) => res.json(turmas.atualizar(req.params.id, req.body || {}))));
 router.delete('/:id', asyncHandler((req, res) => res.json(turmas.excluir(req.params.id))));
 router.get('/:id/frequencia', asyncHandler((req, res) => res.json(presencas.frequenciaDaTurma(req.params.id))));
+router.get('/:id/folha-impressao', asyncHandler((req, res) => res.json(presencas.folhaParaImpressao(req.params.id, req.query))));
+
+// -------------------------- Periodo / renovacao --------------------------
+router.get('/:id/historico', asyncHandler((req, res) => res.json(turmas.historicoDaTurma(req.params.id))));
+router.post('/:id/encerrar', asyncHandler((req, res) => res.json(turmas.encerrar(req.params.id, req.body || {}))));
+router.post('/:id/renovar', asyncHandler((req, res) => res.json(turmas.renovar(req.params.id, req.body || {}))));
 
 // ------------------------------ Matriculas ------------------------------
 router.post('/:id/matriculas', asyncHandler((req, res) => res.status(201).json(turmas.matricular(req.params.id, req.body || {}))));

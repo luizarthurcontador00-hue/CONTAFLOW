@@ -133,7 +133,9 @@ window.PaginaTurmas = (function () {
         <p class="dica">
           ${UI.escapar(resumoHorarios(t.horarios))} ·
           Período: ${UI.escapar(t.periodo_inicio)}${t.periodo_fim ? ' até ' + UI.escapar(t.periodo_fim) : ''}
+          ${t.periodo_rotulo ? ` · <span class="badge badge--muted">${UI.escapar(t.periodo_rotulo)}</span>` : ''}
         </p>
+        <div id="tu-historico"></div>
 
         <div class="flex gap-12 mt-16" style="flex-wrap:wrap">
           <span class="badge ${t.matriculados >= t.vagas ? 'badge--alerta' : 'badge--ok'}">${t.matriculados} de ${t.vagas} vagas</span>
@@ -149,18 +151,140 @@ window.PaginaTurmas = (function () {
         <div id="tu-alunos"></div>
 
         <div class="flex gap-12 mt-16" style="flex-wrap:wrap">
-          <button class="btn" type="button" id="tu-matricular">+ Matricular aluno</button>
+          ${t.status === 'encerrada' ? '' : '<button class="btn" type="button" id="tu-matricular">+ Matricular aluno</button>'}
           <button class="btn btn--secundario" type="button" id="tu-frequencia">📊 Frequência</button>
+          <button class="btn btn--secundario" type="button" id="tu-folha">🖨️ Folha de chamada</button>
           <button class="btn btn--secundario" type="button" id="tu-editar">Editar turma</button>
+          <div class="cresce"></div>
+          ${t.status === 'encerrada'
+            ? ''
+            : `<button class="btn btn--secundario" type="button" id="tu-encerrar">Encerrar período</button>
+               <button class="btn" type="button" id="tu-renovar">🔁 Renovar para o próximo período</button>`}
         </div>`,
       aoAbrir: (el) => {
         desenharAlunos(el, t);
-        el.querySelector('#tu-matricular').addEventListener('click', () => matricular(t, el));
+        desenharHistorico(el, t.id);
+        const bm = el.querySelector('#tu-matricular');
+        if (bm) bm.addEventListener('click', () => matricular(t, el));
         el.querySelector('#tu-frequencia').addEventListener('click', () => verFrequencia(t.id));
+        el.querySelector('#tu-folha').addEventListener('click', () => Documentos.folhaDeChamada(t.id, new Date().toISOString().slice(0, 7)));
         el.querySelector('#tu-editar').addEventListener('click', () => {
           el.querySelector('[data-fechar]').click();
           formulario(t);
         });
+        const be = el.querySelector('#tu-encerrar');
+        if (be) be.addEventListener('click', () => encerrarTurma(t, el));
+        const br = el.querySelector('#tu-renovar');
+        if (br) br.addEventListener('click', () => renovarTurma(t, el));
+      },
+    });
+  }
+
+  /** As gerações da turma: 2026/1 → 2026/2 → … */
+  async function desenharHistorico(el, turmaId) {
+    const alvo = el.querySelector('#tu-historico');
+    if (!alvo) return;
+    let hist = [];
+    try { hist = await API.get(`/api/turmas/${turmaId}/historico`); } catch (_) { return; }
+    if (hist.length < 2) return;
+    alvo.innerHTML = `<p class="dica">🔁 Períodos desta turma:
+      ${hist.map((h) => {
+        const rotulo = h.periodo_rotulo || h.periodo_inicio;
+        return h.atual
+          ? `<strong>${UI.escapar(rotulo)}</strong>`
+          : `<a href="#" data-hist="${h.id}">${UI.escapar(rotulo)}</a>`;
+      }).join(' → ')}</p>`;
+    alvo.querySelectorAll('[data-hist]').forEach((a) => a.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      el.querySelector('[data-fechar]').click();
+      abrirTurma(Number(a.dataset.hist));
+    }));
+  }
+
+  function encerrarTurma(turma, elPai) {
+    const hoje = new Date().toISOString().slice(0, 10);
+    const ativos = turma.matriculas.filter((m) => m.status === 'ativa').length;
+    Modal.abrir({
+      titulo: `Encerrar — ${turma.nome}`, tamanho: 'modal--pequeno', textoConfirmar: 'Encerrar turma',
+      corpoHTML: `
+        <p class="dica" style="margin-top:0">Encerrar fecha o período da turma: ${ativos} matrícula(s) ativa(s) passam a
+        <strong>concluída</strong> (liberando o certificado), a fila de espera é dispensada e as aulas futuras que ainda
+        não tiveram chamada saem do calendário. O histórico e as chamadas já registradas ficam.</p>
+        <div class="campo"><label>Data de encerramento *</label><input type="date" id="en-data" value="${hoje}" /></div>
+        <div class="dica mt-16">Se a ideia é continuar com a mesma turma no próximo semestre, use
+        <strong>Renovar</strong> em vez disto — ele encerra e já abre a seguinte.</div>`,
+      aoConfirmar: async (el) => {
+        try {
+          await API.post(`/api/turmas/${turma.id}/encerrar`, { data_fim: el.querySelector('#en-data').value });
+          UI.sucesso('Turma encerrada.');
+          if (elPai) elPai.querySelector('[data-fechar]').click();
+          await listar();
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
+  function renovarTurma(turma, elPai) {
+    const ativos = turma.matriculas.filter((m) => m.status === 'ativa');
+    const hoje = new Date().toISOString().slice(0, 10);
+    const ano = new Date().getFullYear();
+    const semestre = new Date().getMonth() < 6 ? 2 : 1;
+    const sugestaoRotulo = semestre === 1 ? `${ano + 1}/1` : `${ano}/2`;
+
+    Modal.abrir({
+      titulo: `Renovar — ${turma.nome}`, tamanho: 'modal--grande', textoConfirmar: 'Renovar turma',
+      corpoHTML: `
+        <p class="dica" style="margin-top:0">Cria a turma do próximo período com o mesmo curso, horários, instrutores e
+        acervo, levando junto os alunos que você marcar. A turma atual é encerrada — assim cada semestre tem a sua
+        frequência e o seu certificado separados.</p>
+        <div class="form-grid">
+          <div class="campo"><label>Início do novo período *</label><input type="date" id="rn-inicio" value="${hoje}" /></div>
+          <div class="campo"><label>Fim <span class="dica">(opcional)</span></label><input type="date" id="rn-fim" /></div>
+          <div class="campo"><label>Identificação do período</label>
+            <input id="rn-rotulo" value="${sugestaoRotulo}" placeholder="Ex.: 2026/2" /></div>
+          <div class="campo"><label>Vagas</label><input type="number" id="rn-vagas" min="0" value="${turma.vagas}" /></div>
+        </div>
+        <div class="campo mt-16"><label>Nome da turma</label><input id="rn-nome" value="${UI.escapar(turma.nome)}" /></div>
+        <div class="campo mt-16" style="border-top:1px solid var(--borda);padding-top:16px">
+          <label>Quem continua no próximo período?</label>
+          ${ativos.length ? `
+            <div class="flex gap-12 mb-16"><button type="button" class="btn btn--secundario" id="rn-todos">Marcar todos</button>
+              <button type="button" class="btn btn--secundario" id="rn-nenhum">Desmarcar todos</button></div>
+            <div id="rn-alunos">${ativos.map((m) => `
+              <label class="flex gap-12" style="align-items:center;padding:5px 0">
+                <input type="checkbox" class="rn-aluno" value="${m.aluno_id}" checked />
+                <span>${UI.escapar(m.aluno_nome)}</span>
+              </label>`).join('')}</div>`
+            : '<p class="dica">Não há aluno ativo. A turma nova nasce vazia.</p>'}
+        </div>`,
+      aoConfirmar: async (el) => {
+        const inicio = el.querySelector('#rn-inicio').value;
+        if (!inicio) { UI.erro('Informe o início do novo período.'); return false; }
+        const escolhidos = Array.from(el.querySelectorAll('.rn-aluno:checked')).map((c) => Number(c.value));
+        try {
+          const r = await API.post(`/api/turmas/${turma.id}/renovar`, {
+            periodo_inicio: inicio,
+            periodo_fim: el.querySelector('#rn-fim').value || null,
+            periodo_rotulo: el.querySelector('#rn-rotulo').value,
+            nome: el.querySelector('#rn-nome').value,
+            vagas: el.querySelector('#rn-vagas').value,
+            alunos: escolhidos,
+          });
+          UI.sucesso(`Turma renovada com ${r.alunos_levados} aluno(s).`);
+          if (r.nao_couberam.length) {
+            UI.erro(`${r.nao_couberam.length} aluno(s) não entraram: ${r.nao_couberam.map((n) => `${n.nome} (${n.motivo})`).join(' · ')}`);
+          }
+          if (elPai) elPai.querySelector('[data-fechar]').click();
+          await listar();
+          abrirTurma(r.turma.id);
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+      aoAbrir: (el) => {
+        const marcar = (v) => el.querySelectorAll('.rn-aluno').forEach((c) => { c.checked = v; });
+        const bt = el.querySelector('#rn-todos');
+        if (bt) bt.addEventListener('click', () => marcar(true));
+        const bn = el.querySelector('#rn-nenhum');
+        if (bn) bn.addEventListener('click', () => marcar(false));
       },
     });
   }

@@ -24,6 +24,7 @@ window.PaginaVoluntarios = (function () {
             <option value="contratado">Somente contratados</option>
           </select>
         </div>
+        <button class="btn btn--secundario" id="vol-atividades">📋 Atividades</button>
         <button class="btn btn--secundario" id="vol-horas">⏱️ Horas de voluntariado</button>
         <button class="btn" id="vol-novo">+ Nova pessoa</button>
       </div>
@@ -32,6 +33,7 @@ window.PaginaVoluntarios = (function () {
     container.querySelector('#vol-tipo').addEventListener('change', (e) => { filtroTipo = e.target.value; listar(); });
     container.querySelector('#vol-novo').addEventListener('click', () => formulario(null));
     container.querySelector('#vol-horas').addEventListener('click', horasVoluntariado);
+    container.querySelector('#vol-atividades').addEventListener('click', () => atividades());
     listar();
   }
 
@@ -222,24 +224,26 @@ window.PaginaVoluntarios = (function () {
           } catch (e) { alvo.innerHTML = `<p class="dica">${UI.escapar(e.message)}</p>`; return; }
 
           alvo.innerHTML = !dados.length
-            ? '<p class="dica">Nenhuma aula realizada no período. As horas contam a partir das chamadas registradas.</p>'
+            ? '<p class="dica">Nada registrado no período. As horas vêm das chamadas das aulas e das atividades de apoio.</p>'
             : `<div class="rolagem"><table class="tabela">
-                <thead><tr><th>Voluntário</th><th>Aulas dadas</th><th>Horas</th><th></th></tr></thead>
+                <thead><tr><th>Voluntário</th><th>Aulas dadas</th><th>Outras atividades</th><th>Horas</th><th></th></tr></thead>
                 <tbody>
                   ${dados.map((d, i) => `
                     <tr>
                       <td>${UI.escapar(d.nome)}${d.tipo === 'voluntario' ? ' <span class="badge badge--ok">voluntário</span>' : ''}</td>
-                      <td>${d.aulas_dadas}</td>
+                      <td>${d.aulas_dadas}${d.horas_aula ? ` <span class="dica">${UI.escapar(String(d.horas_aula))}h</span>` : ''}</td>
+                      <td>${d.atividades || 0}${d.horas_atividade ? ` <span class="dica">${UI.escapar(String(d.horas_atividade))}h</span>` : ''}</td>
                       <td><strong>${UI.escapar(String(d.horas || 0))}h</strong></td>
                       <td style="text-align:right">
                         <button class="btn btn--secundario" data-decl="${i}">📄 Declaração</button>
                       </td>
                     </tr>`).join('')}
                 </tbody>
-              </table></div>`;
+              </table></div>
+              <p class="dica mt-16">As horas somam as aulas dadas (das chamadas registradas) com as atividades de apoio lançadas em "Atividades".</p>`;
 
           alvo.querySelectorAll('[data-decl]').forEach((b) => b.addEventListener('click', () => {
-            declaracao(dados[Number(b.dataset.decl)], de, ate);
+            Documentos.declaracaoVoluntariado(dados[Number(b.dataset.decl)], de, ate);
           }));
         }
         el.querySelector('#hv-de').addEventListener('change', carregar);
@@ -249,43 +253,129 @@ window.PaginaVoluntarios = (function () {
     });
   }
 
-  async function declaracao(pessoa, de, ate) {
-    let cfg = {}; let assinante = null;
-    try {
-      [cfg, assinante] = await Promise.all([
-        API.get('/api/config').catch(() => ({})),
-        API.get('/api/membros/assinante').catch(() => null),
-      ]);
-    } catch (_) { cfg = {}; }
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Declaração de voluntariado</title>
-      <style>
-        body{font-family:Georgia,serif;padding:56px;color:#111;line-height:1.9}
-        h1{font-size:19px;text-align:center;margin-bottom:2px}
-        .sub{text-align:center;color:#555;font-size:12px;margin-bottom:40px}
-        h2{font-size:16px;text-align:center;margin:28px 0}
-        .assinatura{margin-top:72px;border-top:1px solid #333;width:300px;text-align:center;padding-top:6px;font-size:12px;margin-left:auto;margin-right:auto}
-      </style></head><body>
-      <h1>${UI.escapar(cfg.nome_loja || 'Instituto')}</h1>
-      <div class="sub">
-        ${cfg.loja_cnpj ? 'CNPJ: ' + UI.escapar(cfg.loja_cnpj) : ''}
-        ${cfg.loja_endereco ? ' · ' + UI.escapar(cfg.loja_endereco) : ''}
-      </div>
-      <h2>DECLARAÇÃO DE TRABALHO VOLUNTÁRIO</h2>
-      <p>Declaramos, para os devidos fins, que <strong>${UI.escapar(pessoa.nome)}</strong>${pessoa.documento ? `, portador(a) do documento ${UI.escapar(pessoa.documento)},` : ''}
-      prestou serviço voluntário nesta instituição no período de ${UI.escapar(de)} a ${UI.escapar(ate)},
-      tendo ministrado <strong>${pessoa.aulas_dadas} aula(s)</strong>, totalizando
-      <strong>${UI.escapar(String(pessoa.horas || 0))} hora(s)</strong> de atividade.</p>
-      <p>O trabalho voluntário aqui declarado não gera vínculo empregatício nem obrigação de natureza
-      trabalhista, previdenciária ou afim, nos termos da Lei nº 9.608/1998.</p>
-      <p>Por ser expressão da verdade, firmamos a presente declaração.</p>
-      <div class="assinatura">
-        ${UI.escapar(assinante ? assinante.nome : (cfg.nome_loja || 'Responsável pela instituição'))}
-        ${assinante ? `<br><span style="font-size:11px;color:#555">${UI.escapar(assinante.cargo)}</span>` : ''}
-      </div>
-      </body></html>`;
+  // ==================== Atividades fora da sala de aula ====================
 
-    try { await UI.baixarPDF(html, `declaracao-voluntariado-${pessoa.nome.replace(/\s+/g, '-').toLowerCase()}.pdf`); }
-    catch (e) { UI.erro(e.message); }
+  /**
+   * Quem monta o palco do recital, troca as cordas ou passa a tarde na
+   * papelada doou o tempo dele igual a quem deu aula. Antes, só as aulas
+   * contavam — e a declaração saía menor do que a realidade.
+   */
+  async function atividades(profissionalId) {
+    const hoje = new Date().toISOString().slice(0, 10);
+    const inicioMes = hoje.slice(0, 8) + '01';
+    let pessoas = [];
+    let tipos = {};
+    try {
+      [pessoas, tipos] = await Promise.all([
+        API.get('/api/agenda/profissionais'),
+        API.get('/api/turmas/voluntarios/atividades/tipos').catch(() => ({})),
+      ]);
+    } catch (e) { UI.erro(e.message); return; }
+
+    Modal.abrir({
+      titulo: 'Atividades de voluntariado', tamanho: 'modal--grande', mostrarConfirmar: false,
+      corpoHTML: `
+        <p class="dica" style="margin-top:0">Registre o tempo doado fora da sala de aula: evento, manutenção do acervo,
+        administrativo. Entra nas horas de voluntariado e na declaração.</p>
+        <div class="barra-ferramentas">
+          <div class="campo"><label>Voluntário</label>
+            <select id="at-filtro-pessoa">
+              <option value="">Todos</option>
+              ${pessoas.map((p) => `<option value="${p.id}" ${String(profissionalId) === String(p.id) ? 'selected' : ''}>${UI.escapar(p.nome)}</option>`).join('')}
+            </select></div>
+          <div class="campo"><label>De</label><input type="date" id="at-de" value="${inicioMes}" /></div>
+          <div class="campo"><label>Até</label><input type="date" id="at-ate" value="${hoje}" /></div>
+          <div class="cresce"></div>
+          <button class="btn" id="at-nova" style="align-self:end">+ Registrar atividade</button>
+        </div>
+        <div id="at-lista" class="mt-16">Carregando…</div>`,
+      aoAbrir: (el) => {
+        async function carregar() {
+          const alvo = el.querySelector('#at-lista');
+          const q = new URLSearchParams();
+          const pid = el.querySelector('#at-filtro-pessoa').value;
+          if (pid) q.set('profissional_id', pid);
+          q.set('de', el.querySelector('#at-de').value);
+          q.set('ate', el.querySelector('#at-ate').value);
+          let lista = [];
+          try { lista = await API.get('/api/turmas/voluntarios/atividades?' + q.toString()); }
+          catch (e) { alvo.innerHTML = `<p class="dica">${UI.escapar(e.message)}</p>`; return; }
+
+          const total = lista.reduce((s, a) => s + Number(a.horas || 0), 0);
+          alvo.innerHTML = !lista.length
+            ? '<div class="vazio"><h3>Nenhuma atividade no período</h3><p class="dica">Registre eventos, manutenção do acervo e trabalho administrativo.</p></div>'
+            : `<p><strong>${Number(total.toFixed(1))}h</strong> em ${lista.length} atividade(s)</p>
+              <div class="rolagem"><table class="tabela">
+                <thead><tr><th>Data</th><th>Voluntário</th><th>Tipo</th><th>Descrição</th><th>Horas</th><th></th></tr></thead>
+                <tbody>${lista.map((a) => `<tr>
+                  <td>${UI.escapar(a.data)}</td>
+                  <td>${UI.escapar(a.voluntario_nome)}</td>
+                  <td class="dica">${UI.escapar(tipos[a.tipo] || a.tipo)}</td>
+                  <td>${UI.escapar(a.descricao || '—')}${a.hora_inicio ? `<div class="dica">${UI.escapar(a.hora_inicio)}–${UI.escapar(a.hora_fim || '')}</div>` : ''}</td>
+                  <td><strong>${UI.escapar(String(a.horas))}h</strong></td>
+                  <td style="text-align:right"><button class="btn btn--perigo" data-at-rm="${a.id}">Excluir</button></td>
+                </tr>`).join('')}</tbody>
+              </table></div>`;
+
+          alvo.querySelectorAll('[data-at-rm]').forEach((b) => b.addEventListener('click', async () => {
+            const ok = await UI.confirmar('Excluir este registro? As horas saem do total do voluntário.', { titulo: 'Excluir atividade', textoConfirmar: 'Excluir' });
+            if (!ok) return;
+            try { await API.del(`/api/turmas/voluntarios/atividades/${b.dataset.atRm}`); UI.sucesso('Atividade excluída.'); carregar(); }
+            catch (e) { UI.erro(e.message); }
+          }));
+        }
+
+        el.querySelector('#at-filtro-pessoa').addEventListener('change', carregar);
+        el.querySelector('#at-de').addEventListener('change', carregar);
+        el.querySelector('#at-ate').addEventListener('change', carregar);
+        el.querySelector('#at-nova').addEventListener('click', () => formAtividade(pessoas, tipos, el.querySelector('#at-filtro-pessoa').value, carregar));
+        carregar();
+      },
+    });
+  }
+
+  function formAtividade(pessoas, tipos, preSelecionado, aoSalvar) {
+    const hoje = new Date().toISOString().slice(0, 10);
+    Modal.abrir({
+      titulo: 'Registrar atividade', tamanho: 'modal--pequeno', textoConfirmar: 'Registrar',
+      corpoHTML: `
+        <div class="campo"><label>Voluntário *</label>
+          <select id="fa-pessoa">
+            <option value="">— selecione —</option>
+            ${pessoas.map((p) => `<option value="${p.id}" ${String(preSelecionado) === String(p.id) ? 'selected' : ''}>${UI.escapar(p.nome)}</option>`).join('')}
+          </select></div>
+        <div class="form-grid mt-16">
+          <div class="campo"><label>Data *</label><input type="date" id="fa-data" value="${hoje}" /></div>
+          <div class="campo"><label>Tipo</label>
+            <select id="fa-tipo">${Object.entries(tipos).map(([k, v]) => `<option value="${k}">${UI.escapar(v)}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-grid mt-16">
+          <div class="campo"><label>Início</label><input type="time" id="fa-ini" /></div>
+          <div class="campo"><label>Fim</label><input type="time" id="fa-fim" /></div>
+        </div>
+        <div class="campo mt-16"><label>Ou informe as horas direto</label>
+          <input type="number" id="fa-horas" step="0.5" min="0" placeholder="Ex.: 2.5" />
+          <span class="dica">Use isto quando não souber a hora exata — o total é o que importa para a declaração.</span></div>
+        <div class="campo mt-16"><label>Descrição</label>
+          <input id="fa-desc" placeholder="Ex.: montagem do palco do recital" /></div>`,
+      aoConfirmar: async (el) => {
+        const corpo = {
+          profissional_id: el.querySelector('#fa-pessoa').value,
+          data: el.querySelector('#fa-data').value,
+          tipo: el.querySelector('#fa-tipo').value,
+          hora_inicio: el.querySelector('#fa-ini').value || null,
+          hora_fim: el.querySelector('#fa-fim').value || null,
+          horas: el.querySelector('#fa-horas').value || null,
+          descricao: el.querySelector('#fa-desc').value,
+        };
+        if (!corpo.profissional_id) { UI.erro('Selecione o voluntário.'); return false; }
+        try {
+          await API.post('/api/turmas/voluntarios/atividades', corpo);
+          UI.sucesso('Atividade registrada.');
+          if (aoSalvar) aoSalvar();
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
   }
 
   return { titulo: 'Voluntários', render };

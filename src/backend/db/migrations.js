@@ -1514,6 +1514,35 @@ const migrations = [
       `).run();
     },
   },
+
+  {
+    version: 36,
+    name: 'instituto-semestre-e-voluntariado',
+    up(db) {
+      db.exec(`
+        -- Turma por periodo: a turma de 2026/2 nasce da de 2026/1. Guardar a
+        -- origem e o que transforma uma pilha de turmas soltas em historico.
+        ALTER TABLE turmas ADD COLUMN turma_origem_id INTEGER REFERENCES turmas(id) ON DELETE SET NULL;
+        ALTER TABLE turmas ADD COLUMN periodo_rotulo TEXT;
+        CREATE INDEX IF NOT EXISTS idx_turmas_origem ON turmas(turma_origem_id);
+
+        -- Voluntariado fora da sala de aula: evento, manutencao do acervo,
+        -- administrativo. Sem isso so contava quem dava aula.
+        CREATE TABLE IF NOT EXISTS voluntarios_atividades (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          profissional_id INTEGER NOT NULL REFERENCES profissionais(id) ON DELETE CASCADE,
+          data            TEXT NOT NULL,
+          hora_inicio     TEXT,
+          hora_fim        TEXT,
+          horas           REAL NOT NULL DEFAULT 0,
+          tipo            TEXT NOT NULL DEFAULT 'outro',
+          descricao       TEXT,
+          criado_em       TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_vol_atividades ON voluntarios_atividades(profissional_id, data);
+      `);
+    },
+  },
 ];
 
 /**
@@ -1549,4 +1578,6 @@ function runMigrations() {
   return { de: atual, para: migrations[migrations.length - 1].version };
 }
 
-module.exports = { runMigrations };
+// A lista sai exportada para dar para testar uma migration isolada, sem ter
+// que reconstruir o banco inteiro na versao anterior.
+module.exports = { runMigrations, migrations };

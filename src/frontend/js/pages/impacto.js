@@ -105,11 +105,13 @@ window.PaginaImpacto = (function () {
         <h3 style="margin-top:0">Voluntariado</h3>
         ${d.voluntarios.lista.length
           ? `<div class="rolagem"><table class="tabela">
-              <thead><tr><th>Voluntário</th><th>Aulas dadas</th><th>Horas</th></tr></thead>
+              <thead><tr><th>Voluntário</th><th>Aulas dadas</th><th>Outras atividades</th><th>Horas</th></tr></thead>
               <tbody>${d.voluntarios.lista.map((v) => `
-                <tr><td>${UI.escapar(v.nome)}</td><td>${v.aulas_dadas}</td><td>${v.horas}h</td></tr>`).join('')}</tbody>
-            </table></div>`
-          : '<p class="dica">Nenhuma aula registrada com instrutor no período.</p>'}
+                <tr><td>${UI.escapar(v.nome)}</td><td>${v.aulas_dadas || 0}</td>
+                <td>${v.atividades || 0}</td><td>${v.horas}h</td></tr>`).join('')}</tbody>
+            </table></div>
+            <p class="dica mt-16">Soma as aulas dadas (das chamadas) com as atividades de apoio registradas em Voluntários.</p>`
+          : '<p class="dica">Nenhuma aula nem atividade registrada no período.</p>'}
       </div>`;
   }
 
@@ -124,8 +126,8 @@ window.PaginaImpacto = (function () {
         : '<p class="dica">Sem dados no período.</p>'}
       ${faixas.length ? `<h3>Faixa etária</h3><table><thead><tr><th>Faixa</th><th>Pessoas</th></tr></thead><tbody>
         ${faixas.map(([r, v]) => `<tr><td>${r}</td><td>${v}</td></tr>`).join('')}</tbody></table>` : ''}
-      ${d.voluntarios.lista.length ? `<h3>Voluntariado</h3><table><thead><tr><th>Voluntário</th><th>Aulas</th><th>Horas</th></tr></thead><tbody>
-        ${d.voluntarios.lista.map((v) => `<tr><td>${UI.escapar(v.nome)}</td><td>${v.aulas_dadas}</td><td>${v.horas}h</td></tr>`).join('')}</tbody></table>` : ''}`;
+      ${d.voluntarios.lista.length ? `<h3>Voluntariado</h3><table><thead><tr><th>Voluntário</th><th>Aulas</th><th>Atividades</th><th>Horas</th></tr></thead><tbody>
+        ${d.voluntarios.lista.map((v) => `<tr><td>${UI.escapar(v.nome)}</td><td>${v.aulas_dadas || 0}</td><td>${v.atividades || 0}</td><td>${v.horas}h</td></tr>`).join('')}</tbody></table>` : ''}`;
   }
 
   async function baixarPdf() {

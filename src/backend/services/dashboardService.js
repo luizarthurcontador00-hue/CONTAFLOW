@@ -298,6 +298,11 @@ function painelInstituto() {
     WHERE a.turma_id IS NOT NULL AND a.status = 'atendido' AND a.profissional_id IS NOT NULL
       AND a.hora_fim IS NOT NULL AND date(a.data) >= date(?)
   `).get(mesIni).minutos;
+  // Voluntariado nao e so aula: evento, manutencao do acervo e administrativo
+  // tambem sao tempo doado.
+  const horasAtividadesMes = db.prepare(
+    'SELECT COALESCE(SUM(horas),0) h FROM voluntarios_atividades WHERE date(data) >= date(?)'
+  ).get(mesIni).h;
 
   const filaEspera = db.prepare("SELECT COUNT(*) c FROM lista_espera WHERE status = 'aguardando'").get().c;
 
@@ -356,7 +361,7 @@ function painelInstituto() {
     pessoas: {
       equipe,
       voluntarios,
-      horas_voluntariado_mes: arred(horasMes / 60),
+      horas_voluntariado_mes: arred(horasMes / 60 + Number(horasAtividadesMes)),
     },
     dinheiro: {
       ofertas_mes: arred(ofertasMes.t),
