@@ -339,6 +339,9 @@ function painelInstituto() {
     return { id: o.id, titulo: o.titulo, valor: o.valor, cabe_agora: cabeAgora };
   });
 
+  // eslint-disable-next-line global-require
+  const aniversariantes = require('./institutoService').aniversariantesDoMes(hoje.slice(5, 7));
+
   return {
     hoje,
     ensino: {
@@ -399,6 +402,7 @@ function painelInstituto() {
       cabem_no_saldo: objetivos.filter((o) => o.cabe_agora).length,
       itens: objetivos.slice(0, 6),
     },
+    aniversariantes,
   };
 }
 

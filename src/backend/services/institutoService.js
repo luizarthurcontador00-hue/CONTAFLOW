@@ -343,9 +343,29 @@ function relatorioImpacto({ de, ate } = {}) {
   };
 }
 
+// ========================= Aniversariantes =========================
+
+/**
+ * Quem faz aniversario no mes (alunos e mantenedores ativos, com data de
+ * nascimento cadastrada). "fazendo" usa o ano corrente, nao a data de hoje —
+ * assim continua certo mesmo consultando um mes que ainda nao chegou.
+ */
+function aniversariantesDoMes(mes) {
+  const db = getDb();
+  const mesAlvo = /^(0[1-9]|1[0-2])$/.test(String(mes)) ? String(mes) : String(new Date().getMonth() + 1).padStart(2, '0');
+  return db.prepare(`
+    SELECT id AS aluno_id, nome, natureza, data_nascimento, telefone,
+      CAST(strftime('%d', data_nascimento) AS INTEGER) AS dia,
+      CAST(strftime('%Y','now','localtime') AS INTEGER) - CAST(strftime('%Y', data_nascimento) AS INTEGER) AS fazendo
+    FROM clientes
+    WHERE ativo = 1 AND data_nascimento IS NOT NULL AND strftime('%m', data_nascimento) = @mes
+    ORDER BY dia, nome COLLATE NOCASE
+  `).all({ mes: mesAlvo });
+}
+
 module.exports = {
   listarAtas, obterAta, criarAta, atualizarAta, excluirAta,
   listarAutorizacoes, registrarAutorizacao, TIPOS_AUTORIZACAO,
   fichaDoAluno, declaracaoMatricula, certificadoConclusao,
-  relatorioImpacto,
+  relatorioImpacto, aniversariantesDoMes,
 };

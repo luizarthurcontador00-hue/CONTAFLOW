@@ -190,6 +190,7 @@ window.PaginaInicio = (function () {
       </div>
       <div class="painel-instituto mt-16">
         ${blocoObjetivos(d.objetivos)}
+        ${blocoAniversariantes(d.aniversariantes)}
       </div>`;
   }
 
@@ -344,7 +345,7 @@ window.PaginaInicio = (function () {
   }
 
   function blocoObjetivos(o) {
-    return `<div class="card" style="grid-column: 1 / -1">
+    return `<div class="card">
       <h3 style="margin-top:0">🎯 Objetivos</h3>
       ${!o.total_abertos
         ? '<p class="muted pi-clicavel" data-ir="tarefas">Nenhum objetivo cadastrado. Cadastre metas do instituto em Tarefas → Objetivos.</p>'
@@ -361,6 +362,25 @@ window.PaginaInicio = (function () {
                    : it.cabe_agora === false ? '<span class="badge badge--alerta">falta juntar</span>'
                    : '<span class="badge badge--muted">meta</span>'}
                </td>
+             </tr>`).join('')}
+           </table>`}
+    </div>`;
+  }
+
+  function blocoAniversariantes(lista) {
+    const mesNome = new Date().toLocaleDateString('pt-BR', { month: 'long' });
+    const hojeDia = new Date().getDate();
+    const mesStr = String(new Date().getMonth() + 1).padStart(2, '0');
+    return `<div class="card">
+      <h3 style="margin-top:0">🎂 Aniversariantes de ${mesNome}</h3>
+      ${!lista.length
+        ? '<p class="muted pi-clicavel" data-ir="clientes">Ninguém faz aniversário este mês (ou falta cadastrar a data de nascimento).</p>'
+        : `<table class="tabela">
+             ${lista.map((p) => `<tr class="pi-clicavel" data-ir="clientes">
+               <td style="white-space:nowrap">${String(p.dia).padStart(2, '0')}/${mesStr}
+                 ${p.dia === hojeDia ? ' <span class="badge badge--ok">hoje</span>' : ''}</td>
+               <td>${UI.escapar(p.nome)}</td>
+               <td class="dica" style="text-align:right">${p.fazendo} anos</td>
              </tr>`).join('')}
            </table>`}
     </div>`;

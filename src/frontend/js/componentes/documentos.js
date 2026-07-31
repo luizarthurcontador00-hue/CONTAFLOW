@@ -144,17 +144,36 @@ window.Documentos = (function () {
   }
 
   /** Monta o PDF de um modelo já preenchido. */
+  function corpoModelo(m, ctx, dados) {
+    return `
+      ${cabecalho(ctx.cfg, '')}
+      <h2 class="titulo-doc">${esc(m.titulo_documento)}</h2>
+      ${textoParaHTML(preencher(m.corpo, { ...dadosComuns(ctx), ...dados }))}`;
+  }
+
   async function emitirModelo(chave, dados, arquivo, extraCss = '') {
     let m; let ctx;
     try { [m, ctx] = await Promise.all([modelo(chave), contexto()]); }
     catch (e) { UI.erro(e.message); return; }
 
-    const corpo = `
-      ${cabecalho(ctx.cfg, '')}
-      <h2 class="titulo-doc">${esc(m.titulo_documento)}</h2>
-      ${textoParaHTML(preencher(m.corpo, { ...dadosComuns(ctx), ...dados }))}`;
+    try { await UI.baixarPDF(pagina(m.titulo, ctx.cfg, corpoModelo(m, ctx, dados), ESTILO_DECLARACAO + extraCss), arquivo); }
+    catch (e) { UI.erro(e.message); }
+  }
 
-    try { await UI.baixarPDF(pagina(m.titulo, ctx.cfg, corpo, ESTILO_DECLARACAO + extraCss), arquivo); }
+  /**
+   * Mesma coisa que emitirModelo, mas pra varias pessoas de uma vez — um PDF
+   * só, uma pagina por pessoa (quebra-pagina entre elas). E o que faz
+   * "imprimir documentos em lote" funcionar pra qualquer modelo (declaracao,
+   * certificado, ficha), sem duplicar a logica de busca/preenchimento.
+   */
+  async function emitirModeloLote(chave, listaDados, arquivo, extraCss = '') {
+    if (!listaDados.length) { UI.erro('Não há ninguém para gerar o documento.'); return; }
+    let m; let ctx;
+    try { [m, ctx] = await Promise.all([modelo(chave), contexto()]); }
+    catch (e) { UI.erro(e.message); return; }
+
+    const corpo = listaDados.map((dados, i) => `${i > 0 ? '<div class="quebra-pagina"></div>' : ''}${corpoModelo(m, ctx, dados)}`).join('\n');
+    try { await UI.baixarPDF(pagina(m.titulo, ctx.cfg, corpo, ESTILO_DECLARACAO + '.quebra-pagina { page-break-before: always; }' + extraCss), arquivo); }
     catch (e) { UI.erro(e.message); }
   }
 
@@ -166,16 +185,12 @@ window.Documentos = (function () {
 
   // ============================ Ficha do aluno ============================
 
-  async function fichaDoAluno(alunoId) {
-    let d; let ctx;
-    try { [d, ctx] = await Promise.all([API.get(`/api/instituto/ficha-aluno/${alunoId}`), contexto()]); }
-    catch (e) { UI.erro(e.message); return; }
-
+  function corpoFicha(d, ctx) {
     const a = d.aluno;
     const emAberto = d.emprestimos.filter((e) => e.em_aberto);
     const devolvidos = d.emprestimos.filter((e) => !e.em_aberto);
 
-    const corpo = `
+    return `
       ${cabecalho(ctx.cfg, 'Ficha do aluno', `Emitida em ${dataBR(d.emitido_em)}`)}
 
       <table>
@@ -243,8 +258,32 @@ window.Documentos = (function () {
       </table>
 
       <div class="rodape">Documento de uso interno · ${esc(ctx.cfg.nome_loja || 'Instituto')}</div>`;
+  }
 
-    try { await UI.baixarPDF(pagina('Ficha do aluno', ctx.cfg, corpo), nomeArquivo('ficha', a.nome)); }
+  async function fichaDoAluno(alunoId) {
+    let d; let ctx;
+    try { [d, ctx] = await Promise.all([API.get(`/api/instituto/ficha-aluno/${alunoId}`), contexto()]); }
+    catch (e) { UI.erro(e.message); return; }
+
+    try { await UI.baixarPDF(pagina('Ficha do aluno', ctx.cfg, corpoFicha(d, ctx)), nomeArquivo('ficha', d.aluno.nome)); }
+    catch (e) { UI.erro(e.message); }
+  }
+
+  /** Ficha de todos os alunos ativos da turma, num PDF só (uma página por aluno). */
+  async function fichasDoAlunoLote(turmaId) {
+    let turma;
+    try { turma = await API.get(`/api/turmas/${turmaId}`); } catch (e) { UI.erro(e.message); return; }
+    const ativos = turma.matriculas.filter((m) => m.status === 'ativa');
+    if (!ativos.length) { UI.erro('Nenhum aluno ativo nesta turma.'); return; }
+
+    let ctx; let lista;
+    try {
+      ctx = await contexto();
+      lista = await Promise.all(ativos.map((m) => API.get(`/api/instituto/ficha-aluno/${m.aluno_id}`)));
+    } catch (e) { UI.erro(e.message); return; }
+
+    const corpo = lista.map((d, i) => `${i > 0 ? '<div class="quebra-pagina"></div>' : ''}${corpoFicha(d, ctx)}`).join('\n');
+    try { await UI.baixarPDF(pagina('Fichas dos alunos', ctx.cfg, corpo, '.quebra-pagina { page-break-before: always; }'), nomeArquivo('fichas', turma.nome)); }
     catch (e) { UI.erro(e.message); }
   }
 
@@ -480,25 +519,42 @@ window.Documentos = (function () {
     .assinatura { margin-top:56px; }
   `;
 
-  async function declaracaoMatricula(alunoId) {
-    let d;
-    try { d = await API.get(`/api/instituto/declaracao-matricula/${alunoId}`); }
-    catch (e) { UI.erro(e.message); return; }
-
+  function dadosDeclaracaoMatricula(d) {
     const a = d.aluno;
     const turmas = d.matriculas.map((m) => {
       const carga = m.carga_horaria ? `, com carga horária de ${m.carga_horaria} hora(s)` : '';
       return `<li>${esc(m.curso_nome)} — turma ${esc(m.turma_nome)}${m.horarios ? `, ${esc(m.horarios)}` : ''}${carga}, `
         + `desde ${porExtenso(m.data_matricula || m.periodo_inicio)}.</li>`;
     }).join('');
-
-    await emitirModelo('declaracao_matricula', {
+    return {
       aluno_nome: `<strong>${esc(a.nome)}</strong>`,
       aluno_cpf: esc(a.cpf || ''),
       aluno_nascimento: porExtenso(a.data_nascimento),
       responsavel_nome: esc(a.responsavel_nome || ''),
       turmas: `<ul>${turmas}</ul>`,
-    }, nomeArquivo('declaracao-matricula', a.nome));
+    };
+  }
+
+  async function declaracaoMatricula(alunoId) {
+    let d;
+    try { d = await API.get(`/api/instituto/declaracao-matricula/${alunoId}`); }
+    catch (e) { UI.erro(e.message); return; }
+    await emitirModelo('declaracao_matricula', dadosDeclaracaoMatricula(d), nomeArquivo('declaracao-matricula', d.aluno.nome));
+  }
+
+  /** Declaração de matrícula de todos os alunos ativos da turma, num PDF só. */
+  async function declaracoesMatriculaLote(turmaId) {
+    let turma;
+    try { turma = await API.get(`/api/turmas/${turmaId}`); } catch (e) { UI.erro(e.message); return; }
+    const ativos = turma.matriculas.filter((m) => m.status === 'ativa');
+    if (!ativos.length) { UI.erro('Nenhum aluno ativo nesta turma.'); return; }
+
+    let lista;
+    try {
+      lista = await Promise.all(ativos.map(async (m) => dadosDeclaracaoMatricula(await API.get(`/api/instituto/declaracao-matricula/${m.aluno_id}`))));
+    } catch (e) { UI.erro(e.message); return; }
+
+    await emitirModeloLote('declaracao_matricula', lista, nomeArquivo('declaracoes-matricula', turma.nome));
   }
 
   /**
@@ -543,13 +599,11 @@ window.Documentos = (function () {
     }, nomeArquivo('termo-voluntariado', pessoa.nome));
   }
 
-  async function certificado(alunoId, turmaId) {
-    let d;
-    try { d = await API.get(`/api/instituto/certificado/${alunoId}/${turmaId}`); }
-    catch (e) { UI.erro(e.message); return; }
+  const CSS_CERTIFICADO = '@page { size: A4 landscape; margin: 18mm; } body { padding:34px; }';
 
+  function dadosCertificado(d) {
     const m = d.matricula;
-    await emitirModelo('certificado', {
+    return {
       aluno_nome: esc(d.aluno.nome),
       curso: esc(m.curso_nome),
       turma: esc(m.turma_nome),
@@ -558,14 +612,36 @@ window.Documentos = (function () {
       periodo_inicio: porExtenso(m.periodo_inicio),
       periodo_fim: porExtenso(m.periodo_fim),
       instrutores: esc(m.instrutores || ''),
-    }, nomeArquivo('certificado', d.aluno.nome),
-    '@page { size: A4 landscape; margin: 18mm; } body { padding:34px; }');
+    };
+  }
+
+  async function certificado(alunoId, turmaId) {
+    let d;
+    try { d = await API.get(`/api/instituto/certificado/${alunoId}/${turmaId}`); }
+    catch (e) { UI.erro(e.message); return; }
+    await emitirModelo('certificado', dadosCertificado(d), nomeArquivo('certificado', d.aluno.nome), CSS_CERTIFICADO);
+  }
+
+  /** Certificado de todos os alunos concluintes da turma, num PDF só. */
+  async function certificadosLote(turmaId) {
+    let turma;
+    try { turma = await API.get(`/api/turmas/${turmaId}`); } catch (e) { UI.erro(e.message); return; }
+    const concluidos = turma.matriculas.filter((m) => m.status === 'concluida');
+    if (!concluidos.length) { UI.erro('Nenhum aluno concluinte nesta turma ainda.'); return; }
+
+    let lista;
+    try {
+      lista = await Promise.all(concluidos.map(async (m) => dadosCertificado(await API.get(`/api/instituto/certificado/${m.aluno_id}/${turmaId}`))));
+    } catch (e) { UI.erro(e.message); return; }
+
+    await emitirModeloLote('certificado', lista, nomeArquivo('certificados', turma.nome), CSS_CERTIFICADO);
   }
 
   return {
-    fichaDoAluno, folhaDeChamada, folhasDeChamadaLote,
+    fichaDoAluno, fichasDoAlunoLote, folhaDeChamada, folhasDeChamadaLote,
     calendarioInstrutor, calendariosInstrutoresLote,
-    declaracaoMatricula, declaracaoVoluntariado, termoVoluntariado, certificado,
+    declaracaoMatricula, declaracoesMatriculaLote, declaracaoVoluntariado, termoVoluntariado,
+    certificado, certificadosLote,
     porExtenso, dataBR,
   };
 })();

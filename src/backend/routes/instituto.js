@@ -34,4 +34,7 @@ router.get('/certificado/:alunoId/:turmaId', asyncHandler((req, res) => res.json
 // ------------------------ Relatorio de impacto ------------------------
 router.get('/impacto', asyncHandler((req, res) => res.json(inst.relatorioImpacto(req.query))));
 
+// ------------------------- Aniversariantes -------------------------
+router.get('/aniversariantes', asyncHandler((req, res) => res.json(inst.aniversariantesDoMes(req.query.mes))));
+
 module.exports = router;

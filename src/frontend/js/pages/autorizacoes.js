@@ -51,6 +51,9 @@ window.PaginaAutorizacoes = (function () {
     const pendentesMenores = itens.filter((i) => !i.entregue && i.menor_de_idade).length;
     alvo.innerHTML = `
       ${pendentesMenores ? `<p><span class="badge badge--alerta">${pendentesMenores} menor(es) de idade sem termo entregue</span></p>` : ''}
+      <div class="flex gap-12 mb-16" style="flex-wrap:wrap">
+        <button class="btn btn--secundario" id="au-lote">🖨️ Gerar todos os termos (${itens.length})</button>
+      </div>
       <div class="rolagem"><table class="tabela">
         <thead><tr><th>Aluno</th><th>Idade</th><th>Responsável</th><th>Termo</th><th></th></tr></thead>
         <tbody>
@@ -85,23 +88,34 @@ window.PaginaAutorizacoes = (function () {
     alvo.querySelectorAll('[data-pdf]').forEach((b) => b.addEventListener('click', () => {
       gerarTermo(itens.find((i) => i.aluno_id === Number(b.dataset.pdf)));
     }));
+    const bLote = alvo.querySelector('#au-lote');
+    if (bLote) bLote.addEventListener('click', () => gerarTermosLote(itens));
   }
 
-  async function gerarTermo(aluno) {
-    let cfg = {}; let assinante = null;
-    try {
-      [cfg, assinante] = await Promise.all([
-        API.get('/api/config').catch(() => ({})),
-        API.get('/api/membros/assinante').catch(() => null),
-      ]);
-    } catch (_) { cfg = {}; }
+  const ESTILO_TERMO = `
+    body{font-family:Georgia,serif;padding:56px;color:#111;line-height:1.9}
+    h1{font-size:19px;text-align:center;margin-bottom:2px}
+    .sub{text-align:center;color:#555;font-size:12px;margin-bottom:36px}
+    h2{font-size:15px;text-align:center;margin:24px 0}
+    .campo{margin:10px 0}
+    .linha{display:inline-block;border-bottom:1px solid #333;min-width:280px}
+    .assinatura{margin-top:64px;border-top:1px solid #333;width:320px;text-align:center;padding-top:6px;font-size:12px}
+    .duplo{display:flex;gap:40px;margin-top:56px}
+    .quebra-pagina{page-break-before:always}
+  `;
 
-    const ehImagem = filtro.tipo === 'imagem';
+  function tituloDoTermo(tipo) {
+    return tipo === 'imagem' ? 'AUTORIZAÇÃO DE USO DE IMAGEM' : (tipo === 'saida' ? 'AUTORIZAÇÃO DE SAÍDA' : 'TERMO DE AUTORIZAÇÃO');
+  }
+
+  /** O corpo de um termo (um aluno). Reaproveitado tanto sozinho quanto em lote. */
+  function corpoTermo(aluno, tipo, cfg, assinante) {
+    const ehImagem = tipo === 'imagem';
     // Aluno maior de idade autoriza por si mesmo — nao existe "responsavel
     // legal" pra ele, e o termo nao pode falar "menor" nem pedir assinatura
     // de quem nao vai assinar nada.
     const menor = !!aluno.menor_de_idade;
-    const titulo = ehImagem ? 'AUTORIZAÇÃO DE USO DE IMAGEM' : (filtro.tipo === 'saida' ? 'AUTORIZAÇÃO DE SAÍDA' : 'TERMO DE AUTORIZAÇÃO');
+    const titulo = tituloDoTermo(tipo);
     const abertura = menor ? 'Eu, responsável legal acima identificado,' : 'Eu, aluno(a) acima identificado(a),';
     const corpo = ehImagem
       ? (menor
@@ -119,17 +133,7 @@ window.PaginaAutorizacoes = (function () {
           : `declaro estar ciente e de acordo em participar das atividades externas organizadas pela instituição,
              nos horários e locais informados previamente.`);
 
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${titulo}</title>
-      <style>
-        body{font-family:Georgia,serif;padding:56px;color:#111;line-height:1.9}
-        h1{font-size:19px;text-align:center;margin-bottom:2px}
-        .sub{text-align:center;color:#555;font-size:12px;margin-bottom:36px}
-        h2{font-size:15px;text-align:center;margin:24px 0}
-        .campo{margin:10px 0}
-        .linha{display:inline-block;border-bottom:1px solid #333;min-width:280px}
-        .assinatura{margin-top:64px;border-top:1px solid #333;width:320px;text-align:center;padding-top:6px;font-size:12px}
-        .duplo{display:flex;gap:40px;margin-top:56px}
-      </style></head><body>
+    return `
       <h1>${UI.escapar(cfg.nome_loja || 'Instituto')}</h1>
       <div class="sub">${cfg.loja_cnpj ? 'CNPJ: ' + UI.escapar(cfg.loja_cnpj) : ''}${cfg.loja_endereco ? ' · ' + UI.escapar(cfg.loja_endereco) : ''}</div>
       <h2>${titulo}</h2>
@@ -148,10 +152,41 @@ window.PaginaAutorizacoes = (function () {
           ${UI.escapar(assinante ? assinante.nome : (cfg.nome_loja || 'Pela instituição'))}
           ${assinante ? `<br><span style="font-size:11px;color:#555">${UI.escapar(assinante.cargo)}</span>` : ''}
         </div>
-      </div>
-      </body></html>`;
+      </div>`;
+  }
 
+  function paginaTermo(titulo, corpo) {
+    return `<!doctype html><html><head><meta charset="utf-8"><title>${titulo}</title>
+      <style>${ESTILO_TERMO}</style></head><body>${corpo}</body></html>`;
+  }
+
+  async function buscarCfgEAssinante() {
+    let cfg = {}; let assinante = null;
+    try {
+      [cfg, assinante] = await Promise.all([
+        API.get('/api/config').catch(() => ({})),
+        API.get('/api/membros/assinante').catch(() => null),
+      ]);
+    } catch (_) { cfg = {}; }
+    return { cfg, assinante };
+  }
+
+  async function gerarTermo(aluno) {
+    const { cfg, assinante } = await buscarCfgEAssinante();
+    const titulo = tituloDoTermo(filtro.tipo);
+    const html = paginaTermo(titulo, corpoTermo(aluno, filtro.tipo, cfg, assinante));
     try { await UI.baixarPDF(html, `termo-${filtro.tipo}-${aluno.aluno_nome.replace(/\s+/g, '-').toLowerCase()}.pdf`); }
+    catch (e) { UI.erro(e.message); }
+  }
+
+  /** Gera o termo de todos os alunos da lista atual (respeita o filtro), num PDF só. */
+  async function gerarTermosLote(itens) {
+    if (!itens.length) { UI.erro('Não há ninguém para gerar o termo.'); return; }
+    const { cfg, assinante } = await buscarCfgEAssinante();
+    const titulo = tituloDoTermo(filtro.tipo);
+    const corpo = itens.map((aluno, i) => `${i > 0 ? '<div class="quebra-pagina"></div>' : ''}${corpoTermo(aluno, filtro.tipo, cfg, assinante)}`).join('\n');
+    const html = paginaTermo(titulo, corpo);
+    try { await UI.baixarPDF(html, `termos-${filtro.tipo}-todos.pdf`); }
     catch (e) { UI.erro(e.message); }
   }
 

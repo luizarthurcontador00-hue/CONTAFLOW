@@ -167,6 +167,17 @@ window.PaginaTurmas = (function () {
             ? ''
             : `<button class="btn btn--secundario" type="button" id="tu-encerrar">Encerrar período</button>
                <button class="btn" type="button" id="tu-renovar">🔁 Renovar para o próximo período</button>`}
+        </div>
+
+        <div class="flex gap-12 mt-16" style="flex-wrap:wrap;border-top:1px solid var(--borda);padding-top:14px">
+          <span class="dica" style="align-self:center">Documentos em lote (um PDF só, todos os alunos):</span>
+          ${t.matriculados
+            ? `<button class="btn btn--secundario" type="button" id="tu-declaracoes-lote">📄 Declarações</button>
+               <button class="btn btn--secundario" type="button" id="tu-fichas-lote">🗂️ Fichas</button>`
+            : ''}
+          ${t.matriculas.some((m) => m.status === 'concluida')
+            ? '<button class="btn btn--secundario" type="button" id="tu-certificados-lote">🎓 Certificados dos concluintes</button>'
+            : ''}
         </div>`,
       aoAbrir: (el) => {
         desenharAlunos(el, t);
@@ -184,6 +195,12 @@ window.PaginaTurmas = (function () {
         if (be) be.addEventListener('click', () => encerrarTurma(t, el));
         const br = el.querySelector('#tu-renovar');
         if (br) br.addEventListener('click', () => renovarTurma(t, el));
+        const bdl = el.querySelector('#tu-declaracoes-lote');
+        if (bdl) bdl.addEventListener('click', () => Documentos.declaracoesMatriculaLote(t.id));
+        const bfl = el.querySelector('#tu-fichas-lote');
+        if (bfl) bfl.addEventListener('click', () => Documentos.fichasDoAlunoLote(t.id));
+        const bcl = el.querySelector('#tu-certificados-lote');
+        if (bcl) bcl.addEventListener('click', () => Documentos.certificadosLote(t.id));
       },
     });
   }
