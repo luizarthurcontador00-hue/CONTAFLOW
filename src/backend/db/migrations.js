@@ -1459,6 +1459,44 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 34,
+    name: 'oferta-entra-no-caixa',
+    up(db) {
+      // A oferta passa a ser um lancamento financeiro de verdade: entra numa
+      // conta (caixa, banco, PIX), soma no saldo e pode ser conciliada com o
+      // extrato. Antes ela vivia isolada — o dinheiro aparecia na prestacao
+      // de contas mas nao no saldo, o que fazia os dois nunca baterem.
+      db.exec(`
+        ALTER TABLE ofertas ADD COLUMN conta_financeira_id INTEGER REFERENCES contas_financeiras(id) ON DELETE SET NULL;
+        CREATE INDEX IF NOT EXISTS idx_ofertas_conta ON ofertas(conta_financeira_id);
+
+        -- A transacao do extrato tambem pode casar com uma oferta, nao so com
+        -- conta a pagar/receber.
+        ALTER TABLE extrato_ofx_transacoes ADD COLUMN oferta_id INTEGER REFERENCES ofertas(id) ON DELETE SET NULL;
+      `);
+
+      // Ofertas ja registradas antes desta versao entram no caixa padrao da
+      // forma de pagamento usada, para o saldo passar a refletir a realidade.
+      const mapa = db.prepare("SELECT valor FROM config WHERE chave = 'financeiro_mapa_contas'").get();
+      let contaPorForma = {};
+      try { contaPorForma = mapa ? JSON.parse(mapa.valor) : {}; } catch (_) { contaPorForma = {}; }
+
+      const ofertas = db.prepare('SELECT * FROM ofertas').all();
+      const lancar = db.prepare(`
+        INSERT INTO contas_financeiras_mov (conta_id, tipo, valor, origem, referencia_id, descricao, data)
+        VALUES (?, 'entrada', ?, 'oferta', ?, ?, ?)
+      `);
+      const marcar = db.prepare('UPDATE ofertas SET conta_financeira_id = ? WHERE id = ?');
+
+      ofertas.forEach((o) => {
+        const contaId = contaPorForma[o.forma] || contaPorForma.dinheiro || null;
+        if (!contaId) return;
+        lancar.run(contaId, o.valor, o.id, `Oferta — ${o.doador_nome || 'doador'}`, o.data);
+        marcar.run(contaId, o.id);
+      });
+    },
+  },
 ];
 
 /**

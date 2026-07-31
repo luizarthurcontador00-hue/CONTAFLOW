@@ -5,13 +5,66 @@
  * contas a receber, saldos das contas financeiras e fluxo de caixa.
  * As listas de contas mostram, por padrao, o mes corrente (com navegacao
  * de mes e opcao "todas").
+ *
+ * No ramo "instituto" esta e a UNICA tela de dinheiro: a arrecadacao
+ * (ofertas, projetos, mantenedores, prestacao de contas) entra aqui como
+ * abas, e nao numa tela separada. O motivo e simples — oferta, saldo e
+ * conciliacao falam do mesmo dinheiro; separados, nunca fechavam entre si.
  */
 window.PaginaFinanceiro = (function () {
   let fornecedores = [];
   let clientes = [];
   let contasFin = [];
   let categoriasDespesa = [];
+  let projetos = [];
   let abaAtual = 'pagar';
+
+  const ehInstituto = () => window.__ramoServico === 'instituto';
+
+  // Abas do instituto: agrupadas em nivel 1 (o assunto) e nivel 2 (o detalhe),
+  // para nao virar uma fileira de 11 abas soltas.
+  const ABAS_INSTITUTO = [
+    { id: 'fluxo', rotulo: '💰 Caixa e saldos' },
+    {
+      id: 'entradas',
+      rotulo: '🤝 Entradas',
+      subs: [
+        { id: 'ofertas', rotulo: 'Ofertas' },
+        { id: 'receber', rotulo: 'A receber' },
+        { id: 'assinaturas', rotulo: 'Contribuição mensal' },
+        { id: 'especie', rotulo: 'Doações em espécie' },
+      ],
+    },
+    {
+      id: 'saidas',
+      rotulo: '💸 Saídas',
+      subs: [
+        { id: 'pagar', rotulo: 'Despesas' },
+        { id: 'fixas', rotulo: 'Despesas fixas' },
+      ],
+    },
+    { id: 'conciliacao', rotulo: '🏦 Conciliação' },
+    {
+      id: 'prestacao',
+      rotulo: '📊 Prestação de contas',
+      subs: [
+        { id: 'contas', rotulo: 'Resumo do período' },
+        { id: 'projetos', rotulo: 'Projetos' },
+        { id: 'mantenedores', rotulo: 'Mantenedores' },
+      ],
+    },
+  ];
+  const subAtual = { entradas: 'ofertas', saidas: 'pagar', prestacao: 'contas' };
+
+  const ABAS_PADRAO = [
+    { id: 'pagar', rotulo: 'A Pagar' },
+    { id: 'fixas', rotulo: 'Contas Fixas' },
+    { id: 'receber', rotulo: 'A Receber' },
+    { id: 'assinaturas', rotulo: 'Mensalidades' },
+    { id: 'fluxo', rotulo: 'Fluxo de Caixa' },
+    { id: 'dre', rotulo: 'DRE' },
+    { id: 'conciliacao', rotulo: '🏦 Conciliação' },
+  ];
   const FORMAS = { dinheiro: 'Dinheiro', cartao_credito: 'Cartão crédito', cartao_debito: 'Cartão débito', pix: 'PIX', prazo: 'A prazo', boleto: 'Boleto', transferencia: 'Transferência' };
   // Formas que alimentam um saldo (a prazo nao entra em conta na hora).
   const FORMAS_SALDO = { dinheiro: 'Dinheiro', pix: 'PIX', cartao_credito: 'Cartão crédito', cartao_debito: 'Cartão débito', transferencia: 'Transferência', boleto: 'Boleto' };
@@ -44,22 +97,24 @@ window.PaginaFinanceiro = (function () {
       API.get('/api/clientes').catch(() => []),
       API.get('/api/financeiro/categorias-despesa').catch(() => []),
     ]);
+    if (ehInstituto()) {
+      projetos = await API.get('/api/arrecadacao/projetos').catch(() => []);
+      if (window.SecoesArrecadacao) await SecoesArrecadacao.carregarProjetos();
+    }
+
+    const abas = ehInstituto() ? ABAS_INSTITUTO : ABAS_PADRAO;
+    if (!abas.some((a) => a.id === abaAtual)) abaAtual = abas[0].id;
+
     container.innerHTML = `
       <div id="fin-alertas" class="mb-16"></div>
       <div class="tabs">
-        <div class="tab ativo" data-aba="pagar">A Pagar</div>
-        <div class="tab" data-aba="fixas">Contas Fixas</div>
-        <div class="tab" data-aba="receber">A Receber</div>
-        <div class="tab" data-aba="assinaturas">Mensalidades</div>
-        <div class="tab" data-aba="fluxo">Fluxo de Caixa</div>
-        <div class="tab" data-aba="dre">DRE</div>
-        <div class="tab" data-aba="conciliacao">🏦 Conciliação</div>
+        ${abas.map((a) => `<div class="tab ${a.id === abaAtual ? 'ativo' : ''}" data-aba="${a.id}">${a.rotulo}</div>`).join('')}
       </div>
       <div id="fin-conteudo"></div>`;
 
-    container.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
+    container.querySelectorAll('.tabs > .tab').forEach((t) => t.addEventListener('click', () => {
       abaAtual = t.dataset.aba;
-      container.querySelectorAll('.tab').forEach((x) => x.classList.toggle('ativo', x === t));
+      container.querySelectorAll('.tabs > .tab').forEach((x) => x.classList.toggle('ativo', x === t));
       trocarAba();
     }));
 
@@ -71,12 +126,35 @@ window.PaginaFinanceiro = (function () {
     trocarAba();
   }
 
+  /** Onde a aba atual deve desenhar: dentro da sub-aba, se houver. */
+  function alvoConteudo() {
+    return document.getElementById('fin-sub') || document.getElementById('fin-conteudo');
+  }
+
+  function secoes() { return window.SecoesArrecadacao; }
+
+  const RENDERIZADORES = {
+    pagar: () => renderPagar(),
+    fixas: () => renderContasFixas(),
+    receber: () => renderReceber(),
+    assinaturas: () => renderAssinaturas(),
+    fluxo: () => renderFluxo(),
+    dre: () => renderDRE(),
+    conciliacao: () => renderConciliacao(),
+    ofertas: () => { secoes().montarEm('fin-sub'); return secoes().ofertas(); },
+    especie: () => { secoes().montarEm('fin-sub'); return secoes().especie(); },
+    mantenedores: () => { secoes().montarEm('fin-sub'); return secoes().mantenedores(); },
+    projetos: () => { secoes().montarEm('fin-sub'); return secoes().projetosSecao(); },
+    contas: () => { secoes().montarEm('fin-sub'); return secoes().prestacaoDeContas(); },
+  };
+
   async function carregarAlertas() {
     const alvo = document.getElementById('fin-alertas');
     let a;
     try { a = await API.get('/api/financeiro/alertas?dias=7'); } catch { return; }
     const blocos = [];
-    if (a.pagar.vencidas.c > 0) blocos.push(`<span class="badge badge--erro">${a.pagar.vencidas.c} conta(s) a pagar vencida(s) — ${UI.moeda(a.pagar.vencidas.v)}</span>`);
+    const rotuloPagar = ehInstituto() ? 'despesa(s)' : 'conta(s) a pagar';
+    if (a.pagar.vencidas.c > 0) blocos.push(`<span class="badge badge--erro">${a.pagar.vencidas.c} ${rotuloPagar} vencida(s) — ${UI.moeda(a.pagar.vencidas.v)}</span>`);
     if (a.pagar.aVencer.c > 0) blocos.push(`<span class="badge badge--alerta">${a.pagar.aVencer.c} a pagar em 7 dias — ${UI.moeda(a.pagar.aVencer.v)}</span>`);
     if (a.receber.vencidas.c > 0) blocos.push(`<span class="badge badge--alerta">${a.receber.vencidas.c} a receber vencida(s) — ${UI.moeda(a.receber.vencidas.v)}</span>`);
     if (a.receber.aVencer.c > 0) blocos.push(`<span class="badge badge--muted">${a.receber.aVencer.c} a receber em 7 dias — ${UI.moeda(a.receber.aVencer.v)}</span>`);
@@ -84,13 +162,29 @@ window.PaginaFinanceiro = (function () {
   }
 
   function trocarAba() {
-    if (abaAtual === 'pagar') renderPagar();
-    else if (abaAtual === 'fixas') renderContasFixas();
-    else if (abaAtual === 'receber') renderReceber();
-    else if (abaAtual === 'assinaturas') renderAssinaturas();
-    else if (abaAtual === 'dre') renderDRE();
-    else if (abaAtual === 'conciliacao') renderConciliacao();
-    else renderFluxo();
+    const conteudo = document.getElementById('fin-conteudo');
+    if (!conteudo) return;
+    // Limpa antes de trocar: sem isso, um #fin-sub que sobrou da aba anterior
+    // faria a proxima aba desenhar dentro da barra de sub-abas antiga.
+    conteudo.innerHTML = '';
+
+    if (!ehInstituto()) { (RENDERIZADORES[abaAtual] || RENDERIZADORES.fluxo)(); return; }
+
+    const def = ABAS_INSTITUTO.find((a) => a.id === abaAtual) || ABAS_INSTITUTO[0];
+    if (!def.subs) { (RENDERIZADORES[def.id] || RENDERIZADORES.fluxo)(); return; }
+
+    conteudo.innerHTML = `
+      <div class="tabs tabs--sub">
+        ${def.subs.map((s) => `<div class="tab ${s.id === subAtual[def.id] ? 'ativo' : ''}" data-sub="${s.id}">${s.rotulo}</div>`).join('')}
+      </div>
+      <div id="fin-sub"></div>`;
+    conteudo.querySelectorAll('[data-sub]').forEach((t) => t.addEventListener('click', () => {
+      subAtual[def.id] = t.dataset.sub;
+      conteudo.querySelectorAll('[data-sub]').forEach((x) => x.classList.toggle('ativo', x === t));
+      document.getElementById('fin-sub').innerHTML = '';
+      RENDERIZADORES[subAtual[def.id]]();
+    }));
+    RENDERIZADORES[subAtual[def.id]]();
   }
 
   function situacao(c) {
@@ -116,8 +210,13 @@ window.PaginaFinanceiro = (function () {
         </div>
         <select id="${prefixo}-status">${statusOpcoes}</select>
         <div class="cresce"></div>
-        <button class="btn" id="${prefixo}-nova">+ Nova conta a ${prefixo === 'cp' ? 'pagar' : 'receber'}</button>
+        <button class="btn" id="${prefixo}-nova">+ ${rotuloNovaConta(prefixo)}</button>
       </div>`;
+  }
+
+  function rotuloNovaConta(prefixo) {
+    if (ehInstituto()) return prefixo === 'cp' ? 'Nova despesa' : 'Nova cobrança a receber';
+    return prefixo === 'cp' ? 'Nova conta a pagar' : 'Nova conta a receber';
   }
 
   function ligarBarraMes(alvo, filtro, prefixo, recarregar) {
@@ -140,12 +239,14 @@ window.PaginaFinanceiro = (function () {
 
   // ----------------------------- A Pagar -----------------------------
   async function renderPagar() {
-    const alvo = document.getElementById('fin-conteudo');
+    const alvo = alvoConteudo();
     const statusOpcoes = ['<option value="">Todas</option>', '<option value="pendente">Pendentes</option>', '<option value="pago">Pagas</option>']
       .map((o) => o.replace(`value="${filtroPagar.status}"`, `value="${filtroPagar.status}" selected`)).join('');
     alvo.innerHTML = barraMes(filtroPagar, 'cp', statusOpcoes) + '<div class="card"><div id="cp-lista">Carregando…</div></div>';
     ligarBarraMes(alvo, filtroPagar, 'cp', listarPagar);
-    alvo.querySelector('#cp-nova').addEventListener('click', formPagar);
+    // Sem a arrow, o evento de clique chegaria como se fosse a conta e o
+    // formulario abriria em modo de edicao de um registro inexistente.
+    alvo.querySelector('#cp-nova').addEventListener('click', () => formPagar());
     await listarPagar();
   }
 
@@ -163,16 +264,24 @@ window.PaginaFinanceiro = (function () {
     ligarAcoes(alvo, 'pagar', contas);
   }
 
-  function formPagar(cp) {
+  async function formPagar(cp) {
     const ehEdicao = !!cp;
+    const inst = ehInstituto();
+    // Projeto recem-criado na aba ao lado precisa aparecer aqui na hora.
+    if (inst) projetos = await API.get('/api/arrecadacao/projetos').catch(() => projetos);
     Modal.abrir({
-      titulo: ehEdicao ? 'Editar conta a pagar' : 'Nova conta a pagar', tamanho: 'modal--pequeno',
+      titulo: ehEdicao ? (inst ? 'Editar despesa' : 'Editar conta a pagar') : (inst ? 'Nova despesa' : 'Nova conta a pagar'), tamanho: 'modal--pequeno',
       corpoHTML: `
         <div class="campo"><label>Descrição *</label><input id="cp-desc" value="${UI.escapar(cp ? cp.descricao : '')}" /></div>
         <div class="form-grid mt-16">
           <div class="campo"><label>Fornecedor</label><select id="cp-forn"><option value="">—</option>${fornecedores.map((f) => `<option value="${f.id}" ${cp && String(cp.fornecedor_id) === String(f.id) ? 'selected' : ''}>${UI.escapar(f.nome)}</option>`).join('')}</select></div>
-          <div class="campo"><label>Categoria (DRE)</label><select id="cp-cat"><option value="">— sem categoria —</option>${categoriasDespesa.map((c) => `<option value="${c.id}" ${cp && String(cp.categoria_despesa_id) === String(c.id) ? 'selected' : ''}>${UI.escapar(c.nome)}${c.considera_dre ? '' : ' (fora do DRE)'}</option>`).join('')}</select></div>
+          <div class="campo"><label>Categoria${inst ? '' : ' (DRE)'}</label><select id="cp-cat"><option value="">— sem categoria —</option>${categoriasDespesa.map((c) => `<option value="${c.id}" ${cp && String(cp.categoria_despesa_id) === String(c.id) ? 'selected' : ''}>${UI.escapar(c.nome)}${c.considera_dre ? '' : ' (fora do DRE)'}</option>`).join('')}</select></div>
         </div>
+        ${inst ? `
+        <div class="campo mt-16"><label>Projeto</label>
+          <select id="cp-projeto"><option value="">Nenhum (custeio geral)</option>${projetos.map((p) => `<option value="${p.id}" ${cp && String(cp.projeto_id) === String(p.id) ? 'selected' : ''}>${UI.escapar(p.nome)}</option>`).join('')}</select>
+          <div class="dica">Marcando o projeto, esta despesa entra no "gasto" dele na prestação de contas.</div>
+        </div>` : ''}
         ${!ehEdicao ? `
         <div class="campo mt-16"><label>Como vai informar o valor?</label>
           <div class="flex gap-12" style="align-items:center;flex-wrap:wrap">
@@ -204,23 +313,27 @@ window.PaginaFinanceiro = (function () {
       },
       aoConfirmar: async (el) => {
         try {
+          const projetoSel = el.querySelector('#cp-projeto');
+          const projetoId = projetoSel ? (projetoSel.value || null) : undefined;
           if (ehEdicao) {
             await API.put(`/api/financeiro/contas-pagar/${cp.id}`, {
               descricao: el.querySelector('#cp-desc').value, fornecedor_id: el.querySelector('#cp-forn').value || null,
               categoria_despesa_id: el.querySelector('#cp-cat').value || null,
+              projeto_id: projetoId,
               valor: el.querySelector('#cp-valor').value, vencimento: el.querySelector('#cp-venc').value || null,
             });
-            UI.sucesso('Conta atualizada.');
+            UI.sucesso(inst ? 'Despesa atualizada.' : 'Conta atualizada.');
           } else {
             const modo = el.querySelector('input[name="cp-modo"]:checked').value;
             const r = await API.post('/api/financeiro/contas-pagar', {
               descricao: el.querySelector('#cp-desc').value, fornecedor_id: el.querySelector('#cp-forn').value || null,
               categoria_despesa_id: el.querySelector('#cp-cat').value || null,
+              projeto_id: projetoId,
               valor: el.querySelector('#cp-valor').value, valor_modo: modo,
               parcelas: el.querySelector('#cp-parc').value, parcela_inicial: el.querySelector('#cp-parcini').value,
               primeiro_vencimento: el.querySelector('#cp-venc').value || null,
             });
-            UI.sucesso(r && r.criadas ? `${r.criadas} parcela(s) criada(s).` : 'Conta criada.');
+            UI.sucesso(r && r.criadas ? `${r.criadas} parcela(s) criada(s).` : (inst ? 'Despesa lançada.' : 'Conta criada.'));
           }
           await listarPagar(); carregarAlertas();
         } catch (e) { UI.erro(e.message); return false; }
@@ -230,10 +343,10 @@ window.PaginaFinanceiro = (function () {
 
   // --------------------------- Contas Fixas ---------------------------
   async function renderContasFixas() {
-    const alvo = document.getElementById('fin-conteudo');
+    const alvo = alvoConteudo();
     alvo.innerHTML = `
-      <p class="dica mb-16">Cadastre contas que se repetem todo mês (aluguel, internet, água, luz…). Elas são lançadas automaticamente em "A Pagar" no início de cada mês.</p>
-      <div class="barra-ferramentas"><div class="cresce"></div><button class="btn" id="cf-nova">+ Nova conta fixa</button></div>
+      <p class="dica mb-16">Cadastre contas que se repetem todo mês (aluguel, internet, água, luz…). Elas são lançadas automaticamente em "${ehInstituto() ? 'Despesas' : 'A Pagar'}" no início de cada mês.</p>
+      <div class="barra-ferramentas"><div class="cresce"></div><button class="btn" id="cf-nova">+ ${ehInstituto() ? 'Nova despesa fixa' : 'Nova conta fixa'}</button></div>
       <div class="card"><div id="cf-lista">Carregando…</div></div>`;
     alvo.querySelector('#cf-nova').addEventListener('click', () => formContaFixa());
     await listarContasFixas();
@@ -313,10 +426,12 @@ window.PaginaFinanceiro = (function () {
 
   // -------------------------- Mensalidades ----------------------------
   async function renderAssinaturas() {
-    const alvo = document.getElementById('fin-conteudo');
+    const alvo = alvoConteudo();
     alvo.innerHTML = `
-      <p class="dica mb-16">Cadastre mensalidades de clientes (academia, escola, plano de serviço…). Todo mês, a cobrança é lançada automaticamente em "A Receber", no dia de vencimento escolhido.</p>
-      <div class="barra-ferramentas"><div class="cresce"></div><button class="btn" id="as-nova">+ Nova mensalidade</button></div>
+      <p class="dica mb-16">${ehInstituto()
+        ? 'Cadastre a contribuição mensal de cada mantenedor. Todo mês, no dia combinado, a cobrança é lançada automaticamente em "A receber" — quando o dinheiro cair, registre a entrada em Ofertas para ela ir ao caixa e ao recibo.'
+        : 'Cadastre mensalidades de clientes (academia, escola, plano de serviço…). Todo mês, a cobrança é lançada automaticamente em "A Receber", no dia de vencimento escolhido.'}</p>
+      <div class="barra-ferramentas"><div class="cresce"></div><button class="btn" id="as-nova">+ ${ehInstituto() ? 'Nova contribuição mensal' : 'Nova mensalidade'}</button></div>
       <div class="card"><div id="as-lista">Carregando…</div></div>`;
     alvo.querySelector('#as-nova').addEventListener('click', () => formAssinatura());
     await listarAssinaturas();
@@ -411,12 +526,12 @@ window.PaginaFinanceiro = (function () {
 
   // ---------------------------- A Receber ----------------------------
   async function renderReceber() {
-    const alvo = document.getElementById('fin-conteudo');
+    const alvo = alvoConteudo();
     const statusOpcoes = ['<option value="">Todas</option>', '<option value="pendente">Pendentes</option>', '<option value="recebido">Recebidas</option>', '<option value="cancelada">Canceladas</option>']
       .map((o) => o.replace(`value="${filtroReceber.status}"`, `value="${filtroReceber.status}" selected`)).join('');
     alvo.innerHTML = barraMes(filtroReceber, 'cr', statusOpcoes) + '<div class="card"><div id="cr-lista">Carregando…</div></div>';
     ligarBarraMes(alvo, filtroReceber, 'cr', listarReceber);
-    alvo.querySelector('#cr-nova').addEventListener('click', formReceber);
+    alvo.querySelector('#cr-nova').addEventListener('click', () => formReceber());
     await listarReceber();
   }
 
@@ -501,7 +616,7 @@ window.PaginaFinanceiro = (function () {
         const quitada = c.status === 'pago' || c.status === 'recebido';
         const ehVista = c.tipo === 'venda_vista';
         return `<tr>
-          <td>${UI.escapar(c.descricao)}${tipo === 'pagar' && c.conta_fixa_id ? ' <span class="badge badge--muted" title="Gerada automaticamente de uma conta fixa">🔁 fixa</span>' : ''}${tipo === 'receber' && c.assinatura_id ? ' <span class="badge badge--muted" title="Gerada automaticamente de uma mensalidade">🔁 mensalidade</span>' : ''}${tipo === 'pagar' && c.total_parcelas > 1 ? ` <span class="badge badge--muted">${c.parcela}/${c.total_parcelas}</span>` : ''}${tipo === 'pagar' && c.categoria_nome ? `<div class="dica">🏷️ ${UI.escapar(c.categoria_nome)}</div>` : ''}</td>
+          <td>${UI.escapar(c.descricao)}${tipo === 'pagar' && c.conta_fixa_id ? ' <span class="badge badge--muted" title="Gerada automaticamente de uma conta fixa">🔁 fixa</span>' : ''}${tipo === 'receber' && c.assinatura_id ? ' <span class="badge badge--muted" title="Gerada automaticamente de uma mensalidade">🔁 mensalidade</span>' : ''}${tipo === 'pagar' && c.total_parcelas > 1 ? ` <span class="badge badge--muted">${c.parcela}/${c.total_parcelas}</span>` : ''}${tipo === 'pagar' && c.categoria_nome ? `<div class="dica">🏷️ ${UI.escapar(c.categoria_nome)}</div>` : ''}${tipo === 'pagar' && c.projeto_nome ? `<div class="dica">📁 ${UI.escapar(c.projeto_nome)}</div>` : ''}</td>
           ${tipo === 'pagar' ? `<td>${UI.escapar(c.fornecedor_nome || '—')}</td>` : ''}
           <td>${c.vencimento || '—'}</td>
           <td>${UI.moeda(c.valor)}</td>
@@ -618,7 +733,7 @@ window.PaginaFinanceiro = (function () {
 
   // --------------------------- Fluxo de caixa ------------------------
   async function renderFluxo() {
-    const alvo = document.getElementById('fin-conteudo');
+    const alvo = alvoConteudo();
     contasFin = await API.get('/api/financeiro/contas-financeiras').catch(() => []);
     const hoje = new Date().toISOString().slice(0, 10);
     const mesInicio = hoje.slice(0, 8) + '01';
@@ -677,9 +792,10 @@ window.PaginaFinanceiro = (function () {
       <div class="card">
         <h3 style="margin-top:0">Composição do período</h3>
         <table class="tabela">
-          <tr><td>Vendas à vista (dinheiro, cartão, PIX)</td><td style="text-align:right;color:var(--sucesso)">+ ${UI.moeda(fx.detalhe.vendas_a_vista)}</td></tr>
-          <tr><td>Recebimentos de contas (a prazo/parcelas)</td><td style="text-align:right;color:var(--sucesso)">+ ${UI.moeda(fx.detalhe.recebimentos)}</td></tr>
-          <tr><td>Pagamentos de contas</td><td style="text-align:right;color:var(--perigo)">- ${UI.moeda(fx.detalhe.pagamentos)}</td></tr>
+          ${ehInstituto() ? '' : `<tr><td>Vendas à vista (dinheiro, cartão, PIX)</td><td style="text-align:right;color:var(--sucesso)">+ ${UI.moeda(fx.detalhe.vendas_a_vista)}</td></tr>`}
+          ${ehInstituto() || Number(fx.detalhe.ofertas || 0) > 0 ? `<tr><td>Ofertas e doações recebidas</td><td style="text-align:right;color:var(--sucesso)">+ ${UI.moeda(fx.detalhe.ofertas || 0)}</td></tr>` : ''}
+          <tr><td>${ehInstituto() ? 'Cobranças recebidas (contribuições, mensalidades)' : 'Recebimentos de contas (a prazo/parcelas)'}</td><td style="text-align:right;color:var(--sucesso)">+ ${UI.moeda(fx.detalhe.recebimentos)}</td></tr>
+          <tr><td>${ehInstituto() ? 'Despesas pagas' : 'Pagamentos de contas'}</td><td style="text-align:right;color:var(--perigo)">- ${UI.moeda(fx.detalhe.pagamentos)}</td></tr>
         </table>
       </div>`;
   }
@@ -760,7 +876,7 @@ window.PaginaFinanceiro = (function () {
     });
   }
 
-  const NOME_ORIGEM_MOV = { venda: 'Venda', recebimento: 'Recebimento', pagamento: 'Pagamento', ajuste: 'Ajuste', abertura: 'Abertura' };
+  const NOME_ORIGEM_MOV = { venda: 'Venda', recebimento: 'Recebimento', pagamento: 'Pagamento', ajuste: 'Ajuste', abertura: 'Abertura', oferta: '🤝 Oferta' };
 
   async function verExtrato(conta) {
     const hoje = new Date().toISOString().slice(0, 10);
@@ -827,7 +943,7 @@ window.PaginaFinanceiro = (function () {
   const dreFiltro = { mes: mesCorrente() };
 
   async function renderDRE() {
-    const alvo = document.getElementById('fin-conteudo');
+    const alvo = alvoConteudo();
     alvo.innerHTML = `
       <div class="barra-ferramentas">
         <div class="flex gap-12" style="align-items:center">
@@ -937,7 +1053,7 @@ window.PaginaFinanceiro = (function () {
   const FORMAS_CONCILIACAO = { transferencia: 'Transferência', pix: 'PIX', dinheiro: 'Dinheiro', cartao_credito: 'Cartão crédito', cartao_debito: 'Cartão débito', boleto: 'Boleto' };
 
   async function renderConciliacao() {
-    const alvo = document.getElementById('fin-conteudo');
+    const alvo = alvoConteudo();
     contasFin = await API.get('/api/financeiro/contas-financeiras').catch(() => []);
     if (!contasFin.length) {
       alvo.innerHTML = '<div class="card vazio">Cadastre uma conta financeira primeiro (aba "Formas de pagamento → contas" ou no botão de saldos) para poder importar um extrato.</div>';
@@ -949,7 +1065,7 @@ window.PaginaFinanceiro = (function () {
           <h3 style="margin-top:0">Importar extrato (.ofx)</h3>
           <button class="btn btn--secundario" id="cc-regras">⚙️ Regras de conciliação</button>
         </div>
-        <p class="dica">Importe o extrato exportado do seu banco (formato OFX) para bater as transações com as contas a pagar/receber do sistema — e já dar baixa nelas. Transações sem conta correspondente podem ser lançadas automaticamente por uma regra (ex.: "taxa" sempre vira despesa de tarifas bancárias).</p>
+        <p class="dica">Importe o extrato exportado do seu banco (formato OFX) para bater as transações com o que já está lançado — ${ehInstituto() ? 'ofertas recebidas e despesas' : 'contas a pagar/receber'} — e já dar baixa nelas. Transações sem par podem ser lançadas automaticamente por uma regra (ex.: "taxa" sempre vira despesa de tarifas bancárias).</p>
         <div class="form-grid">
           <div class="campo"><label>Conta financeira</label><select id="cc-conta">${contasFin.map((c) => `<option value="${c.id}">${UI.escapar(c.nome)}</option>`).join('')}</select></div>
           <div class="campo"><label>Arquivo OFX</label><input type="file" id="cc-arquivo" accept=".ofx" /></div>
@@ -1006,7 +1122,7 @@ window.PaginaFinanceiro = (function () {
       <thead><tr><th>Data</th><th>Descrição</th><th>Tipo</th><th>Valor</th><th>Status</th><th></th></tr></thead>
       <tbody>${transacoes.map((t) => `<tr>
         <td>${t.data}</td>
-        <td>${UI.escapar(t.descricao)}${t.regra_padrao ? ` <span class="badge badge--muted" title="Conciliado automaticamente pela regra &quot;${UI.escapar(t.regra_padrao)}&quot;">🤖 automático</span>` : ''}${t.pagar_descricao ? `<div class="dica">↳ ${UI.escapar(t.pagar_descricao)}</div>` : ''}${t.receber_descricao ? `<div class="dica">↳ ${UI.escapar(t.receber_descricao)}</div>` : ''}</td>
+        <td>${UI.escapar(t.descricao)}${t.regra_padrao ? ` <span class="badge badge--muted" title="Conciliado automaticamente pela regra &quot;${UI.escapar(t.regra_padrao)}&quot;">🤖 automático</span>` : ''}${t.pagar_descricao ? `<div class="dica">↳ ${UI.escapar(t.pagar_descricao)}</div>` : ''}${t.receber_descricao ? `<div class="dica">↳ ${UI.escapar(t.receber_descricao)}</div>` : ''}${t.oferta_descricao ? `<div class="dica">↳ ${UI.escapar(t.oferta_descricao)}</div>` : ''}</td>
         <td><span class="chip-forma">${t.tipo === 'credito' ? '🟢 Crédito' : '🔴 Débito'}</span></td>
         <td>${UI.moeda(t.valor)}</td>
         <td>${t.status === 'pendente' ? '<span class="badge badge--alerta">Pendente</span>' : t.status === 'conciliada' ? '<span class="badge badge--ok">Conciliada</span>' : '<span class="badge badge--muted">Ignorada</span>'}</td>
@@ -1151,10 +1267,15 @@ window.PaginaFinanceiro = (function () {
 
   function opcaoContaHTML(s, tipo, marcada) {
     const diferenca = Math.abs(Number(s.valor) - Number(s.__valorTransacao || 0));
-    const statusTxt = s.status === 'pendente' ? '<span class="badge badge--alerta">Pendente</span>' : `<span class="badge badge--ok">${tipo === 'pagar' ? 'Paga' : 'Recebida'} — só amarra com o extrato</span>`;
+    const ehOferta = s.origem_registro === 'oferta';
+    // A oferta ja entrou no caixa quando foi registrada: conciliar so amarra
+    // com o extrato, nunca lanca o valor de novo.
+    const statusTxt = ehOferta
+      ? '<span class="badge badge--ok">🤝 Oferta — já está no caixa</span>'
+      : (s.status === 'pendente' ? '<span class="badge badge--alerta">Pendente</span>' : `<span class="badge badge--ok">${tipo === 'pagar' ? 'Paga' : 'Recebida'} — só amarra com o extrato</span>`);
     return `
       <label class="flex gap-12" style="align-items:center;padding:8px 0;border-bottom:1px solid var(--borda)">
-        <input type="radio" name="cc-opcao" value="${s.id}" ${marcada ? 'checked' : ''} />
+        <input type="radio" name="cc-opcao" value="${s.id}" data-origem="${ehOferta ? 'oferta' : 'conta'}" ${marcada ? 'checked' : ''} />
         <span class="cresce">${UI.escapar(s.descricao)}${s.contraparte_nome ? ' — ' + UI.escapar(s.contraparte_nome) : ''}
           <span class="dica">${s.vencimento ? 'vence ' + s.vencimento : ''} — ${UI.moeda(s.valor)}${diferenca > 0.01 ? ` <span style="color:var(--perigo)">(diferença de ${UI.moeda(diferenca)})</span>` : ''}</span>
         </span>
@@ -1177,7 +1298,7 @@ window.PaginaFinanceiro = (function () {
       <div class="campo"><label>Bate com uma conta já cadastrada?</label></div>
       <div id="cc-sugestoes">${sugestoes.map((s, idx) => opcaoContaHTML(s, tipo, idx === 0)).join('')}</div>` : '<div class="dica mb-16">Nenhuma conta pendente com esse valor.</div>'}
 
-      <div class="campo mt-16"><label>🔍 Buscar outra conta ${tipo === 'pagar' ? 'a pagar' : 'a receber'}</label></div>
+      <div class="campo mt-16"><label>🔍 Buscar ${tipo === 'pagar' ? 'outra despesa' : (ehInstituto() ? 'outra oferta ou cobrança' : 'outra conta a receber')}</label></div>
       <div class="barra-ferramentas" style="margin-bottom:8px">
         <input type="search" id="cc-busca-termo" class="cresce" placeholder="Buscar por descrição…" />
         <select id="cc-busca-status">
@@ -1237,8 +1358,9 @@ window.PaginaFinanceiro = (function () {
         const forma = el.querySelector('#cc-forma').value;
         try {
           if (opcaoSel && opcaoSel.value !== 'novo') {
-            await API.post(`/api/conciliacao/${t.id}/conciliar`, { tipo, conta_id: Number(opcaoSel.value), forma });
-            UI.sucesso('Conciliado.');
+            const alvoTipo = opcaoSel.dataset.origem === 'oferta' ? 'oferta' : tipo;
+            await API.post(`/api/conciliacao/${t.id}/conciliar`, { tipo: alvoTipo, conta_id: Number(opcaoSel.value), forma });
+            UI.sucesso(alvoTipo === 'oferta' ? 'Oferta amarrada ao extrato.' : 'Conciliado.');
           } else {
             const dados = { tipo, descricao: el.querySelector('#cc-nova-desc').value, forma };
             if (tipo === 'pagar') {

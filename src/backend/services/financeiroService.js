@@ -173,18 +173,20 @@ function extratoConta(id, { inicio, fim } = {}) {
 
 // =========================== Contas a pagar ===========================
 
-function listarPagar({ status, inicio, fim } = {}) {
+function listarPagar({ status, inicio, fim, projeto_id } = {}) {
   const db = getDb();
   const where = [];
   const params = {};
   if (status) { where.push('cp.status = @status'); params.status = status; }
   if (inicio) { where.push('date(cp.vencimento) >= date(@inicio)'); params.inicio = inicio; }
   if (fim) { where.push('date(cp.vencimento) <= date(@fim)'); params.fim = fim; }
+  if (projeto_id) { where.push('cp.projeto_id = @projeto_id'); params.projeto_id = Number(projeto_id); }
   return db.prepare(`
-    SELECT cp.*, f.nome AS fornecedor_nome, cd.nome AS categoria_nome
+    SELECT cp.*, f.nome AS fornecedor_nome, cd.nome AS categoria_nome, pj.nome AS projeto_nome
     FROM contas_pagar cp
     LEFT JOIN fornecedores f ON f.id = cp.fornecedor_id
     LEFT JOIN categorias_despesa cd ON cd.id = cp.categoria_despesa_id
+    LEFT JOIN projetos pj ON pj.id = cp.projeto_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY (cp.status='pago'), date(cp.vencimento)
   `).all(params);
@@ -246,6 +248,8 @@ function criarPagar(dados) {
   const porParcela = dados.valor_modo === 'parcela';
 
   const categoria = dados.categoria_despesa_id ? Number(dados.categoria_despesa_id) : null;
+  // Verba carimbada do instituto: amarra a despesa ao projeto que a bancou.
+  const projeto = dados.projeto_id ? Number(dados.projeto_id) : null;
   const valores = [];
   if (porParcela) {
     for (let i = 1; i <= totalParcelas; i++) valores.push(arred(valorInformado));
@@ -260,15 +264,15 @@ function criarPagar(dados) {
   }
 
   const ins = db.prepare(
-    `INSERT INTO contas_pagar (fornecedor_id, descricao, valor, vencimento, status, forma_pagamento, parcela, total_parcelas, categoria_despesa_id)
-     VALUES (?, ?, ?, ?, 'pendente', ?, ?, ?, ?)`
+    `INSERT INTO contas_pagar (fornecedor_id, descricao, valor, vencimento, status, forma_pagamento, parcela, total_parcelas, categoria_despesa_id, projeto_id)
+     VALUES (?, ?, ?, ?, 'pendente', ?, ?, ?, ?, ?)`
   );
   const tx = db.transaction(() => {
     const ids = [];
     for (let i = parcelaInicial; i <= totalParcelas; i++) {
       const venc = primeiro ? somarMeses(primeiro, i - parcelaInicial) : null;
       const desc = totalParcelas > 1 ? `${descricao} (${i}/${totalParcelas})` : descricao;
-      ids.push(ins.run(dados.fornecedor_id || null, desc, valores[i - 1], venc, dados.forma_pagamento || null, i, totalParcelas, categoria).lastInsertRowid);
+      ids.push(ins.run(dados.fornecedor_id || null, desc, valores[i - 1], venc, dados.forma_pagamento || null, i, totalParcelas, categoria, projeto).lastInsertRowid);
     }
     return ids;
   });
@@ -290,10 +294,11 @@ function atualizarPagar(id, dados) {
   const fornecedorId = dados.fornecedor_id !== undefined ? (dados.fornecedor_id || null) : atual.fornecedor_id;
   const categoria = dados.categoria_despesa_id !== undefined ? (dados.categoria_despesa_id || null) : atual.categoria_despesa_id;
   const formaPagamento = dados.forma_pagamento !== undefined ? (dados.forma_pagamento || null) : atual.forma_pagamento;
+  const projeto = dados.projeto_id !== undefined ? (dados.projeto_id || null) : atual.projeto_id;
   const valorArred = arred(valor);
   const tx = db.transaction(() => {
-    db.prepare('UPDATE contas_pagar SET descricao=?, valor=?, vencimento=?, fornecedor_id=?, categoria_despesa_id=?, forma_pagamento=? WHERE id=?')
-      .run(descricao, valorArred, vencimento, fornecedorId, categoria, formaPagamento, id);
+    db.prepare('UPDATE contas_pagar SET descricao=?, valor=?, vencimento=?, fornecedor_id=?, categoria_despesa_id=?, forma_pagamento=?, projeto_id=? WHERE id=?')
+      .run(descricao, valorArred, vencimento, fornecedorId, categoria, formaPagamento, projeto, id);
     if (atual.status === 'pago' && valorArred !== Number(atual.valor)) {
       db.prepare("UPDATE contas_financeiras_mov SET valor=? WHERE origem='pagamento' AND referencia_id=?").run(valorArred, id);
     }
@@ -774,6 +779,7 @@ function fluxoCaixa({ inicio, fim, conta_financeira_id } = {}) {
       detalhe: {
         vendas_a_vista: somaOrigem('venda'),
         recebimentos: somaOrigem('recebimento'),
+        ofertas: somaOrigem('oferta'),
         pagamentos: somaOrigem('pagamento'),
       },
       conta_financeira: { ...conta, saldo_atual: saldoConta(db, contaId) },
@@ -803,7 +809,14 @@ function fluxoCaixa({ inicio, fim, conta_financeira_id } = {}) {
     WHERE status='pago' AND date(data_pagamento) BETWEEN date(?) AND date(?)
   `).get(ini, f).total;
 
-  const entradas = arred(Number(vendasVista) + Number(recebimentos));
+  // Oferta do instituto entra direto no caixa (nao passa por conta a receber),
+  // entao vem do proprio extrato das contas para nao ficar de fora do fluxo.
+  const ofertas = db.prepare(`
+    SELECT COALESCE(SUM(valor),0) AS total FROM contas_financeiras_mov
+    WHERE origem='oferta' AND tipo='entrada' AND date(data) BETWEEN date(?) AND date(?)
+  `).get(ini, f).total;
+
+  const entradas = arred(Number(vendasVista) + Number(recebimentos) + Number(ofertas));
   const saidas = arred(Number(pagamentos));
   return {
     entradas,
@@ -812,6 +825,7 @@ function fluxoCaixa({ inicio, fim, conta_financeira_id } = {}) {
     detalhe: {
       vendas_a_vista: arred(vendasVista),
       recebimentos: arred(recebimentos),
+      ofertas: arred(ofertas),
       pagamentos: arred(pagamentos),
     },
     contas: listarContasFinanceiras(),

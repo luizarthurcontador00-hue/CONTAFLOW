@@ -153,10 +153,15 @@ function listarTransacoes({ conta_financeira_id, status } = {}) {
   if (status) { where.push('t.status = @status'); params.status = status; }
   return db.prepare(`
     SELECT t.*,
-      cp.descricao AS pagar_descricao, cr.descricao AS receber_descricao, r.padrao AS regra_padrao
+      cp.descricao AS pagar_descricao, cr.descricao AS receber_descricao, r.padrao AS regra_padrao,
+      CASE WHEN o.id IS NULL THEN NULL
+        ELSE 'Oferta — ' || COALESCE(oc.nome, o.doador_nome, 'doador')
+      END AS oferta_descricao
     FROM extrato_ofx_transacoes t
     LEFT JOIN contas_pagar cp ON cp.id = t.contas_pagar_id
     LEFT JOIN contas_receber cr ON cr.id = t.contas_receber_id
+    LEFT JOIN ofertas o ON o.id = t.oferta_id
+    LEFT JOIN clientes oc ON oc.id = o.cliente_id
     LEFT JOIN regras_conciliacao r ON r.id = t.regra_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY (t.status = 'pendente') DESC, t.data DESC
@@ -175,12 +180,30 @@ function sugestoes(id) {
   const db = getDb();
   const t = obterTransacao(id);
   const tabela = t.tipo === 'debito' ? 'contas_pagar' : 'contas_receber';
-  return db.prepare(`
-    SELECT * FROM ${tabela}
+  const contas = db.prepare(`
+    SELECT *, 'conta' AS origem_registro FROM ${tabela}
     WHERE status = 'pendente' AND ABS(valor - @valor) < 0.01
     ORDER BY ABS(julianday(COALESCE(vencimento, date('now'))) - julianday(@data)) ASC
     LIMIT 5
   `).all({ valor: t.valor, data: t.data });
+
+  if (t.tipo !== 'credito') return contas;
+
+  // Doacao que caiu no banco: o par dela e uma oferta, nao uma conta a receber.
+  const ofertas = db.prepare(`
+    SELECT o.id, o.valor, o.data AS vencimento, 'recebido' AS status,
+      COALESCE(c.nome, o.doador_nome) AS contraparte_nome,
+      'Oferta — ' || COALESCE(c.nome, o.doador_nome, 'doador') AS descricao,
+      'oferta' AS origem_registro
+    FROM ofertas o
+    LEFT JOIN clientes c ON c.id = o.cliente_id
+    WHERE ABS(o.valor - @valor) < 0.01
+      AND NOT EXISTS (SELECT 1 FROM extrato_ofx_transacoes e WHERE e.oferta_id = o.id)
+    ORDER BY ABS(julianday(o.data) - julianday(@data)) ASC
+    LIMIT 5
+  `).all({ valor: t.valor, data: t.data });
+
+  return contas.concat(ofertas);
 }
 
 /**
@@ -206,14 +229,42 @@ function buscarContas(id, { termo, status } = {}) {
   }
   if (termo) { where.push('x.descricao LIKE @termo'); params.termo = `%${termo}%`; }
 
-  return db.prepare(`
-    SELECT x.*, j.nome AS contraparte_nome
+  const contas = db.prepare(`
+    SELECT x.*, j.nome AS contraparte_nome, 'conta' AS origem_registro
     FROM ${tabela} x
     ${nomeJoin}
     WHERE ${where.join(' AND ')}
     ORDER BY (x.status = 'pendente') DESC, date(COALESCE(x.vencimento, x.${dataCol})) DESC
     LIMIT 30
   `).all(params);
+
+  // Num instituto, boa parte das entradas nao e "conta a receber" — e oferta.
+  // Sem isso, a doacao que aparece no extrato do banco nunca acharia par.
+  if (t.tipo === 'credito') {
+    const ondeOferta = ['1=1'];
+    const pOferta = {};
+    if (termo) {
+      ondeOferta.push('(COALESCE(c.nome, o.doador_nome) LIKE @termo OR o.observacao LIKE @termo)');
+      pOferta.termo = `%${termo}%`;
+    }
+    const ofertas = db.prepare(`
+      SELECT o.id, o.valor, o.data AS data_recebimento, o.data AS vencimento,
+        'recebido' AS status, o.forma AS forma_recebimento,
+        COALESCE(c.nome, o.doador_nome) AS contraparte_nome,
+        'Oferta — ' || COALESCE(c.nome, o.doador_nome, 'doador') AS descricao,
+        'oferta' AS origem_registro
+      FROM ofertas o
+      LEFT JOIN clientes c ON c.id = o.cliente_id
+      WHERE ${ondeOferta.join(' AND ')}
+      ORDER BY date(o.data) DESC
+      LIMIT 30
+    `).all(pOferta);
+    // Ofertas ja estao "recebidas" por natureza: entram quando o filtro
+    // permite conta ja baixada.
+    if (status !== 'pendente') return contas.concat(ofertas);
+  }
+
+  return contas;
 }
 
 /**
@@ -226,10 +277,21 @@ function conciliarComExistente(id, { tipo, conta_id, forma }) {
   const db = getDb();
   const t = obterTransacao(id);
   if (t.status !== 'pendente') throw new AppError('Esta transação já foi conciliada.');
-  if (tipo !== 'pagar' && tipo !== 'receber') throw new AppError('Tipo inválido.');
+  if (!['pagar', 'receber', 'oferta'].includes(tipo)) throw new AppError('Tipo inválido.');
 
   // eslint-disable-next-line global-require
   const fin = require('./financeiroService');
+
+  // A oferta ja nasceu com o dinheiro lancado na conta — aqui so amarramos a
+  // linha do extrato a ela, sem lancar nada de novo (senao dobraria o saldo).
+  if (tipo === 'oferta') {
+    const o = db.prepare('SELECT * FROM ofertas WHERE id = ?').get(conta_id);
+    if (!o) throw new AppError('Oferta não encontrada.', 404);
+    if (Math.abs(Number(o.valor) - t.valor) > 0.01) throw new AppError('O valor da oferta não bate com o da transação.');
+    db.prepare("UPDATE extrato_ofx_transacoes SET status='conciliada', oferta_id=? WHERE id=?").run(conta_id, id);
+    return obterTransacao(id);
+  }
+
   const tx = db.transaction(() => {
     if (tipo === 'pagar') {
       const cp = db.prepare('SELECT * FROM contas_pagar WHERE id = ?').get(conta_id);
@@ -291,7 +353,7 @@ function ignorar(id) {
 function reabrir(id) {
   const db = getDb();
   obterTransacao(id);
-  db.prepare("UPDATE extrato_ofx_transacoes SET status='pendente', contas_pagar_id=NULL, contas_receber_id=NULL, regra_id=NULL WHERE id=?").run(id);
+  db.prepare("UPDATE extrato_ofx_transacoes SET status='pendente', contas_pagar_id=NULL, contas_receber_id=NULL, oferta_id=NULL, regra_id=NULL WHERE id=?").run(id);
   return obterTransacao(id);
 }
 

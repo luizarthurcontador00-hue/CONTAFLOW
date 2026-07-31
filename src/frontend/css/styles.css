@@ -315,6 +315,13 @@ table.tabela th { color: var(--texto-suave); font-weight: 600; font-size: 12.5px
 .tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--borda); margin-bottom: 16px; }
 .tab { padding: 10px 16px; cursor: pointer; border-bottom: 2px solid transparent; color: var(--texto-suave); font-weight: 600; }
 .tab.ativo { color: var(--primaria); border-bottom-color: var(--primaria); }
+/* Segundo nivel de abas (ex.: Financeiro do instituto: Entradas > Ofertas). */
+.tabs--sub { border-bottom: none; gap: 4px; flex-wrap: wrap; margin-bottom: 12px; }
+.tabs--sub .tab {
+  padding: 6px 12px; font-size: 13px; border-bottom: none; border-radius: 999px;
+  background: var(--fundo-suave, rgba(127, 127, 127, .1));
+}
+.tabs--sub .tab.ativo { background: var(--primaria); color: #fff; }
 
 /* ===================== PDV ===================== */
 .pdv { display: grid; grid-template-columns: 1fr 360px; gap: 16px; height: 100%; }

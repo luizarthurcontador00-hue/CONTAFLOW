@@ -20,7 +20,6 @@
     impacto: { titulo: 'Relatório de impacto', pagina: () => window.PaginaImpacto },
     turmas: { titulo: 'Turmas', pagina: () => window.PaginaTurmas },
     chamada: { titulo: 'Chamada', pagina: () => window.PaginaChamada },
-    arrecadacao: { titulo: 'Arrecadação', pagina: () => window.PaginaArrecadacao },
     ordens: { titulo: 'Ordens & Orçamentos', pagina: () => window.PaginaOrdens },
     lote: { titulo: 'Cadastro em Lote', pagina: () => window.PaginaLote },
     clientes: { titulo: 'Clientes', pagina: () => window.PaginaClientes },
@@ -60,13 +59,12 @@
     servicos: 'servico', agenda: 'servico', ordens: 'servico', comissoes: 'servico', crm: 'servico', viagens: 'servico',
     cursos: 'servico', instrumentos: 'servico', voluntarios: 'servico', turmas: 'servico', chamada: 'servico',
     membros: 'servico', 'lista-espera': 'servico', autorizacoes: 'servico', atas: 'servico', impacto: 'servico',
-    arrecadacao: 'servico',
   };
   // Rotas exclusivas de um ramo especifico (so aparecem alem do filtro de perfil).
   const rotaRamo = {
     crm: 'agencia_viagem', viagens: 'agencia_viagem',
     cursos: 'instituto', instrumentos: 'instituto', voluntarios: 'instituto',
-    turmas: 'instituto', chamada: 'instituto', arrecadacao: 'instituto', membros: 'instituto',
+    turmas: 'instituto', chamada: 'instituto', membros: 'instituto',
     'lista-espera': 'instituto', autorizacoes: 'instituto', atas: 'instituto', impacto: 'instituto',
   };
   // Num instituto sem fins lucrativos nao existe venda: o que entra e oferta,
@@ -90,7 +88,7 @@
     });
     // Regras compostas (dependem tambem do ramo, nao so do perfil).
     ['ordens', 'agenda', 'crm', 'viagens', 'pdv', 'vendas', 'comissoes', 'dashboard',
-      'cursos', 'instrumentos', 'voluntarios', 'turmas', 'chamada', 'arrecadacao', 'membros',
+      'cursos', 'instrumentos', 'voluntarios', 'turmas', 'chamada', 'membros',
       'lista-espera', 'autorizacoes', 'atas', 'impacto',
       'produtos', 'sacolas', 'precificacao', 'compras', 'fornecedores'].forEach((nome) => {
       const link = document.querySelector(`.nav-item[data-rota="${nome}"]`);

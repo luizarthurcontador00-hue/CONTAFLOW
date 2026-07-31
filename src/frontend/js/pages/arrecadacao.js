@@ -1,48 +1,39 @@
 'use strict';
 
 /**
- * Arrecadacao do instituto: ofertas, doacoes em especie, mantenedores,
- * projetos e a prestacao de contas do periodo.
+ * Secoes da arrecadacao do instituto: ofertas, doacoes em especie,
+ * mantenedores, projetos e a prestacao de contas do periodo.
+ *
+ * Isto NAO e uma pagina: sao blocos montados dentro da tela de Financeiro
+ * quando o ramo e "instituto". A ideia e ter um financeiro so — o saldo, a
+ * conciliacao e a arrecadacao falando do mesmo dinheiro — em vez de duas
+ * telas que nunca fecham entre si.
  *
  * Aqui nao existe venda: o que entra e doacao, o que sai e despesa do
  * projeto, e o resultado nao e lucro — e saldo para prestar contas.
  */
-window.PaginaArrecadacao = (function () {
+window.SecoesArrecadacao = (function () {
   const FORMAS = [['pix', 'PIX'], ['dinheiro', 'Dinheiro'], ['transferencia', 'Transferência'],
     ['boleto', 'Boleto'], ['cartao', 'Cartão'], ['outro', 'Outro']];
-  let aba = 'ofertas';
   let projetos = [];
+  let contasFin = [];
+  let alvoId = 'ar-conteudo';
+  const alvo = () => document.getElementById(alvoId);
   const hoje = () => new Date().toISOString().slice(0, 10);
   const inicioDoMes = () => hoje().slice(0, 8) + '01';
   const periodo = { de: inicioDoMes(), ate: hoje(), projeto_id: '' };
 
-  async function render(container) {
-    container.innerHTML = `
-      <div class="tabs">
-        <div class="tab ativo" data-aba="ofertas">🤝 Ofertas</div>
-        <div class="tab" data-aba="especie">🎁 Doações em espécie</div>
-        <div class="tab" data-aba="mantenedores">💚 Mantenedores</div>
-        <div class="tab" data-aba="projetos">📁 Projetos</div>
-        <div class="tab" data-aba="contas">📊 Prestação de contas</div>
-      </div>
-      <div id="ar-conteudo"></div>`;
+  /** Define em qual container as secoes vao ser desenhadas. */
+  function montarEm(id) { alvoId = id; }
 
-    container.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
-      aba = t.dataset.aba;
-      container.querySelectorAll('.tab').forEach((x) => x.classList.toggle('ativo', x === t));
-      trocarAba();
-    }));
-
+  async function carregarProjetos() {
     try { projetos = await API.get('/api/arrecadacao/projetos'); } catch (_) { projetos = []; }
-    trocarAba();
+    return projetos;
   }
 
-  function trocarAba() {
-    if (aba === 'especie') renderEspecie();
-    else if (aba === 'mantenedores') renderMantenedores();
-    else if (aba === 'projetos') renderProjetos();
-    else if (aba === 'contas') renderContas();
-    else renderOfertas();
+  async function carregarContas() {
+    try { contasFin = await API.get('/api/financeiro/contas-financeiras'); } catch (_) { contasFin = []; }
+    return contasFin;
   }
 
   function barraPeriodo(idPrefixo) {
@@ -79,8 +70,9 @@ window.PaginaArrecadacao = (function () {
 
   // ------------------------------- Ofertas -------------------------------
   async function renderOfertas() {
-    const alvo = document.getElementById('ar-conteudo');
-    alvo.innerHTML = barraPeriodo('of') + '<div class="card"><div id="of-lista">Carregando…</div></div>';
+    const el = alvo();
+    if (!el) return;
+    el.innerHTML = barraPeriodo('of') + '<div class="card"><div id="of-lista">Carregando…</div></div>';
     document.getElementById('of-acoes').outerHTML = '<button class="btn" id="of-nova">+ Registrar oferta</button>';
     document.getElementById('of-nova').addEventListener('click', () => formOferta(null));
     ligarPeriodo('of', renderOfertas);
@@ -88,13 +80,15 @@ window.PaginaArrecadacao = (function () {
     let ofertas = [];
     try { ofertas = await API.get('/api/arrecadacao/ofertas?' + query()); }
     catch (e) { document.getElementById('of-lista').innerHTML = `<p class="dica">${UI.escapar(e.message)}</p>`; return; }
+    await carregarContas();
+    const nomeConta = (id) => { const c = contasFin.find((x) => x.id === id); return c ? c.nome : null; };
 
     const total = ofertas.reduce((s, o) => s + Number(o.valor || 0), 0);
     document.getElementById('of-lista').innerHTML = !ofertas.length
-      ? `<div class="vazio"><h3>Nenhuma oferta no período</h3><p class="dica">Registre as doações recebidas para acompanhar a arrecadação.</p></div>`
-      : `<p><strong>Total do período: ${UI.moeda(total)}</strong> · ${ofertas.length} oferta(s)</p>
+      ? `<div class="vazio"><h3>Nenhuma oferta no período</h3><p class="dica">Registre as doações recebidas — cada oferta entra direto no saldo da conta escolhida.</p></div>`
+      : `<p><strong>Total do período: ${UI.moeda(total)}</strong> · ${ofertas.length} oferta(s) — já somadas ao saldo das contas</p>
         <div class="rolagem"><table class="tabela">
-          <thead><tr><th>Data</th><th>Doador</th><th>Valor</th><th>Forma</th><th>Projeto</th><th></th></tr></thead>
+          <thead><tr><th>Data</th><th>Doador</th><th>Valor</th><th>Entrou em</th><th>Projeto</th><th></th></tr></thead>
           <tbody>
             ${ofertas.map((o) => `
               <tr>
@@ -102,24 +96,29 @@ window.PaginaArrecadacao = (function () {
                 <td>${UI.escapar(o.mantenedor_nome || o.doador_nome || '—')}
                   ${o.recibo_emitido ? ' <span class="badge badge--muted">recibo emitido</span>' : ''}</td>
                 <td>${UI.moeda(o.valor)}</td>
-                <td class="dica">${UI.escapar(o.forma || '—')}</td>
+                <td class="dica">${UI.escapar(nomeConta(o.conta_financeira_id) || '⚠️ fora do caixa')}
+                  <div class="dica">${UI.escapar(o.forma || '—')}</div></td>
                 <td class="dica">${UI.escapar(o.projeto_nome || '—')}</td>
                 <td style="text-align:right;white-space:nowrap">
                   <button class="btn btn--secundario" data-recibo="${o.id}">Recibo</button>
-                  <button class="btn btn--secundario" data-editar="${o.id}">Editar</button>
-                  <button class="btn btn--perigo" data-excluir="${o.id}">Excluir</button>
+                  <button class="btn btn--secundario" data-of-editar="${o.id}">Editar</button>
+                  <button class="btn btn--perigo" data-of-excluir="${o.id}">Excluir</button>
                 </td>
               </tr>`).join('')}
           </tbody>
         </table></div>`;
 
-    document.querySelectorAll('[data-editar]').forEach((b) => b.addEventListener('click', () => formOferta(ofertas.find((o) => o.id === Number(b.dataset.editar)))));
-    document.querySelectorAll('[data-recibo]').forEach((b) => b.addEventListener('click', () => gerarRecibo(Number(b.dataset.recibo))));
-    document.querySelectorAll('[data-excluir]').forEach((b) => b.addEventListener('click', async () => {
-      const ok = await UI.confirmar('Excluir esta oferta?', { titulo: 'Excluir oferta', textoConfirmar: 'Excluir' });
+    el.querySelectorAll('[data-of-editar]').forEach((b) => b.addEventListener('click', () => formOferta(ofertas.find((o) => o.id === Number(b.dataset.ofEditar)))));
+    el.querySelectorAll('[data-recibo]').forEach((b) => b.addEventListener('click', () => gerarRecibo(Number(b.dataset.recibo))));
+    el.querySelectorAll('[data-of-excluir]').forEach((b) => b.addEventListener('click', async () => {
+      const ok = await UI.confirmar('Excluir esta oferta? O valor sai também do saldo da conta.', { titulo: 'Excluir oferta', textoConfirmar: 'Excluir' });
       if (!ok) return;
-      try { await API.del(`/api/arrecadacao/ofertas/${b.dataset.excluir}`); UI.sucesso('Oferta excluída.'); renderOfertas(); }
-      catch (e) { UI.erro(e.message); }
+      try {
+        await API.del(`/api/arrecadacao/ofertas/${b.dataset.ofExcluir}`);
+        UI.sucesso('Oferta excluída.');
+        renderOfertas();
+        if (window.__atualizarAvisoLembretes) window.__atualizarAvisoLembretes();
+      } catch (e) { UI.erro(e.message); }
     }));
   }
 
@@ -146,7 +145,13 @@ window.PaginaArrecadacao = (function () {
             <select id="ofd-forma">
               ${FORMAS.map(([v, t]) => `<option value="${v}" ${ed && oferta.forma === v ? 'selected' : ''}>${t}</option>`).join('')}
             </select></div>
-          <div class="campo"><label>Projeto</label>
+          <div class="campo"><label>Entrou na conta</label>
+            <select id="ofd-conta">
+              <option value="">Automático (pela forma)</option>
+              ${contasFin.map((c) => `<option value="${c.id}" ${ed && String(oferta.conta_financeira_id) === String(c.id) ? 'selected' : ''}>${UI.escapar(c.nome)} — ${UI.moeda(c.saldo_atual)}</option>`).join('')}
+            </select>
+            <span class="dica">É esta conta que vai subir de saldo — e onde a oferta vai aparecer na conciliação do extrato.</span></div>
+          <div class="campo col-2"><label>Projeto</label>
             <select id="ofd-projeto">
               <option value="">Nenhum (uso geral)</option>
               ${projetos.map((p) => `<option value="${p.id}" ${ed && oferta.projeto_id === p.id ? 'selected' : ''}>${UI.escapar(p.nome)}</option>`).join('')}
@@ -163,17 +168,17 @@ window.PaginaArrecadacao = (function () {
           clearTimeout(timer);
           timer = setTimeout(async () => {
             const termo = busca.value.trim();
-            const alvo = el.querySelector('#ofd-resultados');
-            if (!termo) { alvo.innerHTML = ''; return; }
+            const lista = el.querySelector('#ofd-resultados');
+            if (!termo) { lista.innerHTML = ''; return; }
             let pessoas = [];
             try { pessoas = await API.get('/api/clientes?busca=' + encodeURIComponent(termo)); } catch (_) { return; }
-            alvo.innerHTML = pessoas.slice(0, 8).map((p) => `
+            lista.innerHTML = pessoas.slice(0, 8).map((p) => `
               <div class="dica" style="padding:4px 0;cursor:pointer" data-pessoa="${p.id}" data-nome="${UI.escapar(p.nome)}">👤 ${UI.escapar(p.nome)}</div>`).join('');
-            alvo.querySelectorAll('[data-pessoa]').forEach((d) => d.addEventListener('click', () => {
+            lista.querySelectorAll('[data-pessoa]').forEach((d) => d.addEventListener('click', () => {
               el.querySelector('#ofd-cliente').value = d.dataset.pessoa;
               busca.value = d.dataset.nome;
               el.querySelector('#ofd-nome').value = '';
-              alvo.innerHTML = '<span class="dica">✅ Mantenedor selecionado.</span>';
+              lista.innerHTML = '<span class="dica">✅ Mantenedor selecionado.</span>';
             }));
           }, 300);
         });
@@ -185,13 +190,14 @@ window.PaginaArrecadacao = (function () {
           valor: el.querySelector('#ofd-valor').value,
           data: el.querySelector('#ofd-data').value,
           forma: el.querySelector('#ofd-forma').value,
+          conta_financeira_id: el.querySelector('#ofd-conta').value || null,
           projeto_id: el.querySelector('#ofd-projeto').value || null,
           observacao: el.querySelector('#ofd-obs').value,
         };
         try {
           if (ed) await API.put(`/api/arrecadacao/ofertas/${oferta.id}`, corpo);
           else await API.post('/api/arrecadacao/ofertas', corpo);
-          UI.sucesso(ed ? 'Oferta atualizada.' : 'Oferta registrada.');
+          UI.sucesso(ed ? 'Oferta atualizada.' : 'Oferta registrada e somada ao saldo.');
           renderOfertas();
         } catch (e) { UI.erro(e.message); return false; }
       },
@@ -244,8 +250,9 @@ window.PaginaArrecadacao = (function () {
 
   // -------------------------- Doações em espécie --------------------------
   async function renderEspecie() {
-    const alvo = document.getElementById('ar-conteudo');
-    alvo.innerHTML = barraPeriodo('es') + '<div class="card"><div id="es-lista">Carregando…</div></div>';
+    const el = alvo();
+    if (!el) return;
+    el.innerHTML = barraPeriodo('es') + '<div class="card"><div id="es-lista">Carregando…</div></div>';
     document.getElementById('es-acoes').outerHTML = '<button class="btn" id="es-nova">+ Registrar doação</button>';
     document.getElementById('es-nova').addEventListener('click', formEspecie);
     ligarPeriodo('es', renderEspecie);
@@ -268,15 +275,16 @@ window.PaginaArrecadacao = (function () {
                   ${d.instrumento_nome ? ` <span class="badge badge--ok">${UI.escapar(d.instrumento_nome)}</span>` : ''}</td>
                 <td>${UI.escapar(String(d.quantidade))}</td>
                 <td>${d.valor_estimado ? UI.moeda(d.valor_estimado) : '—'}</td>
-                <td style="text-align:right"><button class="btn btn--perigo" data-rm="${d.id}">Excluir</button></td>
+                <td style="text-align:right"><button class="btn btn--perigo" data-es-rm="${d.id}">Excluir</button></td>
               </tr>`).join('')}
           </tbody>
-        </table></div>`;
+        </table></div>
+        <p class="dica mt-16">Bens doados não movimentam o saldo das contas — por isso ficam fora do caixa e aparecem em separado na prestação de contas.</p>`;
 
-    document.querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', async () => {
+    el.querySelectorAll('[data-es-rm]').forEach((b) => b.addEventListener('click', async () => {
       const ok = await UI.confirmar('Excluir este registro de doação?', { titulo: 'Excluir', textoConfirmar: 'Excluir' });
       if (!ok) return;
-      try { await API.del(`/api/arrecadacao/doacoes-especie/${b.dataset.rm}`); UI.sucesso('Registro excluído.'); renderEspecie(); }
+      try { await API.del(`/api/arrecadacao/doacoes-especie/${b.dataset.esRm}`); UI.sucesso('Registro excluído.'); renderEspecie(); }
       catch (e) { UI.erro(e.message); }
     }));
   }
@@ -339,8 +347,9 @@ window.PaginaArrecadacao = (function () {
 
   // ----------------------------- Mantenedores -----------------------------
   async function renderMantenedores() {
-    const alvo = document.getElementById('ar-conteudo');
-    alvo.innerHTML = '<div class="card"><div id="mn-lista">Carregando…</div></div>';
+    const el = alvo();
+    if (!el) return;
+    el.innerHTML = '<div class="card"><div id="mn-lista">Carregando…</div></div>';
     let lista = [];
     try { lista = await API.get('/api/arrecadacao/mantenedores'); }
     catch (e) { document.getElementById('mn-lista').innerHTML = `<p class="dica">${UI.escapar(e.message)}</p>`; return; }
@@ -362,13 +371,15 @@ window.PaginaArrecadacao = (function () {
                 <td class="dica">${UI.escapar(m.telefone || m.email || '—')}</td>
               </tr>`).join('')}
           </tbody>
-        </table></div>`;
+        </table></div>
+        <p class="dica mt-16">A contribuição mensal é lançada na aba "Contribuição mensal" e vira uma cobrança em "A receber" todo mês.</p>`;
   }
 
   // ------------------------------- Projetos -------------------------------
   async function renderProjetos() {
-    const alvo = document.getElementById('ar-conteudo');
-    alvo.innerHTML = `
+    const el = alvo();
+    if (!el) return;
+    el.innerHTML = `
       <div class="barra-ferramentas">
         <div class="cresce"><strong>Projetos</strong>
           <div class="dica">Verba carimbada: amarrar entradas e despesas a um projeto é o que torna a prestação de contas possível.</div></div>
@@ -381,13 +392,13 @@ window.PaginaArrecadacao = (function () {
         titulo: 'Novo projeto', textoConfirmar: 'Criar',
         corpoHTML: `<div class="campo"><label>Nome *</label><input id="pj-nome" placeholder="Ex.: Projeto Música na Escola" /></div>
           <div class="campo mt-16"><label>Descrição</label><textarea id="pj-desc" rows="2"></textarea></div>`,
-        aoConfirmar: async (el) => {
+        aoConfirmar: async (elm) => {
           try {
             await API.post('/api/arrecadacao/projetos', {
-              nome: el.querySelector('#pj-nome').value,
-              descricao: el.querySelector('#pj-desc').value,
+              nome: elm.querySelector('#pj-nome').value,
+              descricao: elm.querySelector('#pj-desc').value,
             });
-            projetos = await API.get('/api/arrecadacao/projetos');
+            await carregarProjetos();
             UI.sucesso('Projeto criado.');
             renderProjetos();
           } catch (e) { UI.erro(e.message); return false; }
@@ -415,21 +426,35 @@ window.PaginaArrecadacao = (function () {
               </tr>`;
             }).join('')}
           </tbody>
-        </table></div>`;
+        </table></div>
+        <p class="dica mt-16">O "gasto" vem das despesas marcadas com o projeto na aba Saídas.</p>`;
   }
 
   // -------------------------- Prestação de contas --------------------------
   async function renderContas() {
-    const alvo = document.getElementById('ar-conteudo');
-    alvo.innerHTML = barraPeriodo('pc') + '<div class="card"><div id="pc-corpo">Carregando…</div></div>';
+    const el = alvo();
+    if (!el) return;
+    el.innerHTML = barraPeriodo('pc') + '<div class="card"><div id="pc-corpo">Carregando…</div></div>';
     document.getElementById('pc-acoes').outerHTML = '<button class="btn btn--secundario" id="pc-pdf">⬇️ Baixar PDF</button>';
     ligarPeriodo('pc', renderContas);
 
-    let d;
-    try { d = await API.get('/api/arrecadacao/prestacao-de-contas?' + query()); }
-    catch (e) { document.getElementById('pc-corpo').innerHTML = `<p class="dica">${UI.escapar(e.message)}</p>`; return; }
+    let d; let contas = [];
+    try {
+      [d, contas] = await Promise.all([
+        API.get('/api/arrecadacao/prestacao-de-contas?' + query()),
+        API.get('/api/financeiro/contas-financeiras').catch(() => []),
+      ]);
+    } catch (e) { document.getElementById('pc-corpo').innerHTML = `<p class="dica">${UI.escapar(e.message)}</p>`; return; }
 
-    document.getElementById('pc-corpo').innerHTML = corpoContas(d);
+    const saldoContas = contas.reduce((s, c) => s + Number(c.saldo_atual || 0), 0);
+    document.getElementById('pc-corpo').innerHTML = corpoContas(d) + `
+      <div class="card mt-16">
+        <h4 style="margin-top:0">Conferência com o caixa</h4>
+        <p class="dica">Saldo somado de todas as contas financeiras hoje:
+          <strong style="color:${saldoContas >= 0 ? 'var(--sucesso)' : 'var(--perigo)'}">${UI.moeda(saldoContas)}</strong>.
+          As ofertas do período já estão dentro desse saldo — se o número não bater com o extrato do banco,
+          use a aba <strong>Conciliação</strong> antes de fechar a prestação de contas.</p>
+      </div>`;
     document.getElementById('pc-pdf').addEventListener('click', async () => {
       let cfg = {};
       try { cfg = await API.get('/api/config'); } catch (_) { cfg = {}; }
@@ -442,7 +467,9 @@ window.PaginaArrecadacao = (function () {
         <h1>${UI.escapar(cfg.nome_loja || 'Instituto')}</h1>
         <div class="dica">Prestação de contas${d.projeto ? ' — ' + UI.escapar(d.projeto.nome) : ''}
           · Período: ${UI.escapar(d.periodo.de || 'início')} a ${UI.escapar(d.periodo.ate || 'hoje')}</div>
-        ${corpoContas(d)}</body></html>`;
+        ${corpoContas(d)}
+        <p class="dica">Saldo em caixa/banco na emissão deste relatório: ${UI.moeda(saldoContas)}.</p>
+        </body></html>`;
       try { await UI.baixarPDF(html, 'prestacao-de-contas.pdf'); } catch (e) { UI.erro(e.message); }
     });
   }
@@ -490,5 +517,15 @@ window.PaginaArrecadacao = (function () {
       Não entram no caixa — são registradas à parte.</p>`;
   }
 
-  return { titulo: 'Arrecadação', render };
+  return {
+    montarEm,
+    carregarProjetos,
+    carregarContas,
+    projetos: () => projetos,
+    ofertas: renderOfertas,
+    especie: renderEspecie,
+    mantenedores: renderMantenedores,
+    projetosSecao: renderProjetos,
+    prestacaoDeContas: renderContas,
+  };
 })();

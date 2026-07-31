@@ -111,31 +111,103 @@ function validarOferta(dados) {
     forma: FORMAS.includes(dados.forma) ? dados.forma : 'outro',
     projeto_id: dados.projeto_id ? Number(dados.projeto_id) : null,
     observacao: (dados.observacao || '').trim() || null,
+    conta_financeira_id: dados.conta_financeira_id ? Number(dados.conta_financeira_id) : null,
   };
 }
 
+/** Descricao curta usada no extrato de movimentos da conta. */
+function descricaoDaOferta(db, d) {
+  let nome = d.doador_nome;
+  if (!nome && d.cliente_id) {
+    const c = db.prepare('SELECT nome FROM clientes WHERE id = ?').get(d.cliente_id);
+    nome = c && c.nome;
+  }
+  return `Oferta — ${nome || 'doador'}`;
+}
+
+/**
+ * Em qual conta o dinheiro entrou. Se nao vier escolhida, usa a conta padrao
+ * daquela forma de recebimento (o mesmo mapa que o financeiro ja usa para
+ * venda/recebimento), para o saldo nunca ficar sem lastro.
+ */
+function contaDaOferta(db, d) {
+  if (d.conta_financeira_id) return d.conta_financeira_id;
+  // eslint-disable-next-line global-require
+  const financeiro = require('./financeiroService');
+  return financeiro.contaDaForma(db, d.forma) || null;
+}
+
+/** Apaga o movimento financeiro gerado por esta oferta (para refazer ou excluir). */
+function removerMovimentoDaOferta(db, id) {
+  db.prepare("DELETE FROM contas_financeiras_mov WHERE origem = 'oferta' AND referencia_id = ?").run(id);
+}
+
+/**
+ * Registra a oferta E o movimento na conta financeira, numa transacao so.
+ * E isso que faz a arrecadacao aparecer no saldo e poder ser conciliada com
+ * o extrato do banco.
+ */
 function registrarOferta(dados) {
+  const db = getDb();
   const d = validarOferta(dados);
-  const info = getDb().prepare(`
-    INSERT INTO ofertas (cliente_id, doador_nome, valor, data, forma, projeto_id, observacao)
-    VALUES (@cliente_id, @doador_nome, @valor, @data, @forma, @projeto_id, @observacao)
-  `).run(d);
-  return obterOferta(info.lastInsertRowid);
+  // eslint-disable-next-line global-require
+  const financeiro = require('./financeiroService');
+
+  const gravar = db.transaction(() => {
+    const contaId = contaDaOferta(db, d);
+    const info = db.prepare(`
+      INSERT INTO ofertas (cliente_id, doador_nome, valor, data, forma, projeto_id, observacao, conta_financeira_id)
+      VALUES (@cliente_id, @doador_nome, @valor, @data, @forma, @projeto_id, @observacao, @conta_financeira_id)
+    `).run({ ...d, conta_financeira_id: contaId });
+
+    if (contaId) {
+      financeiro.lancarMovimentoConta(db, {
+        conta_id: contaId, tipo: 'entrada', valor: d.valor, origem: 'oferta',
+        referencia_id: info.lastInsertRowid, descricao: descricaoDaOferta(db, d), data: d.data,
+      });
+    }
+    return info.lastInsertRowid;
+  });
+  return obterOferta(gravar());
 }
 
 function atualizarOferta(id, dados) {
+  const db = getDb();
   const atual = obterOferta(id);
   const d = validarOferta({ ...atual, ...dados });
-  getDb().prepare(`
-    UPDATE ofertas SET cliente_id=@cliente_id, doador_nome=@doador_nome, valor=@valor, data=@data,
-      forma=@forma, projeto_id=@projeto_id, observacao=@observacao WHERE id=@id
-  `).run({ ...d, id });
+  // eslint-disable-next-line global-require
+  const financeiro = require('./financeiroService');
+
+  const salvar = db.transaction(() => {
+    const contaId = contaDaOferta(db, d);
+    db.prepare(`
+      UPDATE ofertas SET cliente_id=@cliente_id, doador_nome=@doador_nome, valor=@valor, data=@data,
+        forma=@forma, projeto_id=@projeto_id, observacao=@observacao, conta_financeira_id=@conta_financeira_id
+      WHERE id=@id
+    `).run({ ...d, conta_financeira_id: contaId, id });
+
+    // Valor/data/conta podem ter mudado: refaz o movimento em vez de tentar
+    // corrigir o antigo, que daria margem a saldo torto.
+    removerMovimentoDaOferta(db, id);
+    if (contaId) {
+      financeiro.lancarMovimentoConta(db, {
+        conta_id: contaId, tipo: 'entrada', valor: d.valor, origem: 'oferta',
+        referencia_id: id, descricao: descricaoDaOferta(db, d), data: d.data,
+      });
+    }
+  });
+  salvar();
   return obterOferta(id);
 }
 
 function excluirOferta(id) {
+  const db = getDb();
   obterOferta(id);
-  getDb().prepare('DELETE FROM ofertas WHERE id = ?').run(id);
+  const apagar = db.transaction(() => {
+    removerMovimentoDaOferta(db, id);
+    db.prepare('DELETE FROM ofertas WHERE id = ?').run(id);
+  });
+  apagar();
   return { ok: true };
 }
 
