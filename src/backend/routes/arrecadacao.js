@@ -8,6 +8,7 @@ const router = express.Router();
 
 router.get('/prestacao-de-contas', asyncHandler((req, res) => res.json(arr.prestacaoDeContas(req.query))));
 router.get('/mantenedores', asyncHandler((req, res) => res.json(arr.listarMantenedores())));
+router.get('/mantenedores/:id/historico', asyncHandler((req, res) => res.json(arr.historicoMantenedor(req.params.id))));
 
 router.get('/projetos', asyncHandler((req, res) => res.json(arr.listarProjetos(req.query))));
 router.post('/projetos', asyncHandler((req, res) => res.status(201).json(arr.criarProjeto(req.body || {}))));

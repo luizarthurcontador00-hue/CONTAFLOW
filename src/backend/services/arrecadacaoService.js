@@ -294,11 +294,43 @@ function listarMantenedores() {
       (SELECT COALESCE(SUM(o.valor),0) FROM ofertas o WHERE o.cliente_id = c.id) AS total_doado,
       (SELECT MAX(o.data) FROM ofertas o WHERE o.cliente_id = c.id) AS ultima_doacao,
       (SELECT a.valor FROM assinaturas a WHERE a.cliente_id = c.id AND a.ativa = 1 ORDER BY a.id DESC LIMIT 1) AS contribuicao_mensal,
-      (SELECT a.dia_vencimento FROM assinaturas a WHERE a.cliente_id = c.id AND a.ativa = 1 ORDER BY a.id DESC LIMIT 1) AS dia_vencimento
+      (SELECT a.dia_vencimento FROM assinaturas a WHERE a.cliente_id = c.id AND a.ativa = 1 ORDER BY a.id DESC LIMIT 1) AS dia_vencimento,
+      (SELECT COUNT(*) FROM contas_receber cr WHERE cr.cliente_id = c.id AND cr.assinatura_id IS NOT NULL
+        AND cr.status = 'pendente' AND cr.vencimento < date('now','localtime')) AS contribuicoes_atrasadas
     FROM clientes c
     WHERE c.natureza IN ('mantenedor','ambos') AND c.ativo = 1
     ORDER BY c.nome
   `).all();
+}
+
+/**
+ * Historico completo de um mantenedor: doacoes avulsas (ofertas) e as
+ * cobrancas geradas mes a mes pela contribuicao mensal (assinatura), com
+ * status de cada uma — pra ver de relance quem ta em dia e quem deve.
+ */
+function historicoMantenedor(clienteId) {
+  const db = getDb();
+  const mantenedor = db.prepare('SELECT * FROM clientes WHERE id = ?').get(clienteId);
+  if (!mantenedor) throw new AppError('Mantenedor não encontrado.', 404);
+
+  const ofertas = db.prepare(`
+    SELECT o.*, p.nome AS projeto_nome FROM ofertas o
+    LEFT JOIN projetos p ON p.id = o.projeto_id
+    WHERE o.cliente_id = ? ORDER BY o.data DESC
+  `).all(clienteId);
+
+  const cobrancas = db.prepare(`
+    SELECT cr.* FROM contas_receber cr
+    WHERE cr.cliente_id = ? AND cr.assinatura_id IS NOT NULL
+    ORDER BY cr.vencimento DESC
+  `).all(clienteId);
+
+  return {
+    mantenedor,
+    total_doado_avulso: ofertas.reduce((s, o) => s + Number(o.valor), 0),
+    ofertas,
+    cobrancas,
+  };
 }
 
 // ========================= Prestacao de contas =========================
@@ -383,5 +415,5 @@ module.exports = {
   listarProjetos, criarProjeto, atualizarProjeto, excluirProjeto,
   listarOfertas, obterOferta, registrarOferta, atualizarOferta, excluirOferta, marcarReciboEmitido,
   listarDoacoesEspecie, registrarDoacaoEspecie, excluirDoacaoEspecie,
-  listarMantenedores, prestacaoDeContas, FORMAS,
+  listarMantenedores, historicoMantenedor, prestacaoDeContas, FORMAS,
 };

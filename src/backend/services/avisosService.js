@@ -293,6 +293,30 @@ function contasVencidas(db) {
   }];
 }
 
+/** Contribuição mensal de mantenedor que venceu e ainda não caiu — diferente de contas_pagar, é dinheiro que devia ter entrado. */
+function contribuicoesAtrasadas(db) {
+  const linhas = db.prepare(`
+    SELECT cr.vencimento,
+      CAST(julianday('now','localtime') - julianday(cr.vencimento) AS INTEGER) AS dias,
+      c.nome AS mantenedor_nome
+    FROM contas_receber cr
+    JOIN assinaturas a ON a.id = cr.assinatura_id
+    JOIN clientes c ON c.id = cr.cliente_id
+    WHERE cr.status = 'pendente' AND cr.vencimento IS NOT NULL AND cr.vencimento < date('now','localtime')
+    ORDER BY cr.vencimento LIMIT 20
+  `).all();
+  if (!linhas.length) return [];
+  return [{
+    tipo: 'contribuicao_atrasada',
+    gravidade: 'alerta',
+    icone: '🤝',
+    titulo: `${linhas.length} contribuição(ões) de mantenedor atrasada(s)`,
+    detalhe: linhas.slice(0, 4).map((l) => `${l.mantenedor_nome} — venceu em ${l.vencimento} (${l.dias} dia(s) de atraso)`),
+    quantidade: linhas.length,
+    rota: '#/arrecadacao',
+  }];
+}
+
 // ------------------------------ Montagem ------------------------------
 
 /**
@@ -320,7 +344,8 @@ function listar() {
       coletar('turmas sem instrutor', () => turmasSemInstrutor(db)),
       coletar('aulas de amanha', () => aulasDeAmanha(db)),
       coletar('autorizacoes', () => autorizacoesPendentes(db)),
-      coletar('mandatos', () => mandatosVencidos(db))
+      coletar('mandatos', () => mandatosVencidos(db)),
+      coletar('contribuicoes atrasadas', () => contribuicoesAtrasadas(db))
     );
   }
 

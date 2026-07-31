@@ -358,21 +358,71 @@ window.SecoesArrecadacao = (function () {
       ? `<div class="vazio"><h3>Nenhum mantenedor</h3>
           <p class="dica">Marque uma pessoa como "mantenedor" no cadastro de Pessoas para ela aparecer aqui.</p></div>`
       : `<div class="rolagem"><table class="tabela">
-          <thead><tr><th>Mantenedor</th><th>Contribuição mensal</th><th>Total doado</th><th>Última doação</th><th>Contato</th></tr></thead>
+          <thead><tr><th>Mantenedor</th><th>Contribuição mensal</th><th>Situação</th><th>Total doado</th><th>Última doação</th><th>Contato</th></tr></thead>
           <tbody>
             ${lista.map((m) => `
-              <tr>
+              <tr class="pi-clicavel" data-historico="${m.id}">
                 <td><strong>${UI.escapar(m.nome)}</strong></td>
                 <td>${m.contribuicao_mensal
                   ? `${UI.moeda(m.contribuicao_mensal)} <span class="dica">(dia ${m.dia_vencimento})</span>`
                   : '<span class="dica">avulso</span>'}</td>
+                <td>${!m.contribuicao_mensal ? '<span class="dica">—</span>'
+                  : m.contribuicoes_atrasadas > 0
+                    ? `<span class="badge badge--alerta">${m.contribuicoes_atrasadas} atrasada(s)</span>`
+                    : '<span class="badge badge--ok">em dia</span>'}</td>
                 <td>${UI.moeda(m.total_doado || 0)}</td>
-                <td class="dica">${UI.escapar(m.ultima_doacao || '—')}</td>
+                <td class="dica">${m.ultima_doacao ? UI.dataHora(m.ultima_doacao) : '—'}</td>
                 <td class="dica">${UI.escapar(m.telefone || m.email || '—')}</td>
               </tr>`).join('')}
           </tbody>
         </table></div>
-        <p class="dica mt-16">A contribuição mensal é lançada na aba "Contribuição mensal" e vira uma cobrança em "A receber" todo mês.</p>`;
+        <p class="dica mt-16">A contribuição mensal é lançada na aba "Contribuição mensal" e vira uma cobrança em "A receber" todo mês. Clique num mantenedor para ver o histórico de doações.</p>`;
+
+    document.getElementById('mn-lista').querySelectorAll('[data-historico]').forEach((tr) => {
+      tr.addEventListener('click', () => historicoMantenedor(Number(tr.dataset.historico)));
+    });
+  }
+
+  /** Historico de doacoes do mantenedor: ofertas avulsas e cobrancas da contribuicao mensal. */
+  async function historicoMantenedor(clienteId) {
+    let d;
+    try { d = await API.get(`/api/arrecadacao/mantenedores/${clienteId}/historico`); }
+    catch (e) { UI.erro(e.message); return; }
+
+    const STATUS_COBRANCA = { pendente: ['Pendente', 'alerta'], recebido: ['Recebido', 'ok'] };
+    Modal.abrir({
+      titulo: `Histórico — ${d.mantenedor.nome}`, tamanho: 'modal--grande', mostrarConfirmar: false,
+      corpoHTML: `
+        <h4 style="margin-top:0">Contribuição mensal</h4>
+        ${d.cobrancas.length
+          ? `<div class="rolagem"><table class="tabela">
+              <thead><tr><th>Vencimento</th><th>Valor</th><th>Situação</th></tr></thead>
+              <tbody>${d.cobrancas.map((c) => {
+                const hoje = new Date().toISOString().slice(0, 10);
+                const atrasada = c.status === 'pendente' && c.vencimento && c.vencimento < hoje;
+                const [rot, cor] = STATUS_COBRANCA[c.status] || [c.status, 'muted'];
+                return `<tr>
+                  <td>${c.vencimento ? UI.dataHora(c.vencimento) : '—'}</td>
+                  <td>${UI.moeda(c.valor)}</td>
+                  <td><span class="badge badge--${atrasada ? 'erro' : cor}">${atrasada ? 'Atrasada' : rot}</span></td>
+                </tr>`;
+              }).join('')}</tbody>
+            </table></div>`
+          : '<p class="dica">Nenhuma contribuição mensal cadastrada.</p>'}
+
+        <h4 class="mt-16">Doações avulsas <span class="dica">(total: ${UI.moeda(d.total_doado_avulso)})</span></h4>
+        ${d.ofertas.length
+          ? `<div class="rolagem"><table class="tabela">
+              <thead><tr><th>Data</th><th>Valor</th><th>Forma</th><th>Projeto</th></tr></thead>
+              <tbody>${d.ofertas.map((o) => `<tr>
+                <td>${UI.dataHora(o.data)}</td>
+                <td>${UI.moeda(o.valor)}</td>
+                <td class="dica">${UI.escapar(FORMAS.find(([v]) => v === o.forma)?.[1] || o.forma || '—')}</td>
+                <td class="dica">${UI.escapar(o.projeto_nome || '—')}</td>
+              </tr>`).join('')}</tbody>
+            </table></div>`
+          : '<p class="dica">Nenhuma doação avulsa registrada.</p>'}`,
+    });
   }
 
   // ------------------------------- Projetos -------------------------------
