@@ -130,6 +130,7 @@ window.PaginaMembros = (function () {
             <input type="checkbox" id="mf-ativo" ${membro.ativo ? 'checked' : ''} /> Membro ativo
           </label></div>` : ''}
         </div>`,
+      aoAbrir: (el) => UI.ligarMascaraDocumento(el.querySelector('#mf-doc')),
       aoConfirmar: async (el) => {
         const corpo = {
           nome: el.querySelector('#mf-nome').value,

@@ -23,9 +23,14 @@ window.PaginaTurmas = (function () {
   let cursos = [];
   let instrumentos = [];
   let equipe = [];
-  const filtro = { curso_id: '', status: '' };
+  let filtro = { curso_id: '', status: '' };
 
   async function render(container) {
+    // O filtro nao pode sobreviver de uma visita a outra: sem isso, o select
+    // reaparece em "Todos" mas a lista continua filtrada pelo valor antigo
+    // (guardado num objeto de escopo do modulo) — parece a tela "travada",
+    // trazendo menos turma do que deveria.
+    filtro = { curso_id: '', status: '' };
     container.innerHTML = `
       <div class="barra-ferramentas">
         <div class="campo"><label>Curso</label><select id="tu-curso"><option value="">Todos</option></select></div>

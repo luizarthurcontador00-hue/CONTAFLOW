@@ -367,6 +367,7 @@
           const aviso = el.querySelector('#ob-instituto-aviso');
           const nomeLabel = el.querySelector('#ob-nome-label');
           const nomeInput = el.querySelector('#ob-nome');
+          UI.ligarMascaraDocumento(el.querySelector('#ob-doc'));
           const atualizarRamoWrap = () => {
             ramoWrap.style.display = (escolha === 'servico' || escolha === 'ambos') ? '' : 'none';
             aviso.style.display = escolha === 'instituto' ? '' : 'none';

@@ -140,6 +140,8 @@ window.PaginaConfiguracoes = (function () {
       });
     }
 
+    UI.ligarMascaraDocumento(alvo.querySelector('[name="loja_cnpj"]'));
+
     alvo.querySelector('select[name="perfil_negocio"]').addEventListener('change', (e) => {
       const ehInst = e.target.value === 'instituto';
       alvo.querySelector('#cfg-ramo-wrap').style.display = (e.target.value === 'servico' || e.target.value === 'ambos') ? '' : 'none';

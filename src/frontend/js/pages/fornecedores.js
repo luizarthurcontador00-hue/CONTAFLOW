@@ -64,6 +64,7 @@ window.PaginaFornecedores = (function () {
         <div class="campo"><label>E-mail</label><input name="email" type="email" value="${UI.escapar(f.email || '')}" /></div>
       </form>`,
       textoConfirmar: 'Salvar',
+      aoAbrir: (el) => UI.ligarMascaraDocumento(el.querySelector('[name="cnpj"]')),
       aoConfirmar: async (el) => {
         const form = el.querySelector('#form-forn');
         if (!form.nome.value.trim()) { UI.erro('Informe o nome do fornecedor.'); return false; }

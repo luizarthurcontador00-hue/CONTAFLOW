@@ -735,6 +735,7 @@ window.PaginaProdutos = (function () {
     Modal.abrir({
       titulo: 'Fornecedores', tamanho: 'modal--grande', corpoHTML: corpo, mostrarConfirmar: false,
       aoAbrir: (el) => {
+        UI.ligarMascaraDocumento(el.querySelector('[name="cnpj"]'));
         const render = () => {
           el.querySelector('#lista-forn').innerHTML = fornecedores.length ? `<table class="tabela">
             <thead><tr><th>Nome</th><th>CNPJ</th><th>Telefone</th><th></th></tr></thead>

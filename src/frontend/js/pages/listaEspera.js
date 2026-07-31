@@ -16,9 +16,12 @@ window.PaginaListaEspera = (function () {
     desistiu: ['Desistiu', 'muted'],
   };
   let cursos = [];
-  const filtro = { curso_id: '', status: 'aguardando' };
+  let filtro = { curso_id: '', status: 'aguardando' };
 
   async function render(container) {
+    // Reseta a cada visita para o select nao ficar mostrando "Todos" com o
+    // filtro antigo ainda aplicado por baixo.
+    filtro = { curso_id: '', status: 'aguardando' };
     container.innerHTML = `
       <div class="barra-ferramentas">
         <div class="cresce">

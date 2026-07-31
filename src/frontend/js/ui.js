@@ -53,6 +53,40 @@ const UI = (function () {
     return d2.toLocaleString('pt-BR');
   }
 
+  /**
+   * Formata um CPF/CNPJ conforme a quantidade de dígitos digitados: até 11
+   * numeros vira CPF (000.000.000-00), a partir do 12º vira CNPJ
+   * (00.000.000/0001-00). Devolve o texto ja formatado, sem mexer no valor
+   * que sera salvo (isso e feito no backend, que so guarda os digitos).
+   */
+  function mascararDocumento(valor) {
+    const d = String(valor || '').replace(/\D/g, '').slice(0, 14);
+    if (d.length <= 11) {
+      return d
+        .replace(/^(\d{3})(\d)/, '$1.$2')
+        .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+        .replace(/\.(\d{3})(\d{1,2})$/, '.$1-$2');
+    }
+    return d
+      .replace(/^(\d{2})(\d)/, '$1.$2')
+      .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+      .replace(/\.(\d{3})(\d)/, '.$1/$2')
+      .replace(/(\d{4})(\d{1,2})$/, '$1-$2');
+  }
+
+  /** Liga a mascara de CPF/CNPJ num input, formatando enquanto o usuario digita. */
+  function ligarMascaraDocumento(input) {
+    if (!input) return;
+    input.addEventListener('input', () => {
+      const pos = input.selectionStart;
+      const antes = input.value.length;
+      input.value = mascararDocumento(input.value);
+      const depois = input.value.length;
+      const novaPos = Math.max(0, (pos || 0) + (depois - antes));
+      input.setSelectionRange(novaPos, novaPos);
+    });
+  }
+
   function escapar(texto) {
     return String(texto == null ? '' : texto)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -119,5 +153,5 @@ const UI = (function () {
     }
   }
 
-  return { toast, sucesso, erro, confirmar, moeda, numero, dataHora, escapar, imprimir, baixarPDF };
+  return { toast, sucesso, erro, confirmar, moeda, numero, dataHora, escapar, imprimir, baixarPDF, mascararDocumento, ligarMascaraDocumento };
 })();

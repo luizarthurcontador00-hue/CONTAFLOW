@@ -37,6 +37,12 @@ window.PaginaAgenda = (function () {
   const rProfs = () => (ehInstituto() ? 'instrutores' : 'profissionais');
 
   function badge(s) { const [t, c] = STATUS[s] || [s, 'muted']; return `<span class="badge badge--${c}">${t}</span>`; }
+  // Encontro gerado por turma nao tem cliente vinculado: o nome a mostrar
+  // e o da turma/curso (guardado em servico_nome na hora de gerar), senao
+  // some com "Sem aluno" mesmo tendo turma inteira ali.
+  function nomeAgendamento(a) {
+    return a.cliente_cadastro || a.cliente_nome || (a.turma_id ? (a.servico_nome || 'Turma') : `Sem ${rCliente()}`);
+  }
   function mudarDia(delta) {
     const d = new Date(dia + 'T00:00:00');
     d.setDate(d.getDate() + delta);
@@ -149,7 +155,7 @@ window.PaginaAgenda = (function () {
 
     alvo.innerHTML = `<div class="card"><div class="agenda-lista">
       ${itens.map((a) => {
-        const nome = a.cliente_cadastro || a.cliente_nome || `Sem ${rCliente()}`;
+        const nome = nomeAgendamento(a);
         const tel = a.cliente_telefone || a.telefone;
         return `<div class="agenda-item" style="border-left-color:${a.profissional_cor || 'var(--primaria)'}">
           <div class="agenda-item__hora">${UI.escapar(a.hora_inicio)}${a.hora_fim ? `<span class="dica">até ${UI.escapar(a.hora_fim)}</span>` : ''}</div>
@@ -246,7 +252,7 @@ window.PaginaAgenda = (function () {
           <div class="cal-dia__numero">${Number(iso.slice(8, 10))}</div>
           <div class="cal-dia__eventos">
             ${evs.slice(0, MOSTRAR).map((a) => {
-              const nome = a.cliente_cadastro || a.cliente_nome || `Sem ${rCliente()}`;
+              const nome = nomeAgendamento(a);
               return `<div class="cal-evento" data-evento="${a.id}" style="background:${a.profissional_cor || 'var(--primaria)'}" title="${UI.escapar(a.hora_inicio + ' — ' + nome)}">${UI.escapar(a.hora_inicio)} ${UI.escapar(nome)}</div>`;
             }).join('')}
             ${extras > 0 ? `<div class="cal-evento cal-evento--mais">+${extras} mais</div>` : ''}
@@ -448,7 +454,7 @@ window.PaginaAgenda = (function () {
 
   // ------------------------------ Detalhe ------------------------------
   function abrirDetalhe(a) {
-    const nome = a.cliente_cadastro || a.cliente_nome || `Sem ${rCliente()}`;
+    const nome = nomeAgendamento(a);
     const tel = a.cliente_telefone || a.telefone;
     Modal.abrir({
       titulo: `${a.hora_inicio} — ${nome}`, tamanho: 'modal--pequeno', mostrarConfirmar: false,

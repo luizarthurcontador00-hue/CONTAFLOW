@@ -6,10 +6,15 @@
  */
 window.PaginaChamada = (function () {
   const hojeISO = () => new Date().toISOString().slice(0, 10);
-  const filtro = { de: hojeISO(), ate: hojeISO(), turma_id: '' };
+  let filtro = { de: hojeISO(), ate: hojeISO(), turma_id: '' };
   let turmas = [];
 
   async function render(container) {
+    // Reseta a cada visita: senao o filtro de turma fica preso na ultima
+    // escolha (o select volta a mostrar "Todas" mas a lista continua
+    // filtrada por dentro) e a data "de hoje" fica congelada na hora que o
+    // app abriu, nao na hora que a tela foi aberta.
+    filtro = { de: hojeISO(), ate: hojeISO(), turma_id: '' };
     container.innerHTML = `
       <div class="barra-ferramentas">
         <div class="campo"><label>De</label><input type="date" id="ch-de" value="${filtro.de}" /></div>

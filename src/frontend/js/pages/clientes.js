@@ -83,6 +83,7 @@ window.PaginaClientes = (function () {
       </form>`,
       textoConfirmar: 'Salvar',
       aoAbrir: async (el) => {
+        UI.ligarMascaraDocumento(el.querySelector('[name="cpf"]'));
         const wrap = el.querySelector('#cli-instr-lista');
         if (!wrap) return;
         let instrumentos = [];
