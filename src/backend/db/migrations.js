@@ -1652,6 +1652,21 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 43,
+    name: 'matricula-instrumento-escolhido',
+    up(db) {
+      db.exec(`
+        -- Turma com mais de um instrumento na lista (ex.: violao aco E
+        -- violao de naylon) e um cardapio de opcoes, nao uma exigencia de
+        -- que cada aluno precise de todos ao mesmo tempo -- cada aluno usa
+        -- UM deles. Sem saber qual, a conferencia de acervo checava a
+        -- disponibilidade de TODOS os instrumentos pra cada aluno, travando
+        -- matricula de quem so precisava do que ainda tinha sobrando.
+        ALTER TABLE matriculas ADD COLUMN instrumento_id INTEGER REFERENCES instrumentos(id);
+      `);
+    },
+  },
 ];
 
 /**

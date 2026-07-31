@@ -321,9 +321,10 @@ window.PaginaTurmas = (function () {
       alvo.innerHTML = '<p class="dica">Nenhum aluno matriculado.</p>';
       return;
     }
+    const mostrarInstrumento = turma.instrumentos.length > 1;
     alvo.innerHTML = `
       <div class="rolagem"><table class="tabela">
-        <thead><tr><th>Aluno</th><th>Situação</th><th>Contato</th><th></th></tr></thead>
+        <thead><tr><th>Aluno</th><th>Situação</th>${mostrarInstrumento ? '<th>Instrumento</th>' : ''}<th>Contato</th><th></th></tr></thead>
         <tbody>
           ${turma.matriculas.map((m) => {
             const [rot, cor] = STATUS_MATRICULA[m.status] || [m.status, 'muted'];
@@ -336,11 +337,13 @@ window.PaginaTurmas = (function () {
                 ${menor && m.responsavel_nome ? `<div class="dica">Resp.: ${UI.escapar(m.responsavel_nome)}</div>` : ''}
               </td>
               <td><span class="badge badge--${cor}">${rot}</span></td>
+              ${mostrarInstrumento ? `<td class="dica">${UI.escapar(m.instrumento_nome || '—')}</td>` : ''}
               <td class="dica">${UI.escapar(m.responsavel_telefone || m.telefone || '—')}</td>
               <td style="text-align:right;white-space:nowrap">
                 <select data-status="${m.id}" style="max-width:150px">
                   ${Object.entries(STATUS_MATRICULA).map(([v, [rotulo]]) => `<option value="${v}" ${m.status === v ? 'selected' : ''}>${rotulo}</option>`).join('')}
                 </select>
+                <button class="btn btn--perigo" type="button" data-excluir-matricula="${m.id}" title="Excluir matrícula">🗑️</button>
               </td>
             </tr>`;
           }).join('')}
@@ -357,6 +360,23 @@ window.PaginaTurmas = (function () {
         listar();
       } catch (e) { UI.erro(e.message); }
     }));
+
+    alvo.querySelectorAll('[data-excluir-matricula]').forEach((b) => b.addEventListener('click', async () => {
+      const m = turma.matriculas.find((x) => x.id === Number(b.dataset.excluirMatricula));
+      const ok = await UI.confirmar(
+        `Excluir a matrícula de "${m ? m.aluno_nome : ''}" nesta turma? Isso remove o vínculo por completo — use "Desistente" na situação se quiser manter o histórico.`,
+        { titulo: 'Excluir matrícula', textoConfirmar: 'Excluir' }
+      );
+      if (!ok) return;
+      try {
+        const r = await API.del(`/api/turmas/matriculas/${b.dataset.excluirMatricula}`);
+        UI.sucesso(r.promovido
+          ? `Matrícula excluída. ${r.promovido.aluno_nome} saiu da fila de espera e assumiu a vaga.`
+          : 'Matrícula excluída.');
+        desenharAlunos(el, r.turma);
+        listar();
+      } catch (e) { UI.erro(e.message); }
+    }));
   }
 
   function ehMenor(dataNascimento) {
@@ -369,6 +389,40 @@ window.PaginaTurmas = (function () {
 
   function matricular(turma, elPai) {
     let alunos = [];
+    let instrumentosDoAlunoSelecionado = new Set();
+
+    function atualizarInfoInstrumento(el) {
+      const info = el.querySelector('#ma-instrumento-info');
+      if (!info || !turma.instrumentos.length) return;
+      const sel = el.querySelector('#ma-instrumento');
+      const instId = sel ? Number(sel.value) : turma.instrumentos[0].id;
+      const inst = turma.instrumentos.find((i) => i.id === instId);
+      if (!inst) { info.textContent = ''; return; }
+      const escolhido = el.querySelector('input[name="ma-aluno"]:checked');
+      if (!escolhido) { info.textContent = ''; return; }
+      const tem = instrumentosDoAlunoSelecionado.has(instId);
+      info.innerHTML = tem
+        ? `✅ Este aluno já tem <strong>${UI.escapar(inst.nome)}</strong> (próprio ou emprestado pelo instituto) — não vai depender do acervo.`
+        : `⚠️ Este aluno não tem <strong>${UI.escapar(inst.nome)}</strong> registrado — vai usar um do acervo, se houver disponível.`;
+      info.style.color = tem ? 'var(--sucesso)' : 'var(--perigo)';
+    }
+
+    async function carregarInstrumentosDoAluno(el, alunoId) {
+      if (!turma.instrumentos.length) return;
+      instrumentosDoAlunoSelecionado = new Set();
+      if (alunoId) {
+        try {
+          const [proprios, emprestimos] = await Promise.all([
+            API.get(`/api/instrumentos/proprios/${alunoId}`),
+            API.get(`/api/instrumentos/emprestimos?abertos=1&aluno_id=${alunoId}`),
+          ]);
+          proprios.forEach((p) => instrumentosDoAlunoSelecionado.add(Number(p.instrumento_id)));
+          emprestimos.forEach((e) => instrumentosDoAlunoSelecionado.add(Number(e.instrumento_id)));
+        } catch (_) { /* sem info do acervo pro aluno, so nao mostra o aviso */ }
+      }
+      atualizarInfoInstrumento(el);
+    }
+
     Modal.abrir({
       titulo: 'Matricular aluno',
       textoConfirmar: 'Matricular',
@@ -376,6 +430,14 @@ window.PaginaTurmas = (function () {
         <div class="campo"><label>Buscar aluno</label>
           <input type="search" id="ma-busca" placeholder="Digite o nome do aluno" /></div>
         <div id="ma-resultados" class="mt-16"><p class="dica">Digite para buscar.</p></div>
+        ${turma.instrumentos.length > 1 ? `
+        <div class="campo mt-16"><label>Qual instrumento este aluno vai usar? *</label>
+          <select id="ma-instrumento">
+            ${turma.instrumentos.map((i) => `<option value="${i.id}">${UI.escapar(i.nome)}</option>`).join('')}
+          </select>
+          <span class="dica">A turma tem mais de um instrumento cadastrado — cada aluno usa um deles.</span></div>
+        ` : ''}
+        ${turma.instrumentos.length ? '<div id="ma-instrumento-info" class="dica mt-16"></div>' : ''}
         ${turma.matriculados >= turma.vagas
           ? '<p class="dica mt-16">⚠️ A turma está lotada. Quem for matriculado agora entra na <strong>fila de espera</strong> e assume assim que abrir vaga.</p>'
           : ''}`,
@@ -397,14 +459,23 @@ window.PaginaTurmas = (function () {
                 <input type="radio" name="ma-aluno" value="${a.id}" />
                 <span>${UI.escapar(a.nome)}${a.telefone ? ` <span class="dica">${UI.escapar(a.telefone)}</span>` : ''}</span>
               </label>`).join('');
+            alvo.querySelectorAll('input[name="ma-aluno"]').forEach((r) => r.addEventListener('change', () => {
+              carregarInstrumentosDoAluno(el, r.value);
+            }));
           }, 300);
         });
+        const instrumentoSel = el.querySelector('#ma-instrumento');
+        if (instrumentoSel) instrumentoSel.addEventListener('change', () => atualizarInfoInstrumento(el));
       },
       aoConfirmar: async (el) => {
         const escolhido = el.querySelector('input[name="ma-aluno"]:checked');
         if (!escolhido) { UI.erro('Selecione um aluno.'); return false; }
+        const instrumentoSel = el.querySelector('#ma-instrumento');
         try {
-          const r = await API.post(`/api/turmas/${turma.id}/matriculas`, { aluno_id: escolhido.value });
+          const r = await API.post(`/api/turmas/${turma.id}/matriculas`, {
+            aluno_id: escolhido.value,
+            instrumento_id: instrumentoSel ? instrumentoSel.value : undefined,
+          });
           UI.sucesso(r.entrou_na_espera
             ? 'Turma lotada: o aluno entrou na fila de espera.'
             : 'Aluno matriculado.');
@@ -566,16 +637,22 @@ window.PaginaTurmas = (function () {
               turma_id: ed ? turma.id : null,
               instrumentos_por_aluno: el.querySelector('#tf-por-aluno').value,
             })));
-            const menorVagasMaximas = Math.min(...resultados.map((r) => r.vagas_maximas));
+            // Marcar mais de um instrumento e um cardapio de opcoes (ex.:
+            // violão aço OU violão de naylon) — cada aluno usa um deles, não
+            // todos ao mesmo tempo. Por isso a capacidade da turma é a SOMA
+            // do que cabe em cada instrumento, não o menor entre eles.
+            const somaVagasMaximas = resultados.reduce((s, r) => s + r.vagas_maximas, 0);
             aviso.innerHTML = resultados.map((r) => {
               const ocupando = r.turmas_no_mesmo_horario.map((t) => t.nome).join(', ');
               return `<strong>${UI.escapar(r.instrumento)}</strong>: o instituto tem ${r.quantidade_total}. `
                 + (r.em_uso_no_horario ? `Neste horário, ${r.em_uso_no_horario} já em uso${ocupando ? ` (${UI.escapar(ocupando)})` : ''}. ` : '')
                 + `Cabem até <strong>${r.vagas_maximas}</strong> aluno(s).`;
-            }).join('<br>') + (atualizarVagas ? '<br><span class="dica">Vagas preenchidas automaticamente pelo acervo — ajuste se algum aluno trouxer o próprio instrumento.</span>' : '');
-            if (atualizarVagas) el.querySelector('#tf-vagas').value = menorVagasMaximas;
+            }).join('<br>')
+              + (resultados.length > 1 ? `<br>Somando os instrumentos marcados (cada aluno usa um deles): até <strong>${somaVagasMaximas}</strong> aluno(s) no total.` : '')
+              + (atualizarVagas ? '<br><span class="dica">Vagas preenchidas automaticamente pelo acervo — ajuste se algum aluno trouxer o próprio instrumento ou já estiver com um emprestado.</span>' : '');
+            if (atualizarVagas) el.querySelector('#tf-vagas').value = somaVagasMaximas;
             const vagas = Number(el.querySelector('#tf-vagas').value || 0);
-            aviso.style.color = vagas > menorVagasMaximas ? 'var(--perigo)' : '';
+            aviso.style.color = vagas > somaVagasMaximas ? 'var(--perigo)' : '';
           } catch (e) { aviso.textContent = e.message; }
         }
 
