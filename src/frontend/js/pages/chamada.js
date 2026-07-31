@@ -23,6 +23,7 @@ window.PaginaChamada = (function () {
         <div class="cresce"></div>
         <button class="btn btn--secundario" id="ch-hoje">Hoje</button>
         <button class="btn btn--secundario" id="ch-risco">⚠️ Alunos em risco</button>
+        <button class="btn btn--secundario" id="ch-ferias">🏖️ Período de férias</button>
         <button class="btn" id="ch-imprimir">🖨️ Folha para imprimir</button>
       </div>
       <div class="card"><div id="ch-lista">Carregando…</div></div>`;
@@ -42,6 +43,7 @@ window.PaginaChamada = (function () {
     });
     container.querySelector('#ch-risco').addEventListener('click', alunosEmRisco);
     container.querySelector('#ch-imprimir').addEventListener('click', folhaParaImprimir);
+    container.querySelector('#ch-ferias').addEventListener('click', periodoDeFerias);
 
     listar();
   }
@@ -143,6 +145,43 @@ window.PaginaChamada = (function () {
         try {
           await API.post(`/api/turmas/encontros/${agendamentoId}/suspender`, { motivo: el.querySelector('#sp-motivo').value });
           UI.sucesso('Dia suspenso.');
+          await listar();
+        } catch (e) { UI.erro(e.message); return false; }
+      },
+    });
+  }
+
+  /**
+   * Suspende em lote o mesmo período (férias, recesso) em todas as turmas
+   * abertas de uma vez — sem precisar entrar turma por turma. Encontro que
+   * já tem chamada registrada é pulado (a aula já rolou), e o resto segue a
+   * mesma regra da suspensão individual: recalcula sozinho a previsão de
+   * término e o progresso de cada turma afetada.
+   */
+  function periodoDeFerias() {
+    const hoje = hojeISO();
+    Modal.abrir({
+      titulo: '🏖️ Período de férias', tamanho: 'modal--pequeno', textoConfirmar: 'Suspender período',
+      corpoHTML: `
+        <p class="dica" style="margin-top:0">Suspende, de uma vez, os encontros desse período em <strong>todas as turmas abertas</strong>.
+        Não conta como aula dada em nenhuma delas — a previsão de término e o progresso de cada turma são recalculados automaticamente.
+        Aula que já tem chamada registrada não é mexida.</p>
+        <div class="campo"><label>De *</label><input type="date" id="pf-de" value="${hoje}" /></div>
+        <div class="campo mt-16"><label>Até *</label><input type="date" id="pf-ate" value="${hoje}" /></div>
+        <div class="campo mt-16"><label>Motivo</label><input id="pf-motivo" placeholder="Ex.: Férias de julho, recesso de fim de ano…" value="Férias" /></div>`,
+      aoConfirmar: async (el) => {
+        const de = el.querySelector('#pf-de').value;
+        const ate = el.querySelector('#pf-ate').value;
+        if (!de || !ate) { UI.erro('Informe as duas datas.'); return false; }
+        try {
+          const r = await API.post('/api/turmas/encontros/suspender-periodo', {
+            de, ate, motivo: el.querySelector('#pf-motivo').value,
+          });
+          const partes = [`${r.encontros_suspensos} encontro(s) suspenso(s) em ${r.turmas_afetadas} turma(s).`];
+          if (r.encontros_com_chamada_ignorados > 0) {
+            partes.push(`${r.encontros_com_chamada_ignorados} encontro(s) já tinham chamada e não foram suspensos${r.turmas_com_chamada_pendente.length ? ` (${r.turmas_com_chamada_pendente.join(', ')})` : ''}.`);
+          }
+          UI.sucesso(partes.join(' '));
           await listar();
         } catch (e) { UI.erro(e.message); return false; }
       },

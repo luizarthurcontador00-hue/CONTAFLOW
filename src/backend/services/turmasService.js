@@ -796,6 +796,19 @@ function progressoTurma(id) {
  * cadastrada). O calendario e regenerado pra criar o encontro extra que
  * cobre a hora perdida.
  */
+/** Recalcula periodo_fim de uma turma apos suspender/reabrir dias (so quando o curso tem carga horaria). */
+function recalcularFimAposSuspensao(db, turmaId) {
+  const turma = db.prepare('SELECT * FROM turmas WHERE id = ?').get(turmaId);
+  const curso = db.prepare('SELECT carga_horaria FROM cursos WHERE id = ?').get(turma.curso_id);
+  if (!curso.carga_horaria) return;
+  const horarios = db.prepare('SELECT * FROM turmas_horarios WHERE turma_id = ?').all(turmaId);
+  const suspensas = new Set(
+    db.prepare('SELECT data FROM agendamentos WHERE turma_id = ? AND suspensa = 1').all(turmaId).map((r) => r.data)
+  );
+  const novoFim = calcularFimAutomatico(turma.periodo_inicio, horarios, curso.carga_horaria, suspensas);
+  db.prepare('UPDATE turmas SET periodo_fim = ? WHERE id = ?').run(novoFim, turmaId);
+}
+
 function suspenderEncontro(agendamentoId, { suspender = true, motivo } = {}) {
   const db = getDb();
   const enc = db.prepare('SELECT * FROM agendamentos WHERE id = ? AND turma_id IS NOT NULL').get(agendamentoId);
@@ -807,17 +820,7 @@ function suspenderEncontro(agendamentoId, { suspender = true, motivo } = {}) {
   const rodar = db.transaction(() => {
     db.prepare('UPDATE agendamentos SET suspensa = ?, motivo_suspensao = ? WHERE id = ?')
       .run(suspender ? 1 : 0, suspender ? ((motivo || '').trim() || null) : null, agendamentoId);
-
-    const turma = db.prepare('SELECT * FROM turmas WHERE id = ?').get(enc.turma_id);
-    const curso = db.prepare('SELECT carga_horaria FROM cursos WHERE id = ?').get(turma.curso_id);
-    if (curso.carga_horaria) {
-      const horarios = db.prepare('SELECT * FROM turmas_horarios WHERE turma_id = ?').all(enc.turma_id);
-      const suspensas = new Set(
-        db.prepare('SELECT data FROM agendamentos WHERE turma_id = ? AND suspensa = 1').all(enc.turma_id).map((r) => r.data)
-      );
-      const novoFim = calcularFimAutomatico(turma.periodo_inicio, horarios, curso.carga_horaria, suspensas);
-      db.prepare('UPDATE turmas SET periodo_fim = ? WHERE id = ?').run(novoFim, enc.turma_id);
-    }
+    recalcularFimAposSuspensao(db, enc.turma_id);
   });
   rodar();
 
@@ -827,6 +830,74 @@ function suspenderEncontro(agendamentoId, { suspender = true, motivo } = {}) {
   limparEncontrosForaDoHorario(enc.turma_id);
   gerarEncontros(enc.turma_id);
   return obter(enc.turma_id);
+}
+
+/**
+ * Suspende em lote o mesmo período de dias (férias, recesso do instituto)
+ * em todas as turmas ativas que tiverem encontro nele — sem precisar entrar
+ * turma por turma. Encontro que já tem chamada registrada é ignorado (aula
+ * que já rolou não pode ser desfeita); o restante segue exatamente a mesma
+ * regra da suspensão individual, turma por turma: recalcula periodo_fim
+ * quando o curso tem carga horária e resincroniza o calendário.
+ */
+function suspenderPeriodo({ de, ate, motivo }) {
+  const db = getDb();
+  const dataDe = String(de || '').trim();
+  const dataAte = String(ate || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dataDe) || !/^\d{4}-\d{2}-\d{2}$/.test(dataAte)) {
+    throw new AppError('Informe as datas de início e fim do período de férias.');
+  }
+  if (dataAte < dataDe) throw new AppError('A data final não pode ser antes da inicial.');
+
+  const motivoFinal = (motivo || '').trim() || 'Férias';
+  const hoje = new Date().toISOString().slice(0, 10);
+  const diasNecessarios = Math.max(90, Math.ceil((new Date(`${dataAte}T12:00:00`) - new Date(`${hoje}T12:00:00`)) / 864e5) + 7);
+
+  const turmasAtivas = db.prepare("SELECT id, nome FROM turmas WHERE status IN ('aberta','planejada')").all();
+
+  let turmasAfetadas = 0;
+  let encontrosSuspensos = 0;
+  let encontrosComChamadaIgnorados = 0;
+  const turmasComChamadaPendente = [];
+
+  turmasAtivas.forEach((t) => {
+    // garante que o calendario ja cobre o periodo pedido antes de tentar suspender
+    // (gerarEncontros e idempotente: so cria o que ainda nao existe).
+    gerarEncontros(t.id, diasNecessarios);
+
+    const encontros = db.prepare(`
+      SELECT id FROM agendamentos WHERE turma_id = ? AND data BETWEEN ? AND ? AND suspensa = 0
+    `).all(t.id, dataDe, dataAte);
+    if (!encontros.length) return;
+
+    let algumSuspenso = false;
+    let bloqueadoPorChamada = false;
+    encontros.forEach((enc) => {
+      if (db.prepare('SELECT 1 FROM presencas WHERE agendamento_id = ?').get(enc.id)) {
+        encontrosComChamadaIgnorados++;
+        bloqueadoPorChamada = true;
+        return;
+      }
+      db.prepare('UPDATE agendamentos SET suspensa = 1, motivo_suspensao = ? WHERE id = ?').run(motivoFinal, enc.id);
+      encontrosSuspensos++;
+      algumSuspenso = true;
+    });
+
+    if (algumSuspenso) {
+      turmasAfetadas++;
+      recalcularFimAposSuspensao(db, t.id);
+      limparEncontrosForaDoHorario(t.id);
+      gerarEncontros(t.id);
+    }
+    if (bloqueadoPorChamada) turmasComChamadaPendente.push(t.nome);
+  });
+
+  return {
+    turmas_afetadas: turmasAfetadas,
+    encontros_suspensos: encontrosSuspensos,
+    encontros_com_chamada_ignorados: encontrosComChamadaIgnorados,
+    turmas_com_chamada_pendente: turmasComChamadaPendente,
+  };
 }
 
 /**
@@ -873,6 +944,6 @@ module.exports = {
   matricular, mudarStatusMatricula, removerMatricula,
   gerarEncontros, gerarEncontrosPendentes, limparEncontrosForaDoHorario,
   sugerirSubstitutos, definirInstrutorDoEncontro,
-  comInstrumentoProprio, progressoTurma, suspenderEncontro, encontrosDoInstrutor,
+  comInstrumentoProprio, progressoTurma, suspenderEncontro, suspenderPeriodo, encontrosDoInstrutor,
   STATUS_TURMA, STATUS_MATRICULA, DIAS,
 };

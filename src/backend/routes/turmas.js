@@ -25,6 +25,7 @@ router.get('/encontros/:agendamentoId/substitutos', asyncHandler((req, res) => r
 router.post('/encontros/:agendamentoId/instrutor', asyncHandler((req, res) => res.json(turmas.definirInstrutorDoEncontro(req.params.agendamentoId, (req.body || {}).profissional_id))));
 router.post('/encontros/:agendamentoId/suspender', asyncHandler((req, res) => res.json(turmas.suspenderEncontro(req.params.agendamentoId, { suspender: true, motivo: (req.body || {}).motivo }))));
 router.post('/encontros/:agendamentoId/reabrir', asyncHandler((req, res) => res.json(turmas.suspenderEncontro(req.params.agendamentoId, { suspender: false }))));
+router.post('/encontros/suspender-periodo', asyncHandler((req, res) => res.json(turmas.suspenderPeriodo(req.body || {}))));
 
 // ------------------------------- Chamada -------------------------------
 router.get('/encontros/:agendamentoId/chamada', asyncHandler((req, res) => res.json(presencas.folhaDeChamada(req.params.agendamentoId))));

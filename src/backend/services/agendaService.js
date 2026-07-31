@@ -266,12 +266,15 @@ function faturar(id, { forma_pagamento = 'dinheiro', vencimento_prazo } = {}) {
 /** Resumo do dia (para o cabecalho da agenda). */
 function resumoDia(data) {
   const db = getDb();
+  // Dia suspenso (feriado, ferias) nao e um agendamento pendente nem entra
+  // no total do dia — nao vai ter aula nenhuma, contar ele so infla o
+  // "pendentes" com algo que ninguem vai atender.
   const r = db.prepare(`
     SELECT COUNT(*) total,
       COALESCE(SUM(CASE WHEN status='atendido' THEN 1 ELSE 0 END),0) atendidos,
       COALESCE(SUM(CASE WHEN status IN ('agendado','confirmado') THEN 1 ELSE 0 END),0) pendentes,
       COALESCE(SUM(CASE WHEN status IN ('agendado','confirmado','atendido') THEN valor ELSE 0 END),0) previsto
-    FROM agendamentos WHERE data = ?
+    FROM agendamentos WHERE data = ? AND suspensa = 0
   `).get(data);
   return { ...r, previsto: arred(r.previsto) };
 }

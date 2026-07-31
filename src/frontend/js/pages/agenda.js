@@ -37,6 +37,14 @@ window.PaginaAgenda = (function () {
   const rProfs = () => (ehInstituto() ? 'instrutores' : 'profissionais');
 
   function badge(s) { const [t, c] = STATUS[s] || [s, 'muted']; return `<span class="badge badge--${c}">${t}</span>`; }
+  // Encontro de turma suspenso (feriado, férias): não é "agendado" nem
+  // "cancelado" de verdade, é um dia que simplesmente não vai ter aula — por
+  // isso ganha um badge próprio em vez do status normal, que confundiria.
+  function badgeStatus(a) {
+    return a.suspensa
+      ? `<span class="badge badge--muted" title="${UI.escapar(a.motivo_suspensao || 'Dia suspenso')}">Suspensa</span>`
+      : badge(a.status);
+  }
   // Encontro gerado por turma nao tem cliente vinculado: o nome a mostrar
   // e o da turma/curso (guardado em servico_nome na hora de gerar), senao
   // some com "Sem aluno" mesmo tendo turma inteira ali.
@@ -157,13 +165,13 @@ window.PaginaAgenda = (function () {
       ${itens.map((a) => {
         const nome = nomeAgendamento(a);
         const tel = a.cliente_telefone || a.telefone;
-        return `<div class="agenda-item" style="border-left-color:${a.profissional_cor || 'var(--primaria)'}">
+        return `<div class="agenda-item" style="border-left-color:${a.profissional_cor || 'var(--primaria)'}${a.suspensa ? ';opacity:.55' : ''}">
           <div class="agenda-item__hora">${UI.escapar(a.hora_inicio)}${a.hora_fim ? `<span class="dica">até ${UI.escapar(a.hora_fim)}</span>` : ''}</div>
           <div class="agenda-item__info">
-            <strong>${UI.escapar(nome)}</strong> ${badge(a.status)}${a.venda_id && !ehInstituto() ? ' <span class="badge badge--ok">faturado</span>' : ''}${a.aula_recorrente_id ? ` <span class="badge badge--muted" title="Gerado automaticamente de uma ${rAula()} fixa">🔁 fixa</span>` : ''}
-            <div class="dica">${UI.escapar(a.servico_nome || rServico(true))}${a.profissional_nome ? ' · ' + UI.escapar(a.profissional_nome) : ''}${tel ? ' · ' + UI.escapar(tel) : ''}</div>
+            <strong>${UI.escapar(nome)}</strong> ${badgeStatus(a)}${a.venda_id && !ehInstituto() ? ' <span class="badge badge--ok">faturado</span>' : ''}${a.aula_recorrente_id ? ` <span class="badge badge--muted" title="Gerado automaticamente de uma ${rAula()} fixa">🔁 fixa</span>` : ''}
+            <div class="dica">${a.suspensa ? `Suspensa${a.motivo_suspensao ? ' — ' + UI.escapar(a.motivo_suspensao) : ''}` : `${UI.escapar(a.servico_nome || rServico(true))}${a.profissional_nome ? ' · ' + UI.escapar(a.profissional_nome) : ''}${tel ? ' · ' + UI.escapar(tel) : ''}`}</div>
           </div>
-          <div class="agenda-item__valor">${UI.moeda(a.valor)}</div>
+          <div class="agenda-item__valor">${a.suspensa ? '' : UI.moeda(a.valor)}</div>
           <div class="agenda-item__acoes">
             ${tel ? `<button class="btn btn--secundario" data-zap="${a.id}" title="Enviar confirmação por WhatsApp">💬</button>` : ''}
             <button class="btn btn--secundario" data-editar="${a.id}">Abrir</button>
@@ -253,7 +261,8 @@ window.PaginaAgenda = (function () {
           <div class="cal-dia__eventos">
             ${evs.slice(0, MOSTRAR).map((a) => {
               const nome = nomeAgendamento(a);
-              return `<div class="cal-evento" data-evento="${a.id}" style="background:${a.profissional_cor || 'var(--primaria)'}" title="${UI.escapar(a.hora_inicio + ' — ' + nome)}">${UI.escapar(a.hora_inicio)} ${UI.escapar(nome)}</div>`;
+              const titulo = a.suspensa ? `${a.hora_inicio} — ${nome} (suspensa${a.motivo_suspensao ? ': ' + a.motivo_suspensao : ''})` : `${a.hora_inicio} — ${nome}`;
+              return `<div class="cal-evento" data-evento="${a.id}" style="background:${a.profissional_cor || 'var(--primaria)'}${a.suspensa ? ';opacity:.5;text-decoration:line-through' : ''}" title="${UI.escapar(titulo)}">${UI.escapar(a.hora_inicio)} ${UI.escapar(nome)}</div>`;
             }).join('')}
             ${extras > 0 ? `<div class="cal-evento cal-evento--mais">+${extras} mais</div>` : ''}
           </div>
@@ -460,7 +469,8 @@ window.PaginaAgenda = (function () {
       titulo: `${a.hora_inicio} — ${nome}`, tamanho: 'modal--pequeno', mostrarConfirmar: false,
       corpoHTML: `
         <table class="tabela">
-          <tr><th>Status</th><td>${badge(a.status)}${a.venda_id && !ehInstituto() ? ' <span class="badge badge--ok">faturado (venda #' + a.venda_id + ')</span>' : ''}${a.aula_recorrente_id ? ` <span class="badge badge--muted">🔁 ${rAula()} fixa</span>` : ''}</td></tr>
+          <tr><th>Status</th><td>${badgeStatus(a)}${a.venda_id && !ehInstituto() ? ' <span class="badge badge--ok">faturado (venda #' + a.venda_id + ')</span>' : ''}${a.aula_recorrente_id ? ` <span class="badge badge--muted">🔁 ${rAula()} fixa</span>` : ''}</td></tr>
+          ${a.suspensa ? `<tr><th>Motivo</th><td>${UI.escapar(a.motivo_suspensao || '—')}</td></tr>` : ''}
           <tr><th>Data</th><td>${diaLabel(a.data)}</td></tr>
           <tr><th>Horário</th><td>${UI.escapar(a.hora_inicio)}${a.hora_fim ? ' às ' + UI.escapar(a.hora_fim) : ''}</td></tr>
           ${ehInstituto() ? '' : `<tr><th>${rServico(true)}</th><td>${UI.escapar(a.servico_nome || '—')}</td></tr>`}
@@ -469,22 +479,25 @@ window.PaginaAgenda = (function () {
           ${ehInstituto() ? '' : `<tr><th>Valor</th><td><strong>${UI.moeda(a.valor)}</strong></td></tr>`}
           ${a.observacao ? `<tr><th>Obs.</th><td>${UI.escapar(a.observacao)}</td></tr>` : ''}
         </table>
-        <div class="campo mt-16"><label>Mudar status</label>
-          <select id="det-status" ${a.venda_id ? 'disabled' : ''}>
-            ${Object.keys(STATUS).map((s) => `<option value="${s}" ${a.status === s ? 'selected' : ''}>${STATUS[s][0]}</option>`).join('')}
-          </select></div>`,
+        ${a.suspensa
+          ? '<p class="dica mt-16">Este dia está suspenso — para reabrir, use a tela de Chamada.</p>'
+          : `<div class="campo mt-16"><label>Mudar status</label>
+              <select id="det-status" ${a.venda_id ? 'disabled' : ''}>
+                ${Object.keys(STATUS).map((s) => `<option value="${s}" ${a.status === s ? 'selected' : ''}>${STATUS[s][0]}</option>`).join('')}
+              </select></div>`}`,
       aoAbrir: (el) => {
         const foot = el.querySelector('.modal__foot');
         foot.innerHTML = `
           <div class="flex gap-12" style="flex-wrap:wrap;width:100%">
-            <button class="btn btn--secundario" id="d-status" ${a.venda_id ? 'disabled' : ''}>Atualizar status</button>
+            ${!a.suspensa ? `<button class="btn btn--secundario" id="d-status" ${a.venda_id ? 'disabled' : ''}>Atualizar status</button>` : ''}
             ${tel ? '<button class="btn btn--secundario" id="d-zap">💬 WhatsApp</button>' : ''}
             <div class="cresce"></div>
             ${!a.venda_id ? '<button class="btn btn--secundario" id="d-editar">Editar</button>' : ''}
             ${!a.venda_id ? '<button class="btn btn--perigo" id="d-excluir">Excluir</button>' : ''}
             ${!a.venda_id && !ehInstituto() ? '<button class="btn" id="d-faturar">💲 Faturar</button>' : ''}
           </div>`;
-        foot.querySelector('#d-status').addEventListener('click', async () => {
+        const btnStatus = foot.querySelector('#d-status');
+        if (btnStatus) btnStatus.addEventListener('click', async () => {
           try { await API.post(`/api/agenda/${a.id}/status`, { status: el.querySelector('#det-status').value }); UI.sucesso('Status atualizado.'); el.remove(); await atualizarVistaAtual(); }
           catch (e) { UI.erro(e.message); }
         });
