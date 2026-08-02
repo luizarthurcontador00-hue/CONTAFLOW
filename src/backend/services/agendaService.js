@@ -110,6 +110,10 @@ function listar({ data, inicio, fim, profissional_id, status } = {}) {
   if (fim) { where.push('date(a.data) <= date(@fim)'); params.fim = fim; }
   if (profissional_id) { where.push('a.profissional_id = @prof'); params.prof = Number(profissional_id); }
   if (status) { where.push('a.status = @status'); params.status = status; }
+  // Turma cancelada nunca deveria ter aula na agenda de verdade -- mas se
+  // ficou algum encontro orfao pra tras (turma cancelada antes da limpeza
+  // existir, por exemplo), nao deixa reaparecer aqui.
+  where.push("(a.turma_id IS NULL OR NOT EXISTS (SELECT 1 FROM turmas t WHERE t.id = a.turma_id AND t.status = 'cancelada'))");
   return db.prepare(`
     SELECT a.*, c.nome AS cliente_cadastro, c.telefone AS cliente_telefone,
            p.nome AS profissional_nome, p.cor AS profissional_cor
@@ -274,7 +278,8 @@ function resumoDia(data) {
       COALESCE(SUM(CASE WHEN status='atendido' THEN 1 ELSE 0 END),0) atendidos,
       COALESCE(SUM(CASE WHEN status IN ('agendado','confirmado') THEN 1 ELSE 0 END),0) pendentes,
       COALESCE(SUM(CASE WHEN status IN ('agendado','confirmado','atendido') THEN valor ELSE 0 END),0) previsto
-    FROM agendamentos WHERE data = ? AND suspensa = 0
+    FROM agendamentos a WHERE data = ? AND suspensa = 0
+      AND (a.turma_id IS NULL OR NOT EXISTS (SELECT 1 FROM turmas t WHERE t.id = a.turma_id AND t.status = 'cancelada'))
   `).get(data);
   return { ...r, previsto: arred(r.previsto) };
 }

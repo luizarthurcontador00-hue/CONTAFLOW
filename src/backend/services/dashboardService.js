@@ -246,19 +246,21 @@ function painelInstituto() {
     JOIN turmas t ON t.id = a.turma_id
     LEFT JOIN cursos c ON c.id = t.curso_id
     LEFT JOIN profissionais p ON p.id = a.profissional_id
-    WHERE date(a.data) = date(?) AND a.status != 'cancelado'
+    WHERE date(a.data) = date(?) AND a.status != 'cancelado' AND t.status != 'cancelada'
     ORDER BY a.hora_inicio
   `).all(hoje);
 
   const aulasSemana = db.prepare(`
-    SELECT COUNT(*) c FROM agendamentos
+    SELECT COUNT(*) c FROM agendamentos a
     WHERE turma_id IS NOT NULL AND status != 'cancelado'
       AND date(data) BETWEEN date(?) AND date(?)
+      AND NOT EXISTS (SELECT 1 FROM turmas t WHERE t.id = a.turma_id AND t.status = 'cancelada')
   `).get(hoje, daquiA7).c;
 
   const aulasRealizadasMes = db.prepare(`
-    SELECT COUNT(*) c FROM agendamentos
+    SELECT COUNT(*) c FROM agendamentos a
     WHERE turma_id IS NOT NULL AND status = 'atendido' AND date(data) >= date(?)
+      AND NOT EXISTS (SELECT 1 FROM turmas t WHERE t.id = a.turma_id AND t.status = 'cancelada')
   `).get(mesIni).c;
 
   // Aula que ja passou e ninguem registrou a chamada: o buraco que mais
@@ -268,6 +270,7 @@ function painelInstituto() {
     WHERE a.turma_id IS NOT NULL AND a.status != 'cancelado' AND a.suspensa = 0
       AND date(a.data) < date(?)
       AND NOT EXISTS (SELECT 1 FROM presencas pr WHERE pr.agendamento_id = a.id)
+      AND NOT EXISTS (SELECT 1 FROM turmas t WHERE t.id = a.turma_id AND t.status = 'cancelada')
   `).get(hoje).c;
 
   const presencasMes = db.prepare(`

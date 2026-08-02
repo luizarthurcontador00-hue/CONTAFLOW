@@ -15,7 +15,7 @@ const SITUACOES = ['presente', 'falta', 'justificada'];
 
 /** Encontros de uma turma (ou de um periodo), com quantos ja tiveram chamada. */
 function listarEncontros({ turma_id, de, ate } = {}) {
-  const where = ['a.turma_id IS NOT NULL'];
+  const where = ['a.turma_id IS NOT NULL', "t.status != 'cancelada'"];
   if (turma_id) where.push('a.turma_id = @turma_id');
   if (de) where.push('a.data >= @de');
   if (ate) where.push('a.data <= @ate');

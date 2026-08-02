@@ -320,7 +320,10 @@ function atualizar(id, dados) {
     `).run({ ...d, id });
     if (dados.horarios) gravarHorarios(db, id, horarios);
     if (dados.instrumentos_ids) gravarInstrumentos(db, id, d.instrumentos_ids);
-    if (dados.instrutores) gravarInstrutores(db, id, dados.instrutores);
+    if (dados.instrutores) {
+      gravarInstrutores(db, id, dados.instrutores);
+      sincronizarInstrutorDosEncontros(db, id);
+    }
   });
   salvar();
 
@@ -356,6 +359,24 @@ function gravarInstrutores(db, turmaId, instrutores) {
     const papel = ['titular', 'auxiliar', 'suplente'].includes(i.papel) ? i.papel : 'titular';
     ins.run(turmaId, pid, papel);
   });
+}
+
+/**
+ * Cada encontro guarda o instrutor titular da hora em que foi gerado
+ * (agendamentos.profissional_id), pra Agenda/Chamada nao precisarem cruzar
+ * com turmas_instrutores toda vez. Problema: trocar o instrutor pela edição
+ * da turma só atualiza turmas_instrutores — os encontros que já existiam
+ * continuam com o nome antigo (ou em branco, se a turma tinha sido criada
+ * sem instrutor). Só sincroniza o que ainda não aconteceu (sem chamada
+ * registrada), pra não reescrever o instrutor de aula que já rolou.
+ */
+function sincronizarInstrutorDosEncontros(db, turmaId) {
+  const titular = db.prepare("SELECT profissional_id FROM turmas_instrutores WHERE turma_id = ? AND papel = 'titular' LIMIT 1").get(turmaId);
+  db.prepare(`
+    UPDATE agendamentos SET profissional_id = ?
+    WHERE turma_id = ? AND date(data) >= date('now','localtime')
+      AND NOT EXISTS (SELECT 1 FROM presencas p WHERE p.agendamento_id = agendamentos.id)
+  `).run(titular ? titular.profissional_id : null, turmaId);
 }
 
 function excluir(id) {
@@ -959,7 +980,7 @@ function suspenderPeriodo({ de, ate, motivo }) {
  */
 function encontrosDoInstrutor(profissionalId, { de, ate } = {}) {
   const db = getDb();
-  const where = ['a.turma_id IS NOT NULL', 'a.profissional_id = @profissionalId'];
+  const where = ['a.turma_id IS NOT NULL', 'a.profissional_id = @profissionalId', "t.status != 'cancelada'"];
   const params = { profissionalId: Number(profissionalId) };
   if (de) { where.push('a.data >= @de'); params.de = de; }
   if (ate) { where.push('a.data <= @ate'); params.ate = ate; }
@@ -1000,7 +1021,7 @@ function escalaDoDia(data) {
     JOIN turmas t ON t.id = a.turma_id
     JOIN cursos c ON c.id = t.curso_id
     LEFT JOIN profissionais p ON p.id = a.profissional_id
-    WHERE a.turma_id IS NOT NULL AND a.data = @data
+    WHERE a.turma_id IS NOT NULL AND a.data = @data AND t.status != 'cancelada'
     ORDER BY a.hora_inicio, t.nome
   `).all({ data });
 

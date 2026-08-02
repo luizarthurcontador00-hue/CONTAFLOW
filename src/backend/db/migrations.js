@@ -1682,6 +1682,47 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 45,
+    name: 'limpar-encontros-de-turma-encerrada-ou-cancelada',
+    up(db) {
+      // Encerrar/cancelar pela edição genérica da turma passou a limpar os
+      // encontros futuros sem chamada (v0.79.1), mas só a partir dali pra
+      // frente -- turma que já estava encerrada/cancelada antes disso ficou
+      // com aulas fantasmas na Agenda e na Chamada pra sempre, porque nada
+      // mais dispara aquela limpeza pra ela. Esta e' a limpeza retroativa,
+      // rodando uma vez so.
+      db.exec(`
+        DELETE FROM agendamentos
+        WHERE turma_id IN (SELECT id FROM turmas WHERE status IN ('cancelada','encerrada'))
+          AND date(data) > date('now','localtime')
+          AND NOT EXISTS (SELECT 1 FROM presencas p WHERE p.agendamento_id = agendamentos.id);
+      `);
+    },
+  },
+  {
+    version: 46,
+    name: 'sincronizar-instrutor-dos-encontros',
+    up(db) {
+      // Trocar o instrutor de uma turma (ou escalar um pela primeira vez
+      // depois que a turma já tinha encontros gerados) só gravava em
+      // turmas_instrutores -- os encontros futuros continuavam com o
+      // profissional_id antigo (ou em branco), entao a Agenda e a Chamada
+      // mostravam a turma sem instrutor mesmo com um titular escalado.
+      // Sincroniza uma vez so, a partir de agora em diante fica automatico.
+      db.exec(`
+        UPDATE agendamentos
+        SET profissional_id = (
+          SELECT profissional_id FROM turmas_instrutores
+          WHERE turma_id = agendamentos.turma_id AND papel = 'titular'
+          LIMIT 1
+        )
+        WHERE turma_id IS NOT NULL
+          AND date(data) >= date('now','localtime')
+          AND NOT EXISTS (SELECT 1 FROM presencas p WHERE p.agendamento_id = agendamentos.id);
+      `);
+    },
+  },
 ];
 
 /**

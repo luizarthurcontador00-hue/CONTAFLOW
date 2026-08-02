@@ -62,6 +62,7 @@ function destinatariosAulaDeAmanha(db) {
     WHERE a.turma_id IS NOT NULL
       AND a.data = date('now','localtime','+1 day')
       AND a.status NOT IN ('cancelado','atendido')
+      AND t.status != 'cancelada'
   `).all();
 }
 
