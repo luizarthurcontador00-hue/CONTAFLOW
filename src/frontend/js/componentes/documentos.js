@@ -515,20 +515,49 @@ window.Documentos = (function () {
     return `${diaSemana[new Date(iso + 'T12:00:00').getDay()]}, ${porExtenso(iso)}`;
   }
 
-  /** Escala do dia: uma linha por aula, ordenada por horário — pensada pra pendurar no mural, pra quem não usa o sistema acompanhar. */
+  const CSS_ESCALA_DO_DIA = `
+    @page { size: A4 landscape; margin: 14mm; }
+    table.tabela-escala th, table.tabela-escala td { text-align:center; vertical-align:middle; }
+    table.tabela-escala td { font-size:12px; }
+    table.tabela-escala .escala-turma { font-weight:bold; }
+    table.tabela-escala .escala-detalhe { font-size:10px; color:#555; }
+  `;
+
+  /**
+   * Escala do dia num quadro (horário × curso), igual a um mural de aviso:
+   * cada linha é um horário, cada coluna um curso/instrumento, e a célula
+   * mostra qual turma acontece ali — assim quem não usa o sistema (staff,
+   * instrutores, visitantes) lê de relance quem tem aula com quem e onde.
+   */
   function corpoEscalaDoDia(encontros) {
-    return encontros.length ? `
-      <table>
-        <thead><tr><th>Horário</th><th>Turma</th><th>Curso</th><th>Sala</th><th>Instrutor</th><th>Alunos</th></tr></thead>
-        <tbody>${encontros.map((e) => `<tr${e.suspensa ? ' style="opacity:.55"' : ''}>
-          <td>${esc(e.hora_inicio)}${e.hora_fim ? ' às ' + esc(e.hora_fim) : ''}</td>
-          <td>${esc(e.turma_nome)}${e.suspensa ? ' <span class="dica">(suspensa' + (e.motivo_suspensao ? ': ' + esc(e.motivo_suspensao) : '') + ')</span>' : ''}</td>
-          <td>${esc(e.curso_nome)}</td>
-          <td>${esc(e.sala || '—')}</td>
-          <td>${esc(e.profissional_nome || '—')}</td>
-          <td style="font-size:11px">${e.alunos.length ? esc(e.alunos.join(', ')) : 'Nenhum aluno matriculado.'}</td>
+    if (!encontros.length) return '<p class="dica">Nenhuma aula marcada neste dia.</p>';
+
+    const chaveHorario = (e) => `${e.hora_inicio}|${e.hora_fim || ''}`;
+    const horarios = [...new Map(encontros.map((e) => [chaveHorario(e), { inicio: e.hora_inicio, fim: e.hora_fim }])).values()]
+      .sort((a, b) => a.inicio.localeCompare(b.inicio));
+    const cursos = [...new Set(encontros.map((e) => e.curso_nome || 'Outros'))];
+
+    const grade = new Map();
+    encontros.forEach((e) => {
+      const chave = `${chaveHorario(e)}|${e.curso_nome || 'Outros'}`;
+      if (!grade.has(chave)) grade.set(chave, []);
+      grade.get(chave).push(e);
+    });
+
+    return `
+      <table class="tabela-escala">
+        <thead><tr><th></th>${cursos.map((c) => `<th>${esc(c.toUpperCase())}</th>`).join('')}</tr></thead>
+        <tbody>${horarios.map((h) => `<tr>
+          <th style="white-space:nowrap">${esc(h.inicio)}${h.fim ? ' até ' + esc(h.fim) : ''}</th>
+          ${cursos.map((c) => {
+            const itens = grade.get(`${h.inicio}|${h.fim || ''}|${c}`) || [];
+            return `<td>${itens.map((e) => `
+              <div class="escala-turma"${e.suspensa ? ' style="opacity:.55;text-decoration:line-through"' : ''}>${esc(e.turma_nome)}</div>
+              ${e.sala || e.profissional_nome ? `<div class="escala-detalhe">${[e.sala ? 'Sala ' + esc(e.sala) : '', e.profissional_nome ? esc(e.profissional_nome) : ''].filter(Boolean).join(' · ')}</div>` : ''}
+            `).join('<hr style="border:none;border-top:1px dashed #ccc;margin:4px 0">')}</td>`;
+          }).join('')}
         </tr>`).join('')}</tbody>
-      </table>` : '<p class="dica">Nenhuma aula marcada neste dia.</p>';
+      </table>`;
   }
 
   /** PDF pronto pra imprimir e afixar: a escala de aulas de um dia, pra staff, instrutores e visitantes acompanharem. */
@@ -544,7 +573,7 @@ window.Documentos = (function () {
 
     const corpo = `${cabecalho(ctx.cfg, 'Escala de aulas do dia', porExtensoComDia(data))}${corpoEscalaDoDia(encontros)}
       <div class="rodape">emitido em ${dataBR(new Date().toISOString().slice(0, 10))}</div>`;
-    try { await UI.baixarPDF(pagina('Escala de aulas do dia', ctx.cfg, corpo), nomeArquivo('escala-do-dia', data)); }
+    try { await UI.baixarPDF(pagina('Escala de aulas do dia', ctx.cfg, corpo, CSS_ESCALA_DO_DIA), nomeArquivo('escala-do-dia', data)); }
     catch (e) { UI.erro(e.message); }
   }
 
