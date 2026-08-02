@@ -207,7 +207,7 @@ window.PaginaAgenda = (function () {
           ${profissionais.map((p) => `<option value="${p.id}" ${String(filtroProf) === String(p.id) ? 'selected' : ''}>${UI.escapar(p.nome)}</option>`).join('')}
         </select>
         <div class="cresce"></div>
-        ${ehInstituto() ? '' : '<button class="btn btn--secundario" id="ag-equipe-mes">👥 Equipe</button>'}
+        ${ehInstituto() ? '<button class="btn btn--secundario" id="ag-imprimir-mes">🖨️ Imprimir escala do mês</button>' : '<button class="btn btn--secundario" id="ag-equipe-mes">👥 Equipe</button>'}
         <button class="btn" id="ag-novo-mes">+ Nov${rAula() === 'aula' ? 'a' : 'o'} ${rAula()}</button>
       </div>
       <div id="ag-calendario"><div class="card">Carregando…</div></div>`;
@@ -218,6 +218,8 @@ window.PaginaAgenda = (function () {
     alvo.querySelector('#ag-prof-filtro-mes').addEventListener('change', (e) => { filtroProf = e.target.value; carregarCalendario(); });
     const btnEquipeMes = alvo.querySelector('#ag-equipe-mes');
     if (btnEquipeMes) btnEquipeMes.addEventListener('click', gerenciarEquipe);
+    const btnImprimirMes = alvo.querySelector('#ag-imprimir-mes');
+    if (btnImprimirMes) btnImprimirMes.addEventListener('click', () => Documentos.escalaDoMes({ deMes: mesAtual, ateMes: mesAtual }));
     alvo.querySelector('#ag-novo-mes').addEventListener('click', () => abrirForm());
 
     await carregarCalendario();

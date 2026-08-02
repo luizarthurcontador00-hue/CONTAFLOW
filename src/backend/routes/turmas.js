@@ -13,6 +13,7 @@ router.get('/horas-voluntariado', asyncHandler((req, res) => res.json(presencas.
 router.get('/encontros', asyncHandler((req, res) => res.json(presencas.listarEncontros(req.query))));
 router.get('/instrutores/:profissionalId/encontros', asyncHandler((req, res) => res.json(turmas.encontrosDoInstrutor(req.params.profissionalId, req.query))));
 router.get('/escala-do-dia', asyncHandler((req, res) => res.json(turmas.escalaDoDia(req.query.data))));
+router.get('/escala-do-periodo', asyncHandler((req, res) => res.json(turmas.escalaDoPeriodo(req.query))));
 
 // ------------------- Atividades de voluntariado (fora da aula) -------------------
 router.get('/voluntarios/atividades', asyncHandler((req, res) => res.json(presencas.listarAtividades(req.query))));

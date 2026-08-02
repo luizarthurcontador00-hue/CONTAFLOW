@@ -577,6 +577,35 @@ window.Documentos = (function () {
     catch (e) { UI.erro(e.message); }
   }
 
+  /** PDF do mês inteiro: a mesma grade horário × curso, repetida dia a dia, pra quem quer o panorama do mês pregado no mural. */
+  async function escalaDoMes({ deMes, ateMes } = {}) {
+    const mesAtual = new Date().toISOString().slice(0, 7);
+    const de = deMes || mesAtual; const ate = ateMes || de;
+    const { de: dataDe, ate: dataAte } = periodoDoMes(de, ate);
+
+    let encontros; let ctx;
+    try {
+      [encontros, ctx] = await Promise.all([
+        API.get(`/api/turmas/escala-do-periodo?de=${dataDe}&ate=${dataAte}`),
+        contexto(),
+      ]);
+    } catch (e) { UI.erro(e.message); return; }
+    if (!encontros.length) { UI.erro('Não há aula marcada neste período.'); return; }
+
+    const porDia = new Map();
+    encontros.forEach((e) => {
+      if (!porDia.has(e.data)) porDia.set(e.data, []);
+      porDia.get(e.data).push(e);
+    });
+    const dias = [...porDia.keys()].sort();
+
+    const corpo = `${cabecalho(ctx.cfg, 'Escala de aulas do mês', rotuloPeriodo(de, ate))}`
+      + dias.map((d) => `<h3>${esc(porExtensoComDia(d))}</h3>${corpoEscalaDoDia(porDia.get(d))}`).join('')
+      + `<div class="rodape">emitido em ${dataBR(new Date().toISOString().slice(0, 10))}</div>`;
+    try { await UI.baixarPDF(pagina('Escala de aulas do mês', ctx.cfg, corpo, CSS_ESCALA_DO_DIA), nomeArquivo('escala-do-mes', de)); }
+    catch (e) { UI.erro(e.message); }
+  }
+
   // ============================= Declarações =============================
 
   const ESTILO_DECLARACAO = `
@@ -710,7 +739,7 @@ window.Documentos = (function () {
 
   return {
     fichaDoAluno, fichasDoAlunoLote, folhaDeChamada, folhasDeChamadaLote,
-    calendarioInstrutor, calendariosInstrutoresLote, escalaDoDia,
+    calendarioInstrutor, calendariosInstrutoresLote, escalaDoDia, escalaDoMes,
     declaracaoMatricula, declaracoesMatriculaLote, declaracaoVoluntariado, termoVoluntariado,
     certificado, certificadosLote,
     porExtenso, dataBR,

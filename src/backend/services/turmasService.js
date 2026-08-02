@@ -205,11 +205,17 @@ function validar(dados, horarios) {
  */
 /**
  * Vagas sao sobre o acervo: quem traz o proprio instrumento (ou ja esta com
- * um exemplar emprestado do instituto) nao usa nada dele, entao nao ocupa
- * vaga de verdade — so quem depende do acervo conta pro limite configurado.
- * Por isso o total exibido cresce (vagas + quem furou) em vez da vaga
- * configurada ser alterada: "1 de 9" mostra a realidade sem mentir sobre
- * quantos cabem fisicamente nem mexer no numero que o instituto configurou.
+ * um exemplar emprestado do instituto) nao usa nada dele, entao nao deveria
+ * travar o limite configurado nem contar contra ele. Por isso o total
+ * exibido cresce (vagas + quem furou) em vez da vaga configurada ser
+ * alterada: "5 de 6" mostra a realidade sem mexer no numero que o instituto
+ * configurou.
+ *
+ * `ocupadas` e o que aparece na tela: quantos alunos estao matriculados de
+ * verdade, contando todo mundo (com instrumento proprio ou nao) — e' a
+ * pergunta "quantos alunos tem aqui". `usandoAcervo` e o numero que decide
+ * fila de espera e se da pra reduzir as vagas: so quem depende do acervo
+ * pode travar essas coisas, quem traz o proprio nunca.
  *
  * Recalculado sempre na hora (nunca gravado), porque a posse do instrumento
  * pode mudar depois da matricula — um aluno que compra o proprio instrumento
@@ -217,7 +223,7 @@ function validar(dados, horarios) {
  */
 function contarVagas(matriculasAtivas, vagasBase) {
   const furando = matriculasAtivas.filter((m) => m.instrumento_id && instrumentos.alunoJaTemInstrumento(m.aluno_id, m.instrumento_id)).length;
-  return { ocupadas: matriculasAtivas.length - furando, total: vagasBase + furando, furando };
+  return { ocupadas: matriculasAtivas.length, usandoAcervo: matriculasAtivas.length - furando, total: vagasBase + furando, furando };
 }
 
 /** Quantos matriculados ativos da turma trazem o proprio instrumento. */
@@ -305,9 +311,9 @@ function atualizar(id, dados) {
   // Reduzir vagas abaixo de quem ja depende do acervo deixaria aluno sem
   // instrumento — quem traz o proprio nao conta pra esse limite.
   const ativas = atual.matriculas.filter((m) => m.status === 'ativa');
-  const ocupadas = contarVagas(ativas, atual.vagas).ocupadas;
-  if (d.vagas < ocupadas) {
-    throw new AppError(`Esta turma já tem ${ocupadas} aluno(s) matriculado(s) que dependem do acervo. Não dá para reduzir para ${d.vagas} vagas.`);
+  const usandoAcervo = contarVagas(ativas, atual.vagas).usandoAcervo;
+  if (d.vagas < usandoAcervo) {
+    throw new AppError(`Esta turma já tem ${usandoAcervo} aluno(s) matriculado(s) que dependem do acervo. Não dá para reduzir para ${d.vagas} vagas.`);
   }
 
   const salvar = db.transaction(() => {
@@ -449,9 +455,9 @@ function renovar(id, dados = {}) {
   const vagas = dados.vagas !== undefined && dados.vagas !== '' ? Number(dados.vagas) : origem.vagas;
   // Quem traz o proprio instrumento nao ocupa vaga de acervo na turma nova
   // tambem — so quem depende dele entra na conta do limite.
-  const ocupadasNovas = contarVagas(ativosData.filter((m) => levar.includes(m.aluno_id)), vagas).ocupadas;
-  if (ocupadasNovas > vagas) {
-    throw new AppError(`Você escolheu ${levar.length} aluno(s) para continuar (${ocupadasNovas} deles dependem do acervo), mas a turma nova tem ${vagas} vaga(s).`);
+  const usandoAcervoNovas = contarVagas(ativosData.filter((m) => levar.includes(m.aluno_id)), vagas).usandoAcervo;
+  if (usandoAcervoNovas > vagas) {
+    throw new AppError(`Você escolheu ${levar.length} aluno(s) para continuar (${usandoAcervoNovas} deles dependem do acervo), mas a turma nova tem ${vagas} vaga(s).`);
   }
 
   // A ORDEM importa: a turma velha precisa fechar ANTES de a nova nascer.
@@ -596,7 +602,7 @@ function matricular(turmaId, { aluno_id, observacao, instrumento_id }) {
   // vagas OCUPADAS DE VERDADE (excluindo quem furou) ja baterem no limite.
   const naoUsaAcervo = !!inst && jaTemInstrumento;
   const ativas = turma.matriculas.filter((m) => m.status === 'ativa');
-  const cheia = !naoUsaAcervo && contarVagas(ativas, turma.vagas).ocupadas >= turma.vagas;
+  const cheia = !naoUsaAcervo && contarVagas(ativas, turma.vagas).usandoAcervo >= turma.vagas;
   const status = cheia ? 'espera' : 'ativa';
 
   const info = db.prepare(
@@ -640,7 +646,7 @@ function chamarPrimeiroDaEspera(db, turmaId) {
   // instrumento nunca entra em espera, ja fura a vaga na hora da matricula)
   // — entao so as vagas ocupadas de verdade (excluindo quem furou) importam aqui.
   const ativas = db.prepare("SELECT aluno_id, instrumento_id FROM matriculas WHERE turma_id = ? AND status = 'ativa'").all(turmaId);
-  if (contarVagas(ativas, turma.vagas).ocupadas >= turma.vagas) return null;
+  if (contarVagas(ativas, turma.vagas).usandoAcervo >= turma.vagas) return null;
 
   const proximo = db.prepare(`
     SELECT m.*, c.nome AS aluno_nome FROM matriculas m JOIN clientes c ON c.id = m.aluno_id
@@ -980,18 +986,22 @@ function suspenderPeriodo({ de, ate, motivo }) {
  */
 function encontrosDoInstrutor(profissionalId, { de, ate } = {}) {
   const db = getDb();
-  const where = ['a.turma_id IS NOT NULL', 'a.profissional_id = @profissionalId', "t.status != 'cancelada'"];
+  // agendamentos.profissional_id só guarda o titular (é quem entra sozinho
+  // na agenda de verdade) — um auxiliar ou suplente nunca aparece por ali,
+  // mesmo escalado na turma. O calendário do instrutor precisa de QUALQUER
+  // papel, então casa por turmas_instrutores em vez de a.profissional_id.
+  const where = ['a.turma_id IS NOT NULL', "t.status != 'cancelada'"];
   const params = { profissionalId: Number(profissionalId) };
   if (de) { where.push('a.data >= @de'); params.de = de; }
   if (ate) { where.push('a.data <= @ate'); params.ate = ate; }
 
   const encontros = db.prepare(`
     SELECT a.id, a.data, a.hora_inicio, a.hora_fim, a.suspensa, a.turma_id,
-      t.nome AS turma_nome, t.sala, c.nome AS curso_nome,
-      (SELECT papel FROM turmas_instrutores ti WHERE ti.turma_id = t.id AND ti.profissional_id = @profissionalId) AS papel
+      t.nome AS turma_nome, t.sala, c.nome AS curso_nome, ti.papel AS papel
     FROM agendamentos a
     JOIN turmas t ON t.id = a.turma_id
     JOIN cursos c ON c.id = t.curso_id
+    JOIN turmas_instrutores ti ON ti.turma_id = t.id AND ti.profissional_id = @profissionalId
     WHERE ${where.join(' AND ')}
     ORDER BY a.data, a.hora_inicio
   `).all(params);
@@ -1011,8 +1021,11 @@ function encontrosDoInstrutor(profissionalId, { de, ate } = {}) {
   return encontros;
 }
 
-function escalaDoDia(data) {
+/** Escala de aulas num período (um dia ou um mês inteiro) — base da impressão para mural. */
+function escalaDoPeriodo({ de, ate } = {}) {
   const db = getDb();
+  const inicio = de;
+  const fim = ate || de;
   const encontros = db.prepare(`
     SELECT a.id, a.data, a.hora_inicio, a.hora_fim, a.suspensa, a.motivo_suspensao, a.turma_id,
       t.nome AS turma_nome, t.sala, c.nome AS curso_nome,
@@ -1021,9 +1034,9 @@ function escalaDoDia(data) {
     JOIN turmas t ON t.id = a.turma_id
     JOIN cursos c ON c.id = t.curso_id
     LEFT JOIN profissionais p ON p.id = a.profissional_id
-    WHERE a.turma_id IS NOT NULL AND a.data = @data AND t.status != 'cancelada'
-    ORDER BY a.hora_inicio, t.nome
-  `).all({ data });
+    WHERE a.turma_id IS NOT NULL AND a.data BETWEEN @inicio AND @fim AND t.status != 'cancelada'
+    ORDER BY a.data, a.hora_inicio, t.nome
+  `).all({ inicio, fim });
 
   const alunosPorTurma = new Map();
   const buscarAlunos = db.prepare(`
@@ -1039,6 +1052,10 @@ function escalaDoDia(data) {
   return encontros;
 }
 
+function escalaDoDia(data) {
+  return escalaDoPeriodo({ de: data, ate: data });
+}
+
 module.exports = {
   listar, obter, criar, atualizar, excluir,
   encerrar, renovar, historicoDaTurma,
@@ -1046,6 +1063,6 @@ module.exports = {
   gerarEncontros, gerarEncontrosPendentes, limparEncontrosForaDoHorario,
   sugerirSubstitutos, definirInstrutorDoEncontro,
   comInstrumentoProprio, progressoTurma, suspenderEncontro, suspenderPeriodo, encontrosDoInstrutor,
-  escalaDoDia, contarVagas,
+  escalaDoDia, escalaDoPeriodo, contarVagas,
   STATUS_TURMA, STATUS_MATRICULA, DIAS,
 };
