@@ -144,7 +144,7 @@ window.PaginaRelatorios = (function () {
         <h3>${UI.escapar(t.nome)} <span class="dica">${UI.escapar(t.curso || '')}</span></h3>
         <p class="dica" style="margin-top:0">${UI.escapar(t.horarios || 'sem horário definido')}
           · ${t.instrutores ? UI.escapar(t.instrutores) : 'sem instrutor'}
-          · ${t.matriculados}/${t.vagas} vagas${t.na_fila ? ` · ${t.na_fila} na fila` : ''}${t.sala ? ` · sala ${UI.escapar(t.sala)}` : ''}</p>
+          · ${t.vagas_ocupadas}/${t.vagas_total} vagas${t.na_fila ? ` · ${t.na_fila} na fila` : ''}${t.sala ? ` · sala ${UI.escapar(t.sala)}` : ''}</p>
         <table class="tabela"><thead><tr><th>Aluno</th><th>Telefone</th><th>Responsável</th></tr></thead>
         <tbody>${t.alunos.length ? t.alunos.map((a) => `<tr>
           <td>${UI.escapar(a.nome)}</td><td>${UI.escapar(a.telefone || '—')}</td>

@@ -217,8 +217,17 @@ function painelInstituto() {
     ORDER BY c.nome, t.nome
   `).all();
 
-  const vagasTotais = turmas.reduce((s, t) => s + Number(t.vagas || 0), 0);
-  const ocupadas = turmas.reduce((s, t) => s + Number(t.matriculados || 0), 0);
+  // eslint-disable-next-line global-require
+  const { contarVagas } = require('./turmasService');
+  const buscarAtivas = db.prepare("SELECT aluno_id, instrumento_id FROM matriculas WHERE turma_id = ? AND status = 'ativa'");
+  turmas.forEach((t) => {
+    const v = contarVagas(buscarAtivas.all(t.id), t.vagas);
+    t.vagas_ocupadas = v.ocupadas;
+    t.vagas_total = v.total;
+  });
+
+  const vagasTotais = turmas.reduce((s, t) => s + Number(t.vagas_total || 0), 0);
+  const ocupadas = turmas.reduce((s, t) => s + Number(t.vagas_ocupadas || 0), 0);
 
   const alunosAtivos = db.prepare(`
     SELECT COUNT(DISTINCT aluno_id) c FROM matriculas WHERE status = 'ativa'
@@ -350,7 +359,7 @@ function painelInstituto() {
       vagas_ocupadas: ocupadas,
       vagas_livres: Math.max(0, vagasTotais - ocupadas),
       ocupacao_pct: vagasTotais > 0 ? arred((ocupadas / vagasTotais) * 100) : 0,
-      turmas_lotadas: turmas.filter((t) => t.matriculados >= t.vagas).length,
+      turmas_lotadas: turmas.filter((t) => t.vagas_ocupadas >= t.vagas_total).length,
       turmas_sem_instrutor: turmas.filter((t) => !t.instrutores).length,
       alunos_ativos: alunosAtivos,
       alunos_novos_mes: alunosNovosMes,
@@ -360,6 +369,7 @@ function painelInstituto() {
         const progresso = require('./turmasService').progressoTurma(t.id);
         return {
           id: t.id, nome: t.nome, curso: t.curso_nome, vagas: t.vagas,
+          vagas_ocupadas: t.vagas_ocupadas, vagas_total: t.vagas_total,
           matriculados: t.matriculados, na_fila: t.na_fila, instrutores: t.instrutores,
           progresso_pct: progresso.percentual,
         };

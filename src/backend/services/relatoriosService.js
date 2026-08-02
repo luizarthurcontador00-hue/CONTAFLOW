@@ -3,6 +3,7 @@
 const XLSX = require('xlsx');
 const { getDb } = require('../db/connection');
 const { arred } = require('./precificacaoService');
+const turmasService = require('./turmasService');
 
 /** Relatorio de estoque atual com valor em custo e em venda. */
 function estoqueAtual({ apenas_baixo } = {}) {
@@ -136,25 +137,31 @@ function turmasRelatorio() {
 
   const horarios = db.prepare('SELECT * FROM turmas_horarios ORDER BY dia_semana, hora_inicio').all();
   const alunos = db.prepare(`
-    SELECT m.turma_id, cl.nome, cl.telefone, cl.responsavel_nome, cl.responsavel_telefone
+    SELECT m.turma_id, m.aluno_id, m.instrumento_id, cl.nome, cl.telefone, cl.responsavel_nome, cl.responsavel_telefone
     FROM matriculas m JOIN clientes cl ON cl.id = m.aluno_id
     WHERE m.status = 'ativa' ORDER BY cl.nome COLLATE NOCASE
   `).all();
 
   const DIAS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
-  const itens = turmas.map((t) => ({
-    ...t,
-    horarios: horarios.filter((h) => h.turma_id === t.id)
-      .map((h) => `${DIAS[h.dia_semana] || h.dia_semana} ${h.hora_inicio}–${h.hora_fim}`).join(' · '),
-    alunos: alunos.filter((a) => a.turma_id === t.id),
-  }));
+  const itens = turmas.map((t) => {
+    const alunosDaTurma = alunos.filter((a) => a.turma_id === t.id);
+    const v = turmasService.contarVagas(alunosDaTurma, t.vagas);
+    return {
+      ...t,
+      horarios: horarios.filter((h) => h.turma_id === t.id)
+        .map((h) => `${DIAS[h.dia_semana] || h.dia_semana} ${h.hora_inicio}–${h.hora_fim}`).join(' · '),
+      alunos: alunosDaTurma,
+      vagas_ocupadas: v.ocupadas,
+      vagas_total: v.total,
+    };
+  });
 
   return {
     itens,
     totais: {
       turmas: itens.length,
       matriculados: itens.reduce((s, t) => s + Number(t.matriculados), 0),
-      vagas: itens.reduce((s, t) => s + Number(t.vagas || 0), 0),
+      vagas: itens.reduce((s, t) => s + Number(t.vagas_total || 0), 0),
       sem_instrutor: itens.filter((t) => !t.instrutores).length,
     },
   };

@@ -161,7 +161,7 @@ window.PaginaListaEspera = (function () {
       corpoHTML: `
         <div class="campo"><label>Turma</label>
           <select id="lem-turma">
-            ${turmas.map((t) => `<option value="${t.id}">${UI.escapar(t.nome)} — ${t.matriculados}/${t.vagas} vagas</option>`).join('')}
+            ${turmas.map((t) => `<option value="${t.id}">${UI.escapar(t.nome)} — ${t.vagas_ocupadas}/${t.vagas_total} vagas</option>`).join('')}
           </select>
           <span class="dica">Se a turma estiver lotada, a pessoa entra na fila de espera daquela turma.</span></div>`,
       aoConfirmar: async (el) => {

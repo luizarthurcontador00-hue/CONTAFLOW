@@ -104,7 +104,7 @@ window.PaginaTurmas = (function () {
         <tbody>
           ${turmas.map((t) => {
             const [rot, cor] = STATUS[t.status] || [t.status, 'muted'];
-            const lotada = t.matriculados >= t.vagas && t.vagas > 0;
+            const lotada = t.vagas_ocupadas >= t.vagas_total && t.vagas_total > 0;
             return `
             <tr>
               <td>
@@ -113,7 +113,7 @@ window.PaginaTurmas = (function () {
               </td>
               <td class="dica">${UI.escapar(resumoHorarios(t.horarios))}</td>
               <td>
-                <span class="badge ${lotada ? 'badge--alerta' : 'badge--ok'}">${t.matriculados}/${t.vagas}</span>
+                <span class="badge ${lotada ? 'badge--alerta' : 'badge--ok'}">${t.vagas_ocupadas}/${t.vagas_total}</span>
                 ${t.na_espera ? `<div class="dica">${t.na_espera} na espera</div>` : ''}
               </td>
               <td class="dica">${UI.escapar(t.instrumentos.map((i) => i.nome).join(', ') || '—')}</td>
@@ -155,9 +155,12 @@ window.PaginaTurmas = (function () {
         <div id="tu-progresso"></div>
         <div id="tu-historico"></div>
 
-        <div class="flex gap-12 mt-16" style="flex-wrap:wrap">
-          <span class="badge ${t.matriculados >= t.vagas ? 'badge--alerta' : 'badge--ok'}">${t.matriculados} de ${t.vagas} vagas</span>
+        <div class="flex gap-12 mt-16" style="flex-wrap:wrap;align-items:center">
+          <span class="badge ${t.vagas_ocupadas >= t.vagas_total ? 'badge--alerta' : 'badge--ok'}">${t.vagas_ocupadas} de ${t.vagas_total} vagas</span>
           ${t.na_espera ? `<span class="badge badge--alerta">${t.na_espera} na fila de espera</span>` : ''}
+          ${t.vagas_total > t.vagas
+            ? `<span class="dica">(${t.vagas} configurada${t.vagas === 1 ? '' : 's'} + ${t.vagas_total - t.vagas} aluno${t.vagas_total - t.vagas === 1 ? '' : 's'} com instrumento próprio, que não ocupa${t.vagas_total - t.vagas === 1 ? '' : 'm'} vaga do acervo)</span>`
+            : ''}
         </div>
 
         <h4 class="mt-16">Instrutores</h4>
@@ -466,8 +469,8 @@ window.PaginaTurmas = (function () {
           <span class="dica">A turma tem mais de um instrumento cadastrado — cada aluno usa um deles.</span></div>
         ` : ''}
         ${turma.instrumentos.length ? '<div id="ma-instrumento-info" class="dica mt-16"></div>' : ''}
-        ${turma.matriculados >= turma.vagas
-          ? '<p class="dica mt-16">⚠️ A turma está lotada. Quem for matriculado agora entra na <strong>fila de espera</strong> e assume assim que abrir vaga.</p>'
+        ${turma.vagas_ocupadas >= turma.vagas_total
+          ? '<p class="dica mt-16">⚠️ A turma está lotada. Quem for matriculado agora entra na <strong>fila de espera</strong> e assume assim que abrir vaga — a não ser que traga o próprio instrumento.</p>'
           : ''}`,
       aoAbrir: (el) => {
         const busca = el.querySelector('#ma-busca');

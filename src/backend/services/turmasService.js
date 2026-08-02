@@ -55,6 +55,7 @@ function listar({ curso_id, status, instrumento_id } = {}) {
   `).all(params);
 
   const db = getDb();
+  const buscarAtivas = db.prepare("SELECT aluno_id, instrumento_id FROM matriculas WHERE turma_id = ? AND status = 'ativa'");
   turmas.forEach((t) => {
     t.horarios = db.prepare('SELECT * FROM turmas_horarios WHERE turma_id = ? ORDER BY dia_semana, hora_inicio').all(t.id);
     t.instrutores = db.prepare(`
@@ -63,6 +64,9 @@ function listar({ curso_id, status, instrumento_id } = {}) {
       WHERE ti.turma_id = ? ORDER BY ti.papel, p.nome
     `).all(t.id);
     t.instrumentos = instrumentosDaTurma(db, t.id);
+    const v = contarVagas(buscarAtivas.all(t.id), t.vagas);
+    t.vagas_ocupadas = v.ocupadas;
+    t.vagas_total = v.total;
   });
   return turmas;
 }
@@ -92,8 +96,12 @@ function obter(id) {
     LEFT JOIN instrumentos i ON i.id = m.instrumento_id
     WHERE m.turma_id = ? ORDER BY (m.status != 'ativa'), a.nome
   `).all(id);
-  turma.matriculados = turma.matriculas.filter((m) => m.status === 'ativa').length;
+  const ativas = turma.matriculas.filter((m) => m.status === 'ativa');
+  turma.matriculados = ativas.length;
   turma.na_espera = turma.matriculas.filter((m) => m.status === 'espera').length;
+  const v = contarVagas(ativas, turma.vagas);
+  turma.vagas_ocupadas = v.ocupadas;
+  turma.vagas_total = v.total;
   return turma;
 }
 
@@ -195,6 +203,23 @@ function validar(dados, horarios) {
  * Impede abrir/editar turma pedindo mais instrumentos do que existem livres
  * naquele horario. Explica o limite com nomes, para dar para agir.
  */
+/**
+ * Vagas sao sobre o acervo: quem traz o proprio instrumento (ou ja esta com
+ * um exemplar emprestado do instituto) nao usa nada dele, entao nao ocupa
+ * vaga de verdade — so quem depende do acervo conta pro limite configurado.
+ * Por isso o total exibido cresce (vagas + quem furou) em vez da vaga
+ * configurada ser alterada: "1 de 9" mostra a realidade sem mentir sobre
+ * quantos cabem fisicamente nem mexer no numero que o instituto configurou.
+ *
+ * Recalculado sempre na hora (nunca gravado), porque a posse do instrumento
+ * pode mudar depois da matricula — um aluno que compra o proprio instrumento
+ * libera a vaga de acervo sem precisar de nenhuma acao manual.
+ */
+function contarVagas(matriculasAtivas, vagasBase) {
+  const furando = matriculasAtivas.filter((m) => m.instrumento_id && instrumentos.alunoJaTemInstrumento(m.aluno_id, m.instrumento_id)).length;
+  return { ocupadas: matriculasAtivas.length - furando, total: vagasBase + furando, furando };
+}
+
 /** Quantos matriculados ativos da turma trazem o proprio instrumento. */
 function comInstrumentoProprio(turmaId, instrumentoId) {
   if (!turmaId || !instrumentoId) return 0;
@@ -277,10 +302,12 @@ function atualizar(id, dados) {
   const d = validar({ ...atual, instrumentos_ids: instrumentosIdsAtuais, ...dados }, horarios);
   conferirAcervo(d, horarios, id);
 
-  // Reduzir vagas abaixo de quem ja esta matriculado deixaria aluno sem lugar.
-  const ativos = db.prepare("SELECT COUNT(*) c FROM matriculas WHERE turma_id = ? AND status = 'ativa'").get(id).c;
-  if (d.vagas < ativos) {
-    throw new AppError(`Esta turma já tem ${ativos} aluno(s) matriculado(s). Não dá para reduzir para ${d.vagas} vagas.`);
+  // Reduzir vagas abaixo de quem ja depende do acervo deixaria aluno sem
+  // instrumento — quem traz o proprio nao conta pra esse limite.
+  const ativas = atual.matriculas.filter((m) => m.status === 'ativa');
+  const ocupadas = contarVagas(ativas, atual.vagas).ocupadas;
+  if (d.vagas < ocupadas) {
+    throw new AppError(`Esta turma já tem ${ocupadas} aluno(s) matriculado(s) que dependem do acervo. Não dá para reduzir para ${d.vagas} vagas.`);
   }
 
   const salvar = db.transaction(() => {
@@ -394,12 +421,16 @@ function renovar(id, dados = {}) {
   if (fim && fim < inicio) throw new AppError('O fim do período não pode ser antes do início.');
 
   // Quem vai junto: por padrao, todo mundo que estava ativo.
-  const ativos = origem.matriculas.filter((m) => m.status === 'ativa').map((m) => m.aluno_id);
+  const ativosData = origem.matriculas.filter((m) => m.status === 'ativa');
+  const ativos = ativosData.map((m) => m.aluno_id);
   const levar = Array.isArray(dados.alunos) ? dados.alunos.map(Number).filter((a) => ativos.includes(a)) : ativos;
 
   const vagas = dados.vagas !== undefined && dados.vagas !== '' ? Number(dados.vagas) : origem.vagas;
-  if (levar.length > vagas) {
-    throw new AppError(`Você escolheu ${levar.length} aluno(s) para continuar, mas a turma nova tem ${vagas} vaga(s).`);
+  // Quem traz o proprio instrumento nao ocupa vaga de acervo na turma nova
+  // tambem — so quem depende dele entra na conta do limite.
+  const ocupadasNovas = contarVagas(ativosData.filter((m) => levar.includes(m.aluno_id)), vagas).ocupadas;
+  if (ocupadasNovas > vagas) {
+    throw new AppError(`Você escolheu ${levar.length} aluno(s) para continuar (${ocupadasNovas} deles dependem do acervo), mas a turma nova tem ${vagas} vaga(s).`);
   }
 
   // A ORDEM importa: a turma velha precisa fechar ANTES de a nova nascer.
@@ -539,15 +570,13 @@ function matricular(turmaId, { aluno_id, observacao, instrumento_id }) {
 
   // Quem traz o instrumento escolhido (proprio ou ja emprestado pelo
   // instituto) nao usa nada do acervo — entao a vaga que falta e so um
-  // numero na ficha, nao um limite de verdade. Em vez de mandar pra fila de
-  // espera por causa disso, deixa entrar e atualiza a quantidade de vagas
-  // da turma pra refletir o que aconteceu (assim "5/5" nao mente sobre quem
-  // cabe fisicamente na sala).
-  const cheia = turma.matriculados >= turma.vagas;
-  const furaVaga = cheia && !!inst && jaTemInstrumento;
-
-  const status = (cheia && !furaVaga) ? 'espera' : 'ativa';
-  if (furaVaga) db.prepare('UPDATE turmas SET vagas = vagas + 1 WHERE id = ?').run(turmaId);
+  // numero na ficha, nao um limite de verdade, e nunca vai pra fila de
+  // espera por causa dela. Quem depende do acervo so entra em espera se as
+  // vagas OCUPADAS DE VERDADE (excluindo quem furou) ja baterem no limite.
+  const naoUsaAcervo = !!inst && jaTemInstrumento;
+  const ativas = turma.matriculas.filter((m) => m.status === 'ativa');
+  const cheia = !naoUsaAcervo && contarVagas(ativas, turma.vagas).ocupadas >= turma.vagas;
+  const status = cheia ? 'espera' : 'ativa';
 
   const info = db.prepare(
     'INSERT INTO matriculas (turma_id, aluno_id, status, observacao, instrumento_id) VALUES (?, ?, ?, ?, ?)'
@@ -586,8 +615,11 @@ function mudarStatusMatricula(matriculaId, status, observacao) {
 /** Puxa o primeiro da fila de espera para uma vaga que abriu. */
 function chamarPrimeiroDaEspera(db, turmaId) {
   const turma = db.prepare('SELECT vagas FROM turmas WHERE id = ?').get(turmaId);
-  const ativos = db.prepare("SELECT COUNT(*) c FROM matriculas WHERE turma_id = ? AND status = 'ativa'").get(turmaId).c;
-  if (ativos >= turma.vagas) return null;
+  // Quem esta na espera sempre depende do acervo (quem traz o proprio
+  // instrumento nunca entra em espera, ja fura a vaga na hora da matricula)
+  // — entao so as vagas ocupadas de verdade (excluindo quem furou) importam aqui.
+  const ativas = db.prepare("SELECT aluno_id, instrumento_id FROM matriculas WHERE turma_id = ? AND status = 'ativa'").all(turmaId);
+  if (contarVagas(ativas, turma.vagas).ocupadas >= turma.vagas) return null;
 
   const proximo = db.prepare(`
     SELECT m.*, c.nome AS aluno_nome FROM matriculas m JOIN clientes c ON c.id = m.aluno_id
@@ -993,6 +1025,6 @@ module.exports = {
   gerarEncontros, gerarEncontrosPendentes, limparEncontrosForaDoHorario,
   sugerirSubstitutos, definirInstrutorDoEncontro,
   comInstrumentoProprio, progressoTurma, suspenderEncontro, suspenderPeriodo, encontrosDoInstrutor,
-  escalaDoDia,
+  escalaDoDia, contarVagas,
   STATUS_TURMA, STATUS_MATRICULA, DIAS,
 };
