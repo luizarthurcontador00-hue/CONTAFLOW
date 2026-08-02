@@ -48,6 +48,7 @@ window.PaginaTurmas = (function () {
           </div>
         </div>
         <div class="cresce"></div>
+        <button class="btn btn--secundario" id="tu-imprimir">🖨️ Imprimir turmas</button>
         <button class="btn" id="tu-nova">+ Nova turma</button>
       </div>
       <div class="card"><div id="tu-lista">Carregando…</div></div>`;
@@ -70,6 +71,7 @@ window.PaginaTurmas = (function () {
       if (!cursos.length) { UI.erro('Cadastre ao menos um curso antes de criar turmas.'); return; }
       formulario(null);
     });
+    container.querySelector('#tu-imprimir').addEventListener('click', () => Documentos.relatorioDeTurmas(filtro));
 
     listar();
   }

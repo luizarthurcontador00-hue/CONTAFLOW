@@ -606,6 +606,85 @@ window.Documentos = (function () {
     catch (e) { UI.erro(e.message); }
   }
 
+  // ========================= Relatório de todas as turmas =========================
+
+  const ROTULO_STATUS_TURMA = { planejada: 'Planejada', aberta: 'Aberta', encerrada: 'Encerrada', cancelada: 'Cancelada' };
+
+  /** Uma página por turma: curso, período, instrutores, progresso, vagas e a lista de alunos matriculados. */
+  function corpoRelatorioTurma(t, progresso) {
+    const instrutores = t.instrutores.length
+      ? t.instrutores.map((i) => `${esc(i.nome)} (${esc(i.papel)})`).join(', ')
+      : 'Nenhum instrutor escalado.';
+    const horarios = t.horarios.length
+      ? t.horarios.map((h) => `${DIAS_SEMANA_ABREV[h.dia_semana]} ${esc(h.hora_inicio)}–${esc(h.hora_fim)}`).join(' · ')
+      : '—';
+    const ativos = t.matriculas.filter((m) => m.status === 'ativa');
+
+    return `
+      <h2 style="margin-top:0">${esc(t.curso_nome)}</h2>
+      <h3 style="margin-top:0">${esc(t.nome)} <span class="dica">${ROTULO_STATUS_TURMA[t.status] || t.status}</span></h3>
+      <p class="dica" style="margin-top:0">${horarios}${t.sala ? ' · Sala ' + esc(t.sala) : ''}
+        · Período: ${dataBR(t.periodo_inicio)}${t.periodo_fim ? ' até ' + dataBR(t.periodo_fim) : ''}</p>
+      <p><strong>Instrutores:</strong> ${instrutores}</p>
+      <p><strong>Progresso do curso:</strong> ${progresso.percentual != null
+        ? `${progresso.percentual}% (${progresso.horas_dadas}h de ${progresso.carga_horaria}h)`
+        : 'sem carga horária cadastrada no curso'}</p>
+      <p><strong>Vagas:</strong> ${t.vagas_ocupadas} de ${t.vagas_total}${t.na_espera ? ` · ${t.na_espera} na fila de espera` : ''}</p>
+      <h4>Alunos matriculados</h4>
+      <table>
+        <thead><tr><th>Aluno</th><th>Situação</th><th>Responsável</th></tr></thead>
+        <tbody>${ativos.length ? ativos.map((m) => `<tr>
+          <td>${esc(m.aluno_nome)}</td>
+          <td>${esc(ROTULO_MATRICULA[m.status] || m.status)}</td>
+          <td>${esc(m.responsavel_nome || '—')}</td>
+        </tr>`).join('') : '<tr><td colspan="3" class="dica">Nenhum aluno matriculado.</td></tr>'}</tbody>
+      </table>`;
+  }
+
+  /**
+   * Relatório com todas as turmas (respeitando o filtro da tela), uma página
+   * por turma, agrupado por curso — assim saem juntas todas as folhas de
+   * bateria, depois todas de violão, e assim por diante.
+   */
+  async function relatorioDeTurmas({ curso_id, status } = {}) {
+    const params = new URLSearchParams();
+    if (curso_id) params.set('curso_id', curso_id);
+    const statusList = Array.isArray(status) ? status : (status ? [status] : []);
+    if (statusList.length) params.set('status', statusList.join(','));
+
+    let resumos; let ctx;
+    try {
+      [resumos, ctx] = await Promise.all([
+        API.get('/api/turmas?' + params.toString()),
+        contexto(),
+      ]);
+    } catch (e) { UI.erro(e.message); return; }
+    if (!resumos.length) { UI.erro('Não há turma para gerar o relatório.'); return; }
+
+    let detalhes;
+    try {
+      detalhes = await Promise.all(resumos.map(async (r) => {
+        const [t, prog] = await Promise.all([
+          API.get(`/api/turmas/${r.id}`),
+          API.get(`/api/turmas/${r.id}/progresso`),
+        ]);
+        return { t, prog };
+      }));
+    } catch (e) { UI.erro(e.message); return; }
+
+    detalhes.sort((a, b) => a.t.curso_nome.localeCompare(b.t.curso_nome, 'pt-BR') || a.t.nome.localeCompare(b.t.nome, 'pt-BR'));
+
+    const corpo = `${cabecalho(ctx.cfg, 'Relatório de turmas', `${detalhes.length} turma(s)`)}`
+      + detalhes.map((d, i) => `${i > 0 ? '<div class="quebra-pagina"></div>' : ''}${corpoRelatorioTurma(d.t, d.prog)}`).join('')
+      + `<div class="rodape">emitido em ${dataBR(new Date().toISOString().slice(0, 10))}</div>`;
+    try {
+      await UI.baixarPDF(
+        pagina('Relatório de turmas', ctx.cfg, corpo, '.quebra-pagina { page-break-before: always; }'),
+        nomeArquivo('relatorio-turmas', new Date().toISOString().slice(0, 10))
+      );
+    } catch (e) { UI.erro(e.message); }
+  }
+
   // ============================= Declarações =============================
 
   const ESTILO_DECLARACAO = `
@@ -739,7 +818,7 @@ window.Documentos = (function () {
 
   return {
     fichaDoAluno, fichasDoAlunoLote, folhaDeChamada, folhasDeChamadaLote,
-    calendarioInstrutor, calendariosInstrutoresLote, escalaDoDia, escalaDoMes,
+    calendarioInstrutor, calendariosInstrutoresLote, escalaDoDia, escalaDoMes, relatorioDeTurmas,
     declaracaoMatricula, declaracoesMatriculaLote, declaracaoVoluntariado, termoVoluntariado,
     certificado, certificadosLote,
     porExtenso, dataBR,
