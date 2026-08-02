@@ -23,22 +23,30 @@ window.PaginaTurmas = (function () {
   let cursos = [];
   let instrumentos = [];
   let equipe = [];
-  let filtro = { curso_id: '', status: '' };
+  // Por regra, ao abrir o modulo so mostra turma em andamento ou planejada —
+  // encerrada/cancelada so aparece quando o usuario pede explicitamente
+  // marcando a caixinha (senao a lista some do dia a dia).
+  const STATUS_PADRAO = ['aberta', 'planejada'];
+  let filtro = { curso_id: '', status: STATUS_PADRAO.slice() };
 
   async function render(container) {
     // O filtro nao pode sobreviver de uma visita a outra: sem isso, o select
     // reaparece em "Todos" mas a lista continua filtrada pelo valor antigo
     // (guardado num objeto de escopo do modulo) — parece a tela "travada",
     // trazendo menos turma do que deveria.
-    filtro = { curso_id: '', status: '' };
+    filtro = { curso_id: '', status: STATUS_PADRAO.slice() };
     container.innerHTML = `
       <div class="barra-ferramentas">
         <div class="campo"><label>Curso</label><select id="tu-curso"><option value="">Todos</option></select></div>
         <div class="campo"><label>Situação</label>
-          <select id="tu-status">
-            <option value="">Todas</option>
-            ${Object.entries(STATUS).map(([v, [t]]) => `<option value="${v}">${t}</option>`).join('')}
-          </select></div>
+          <div class="flex gap-12" style="align-items:center;height:38px">
+            ${Object.entries(STATUS).map(([v, [t]]) => `
+              <label class="flex gap-12" style="align-items:center;gap:4px;cursor:pointer;white-space:nowrap">
+                <input type="checkbox" data-status-check value="${v}" ${filtro.status.includes(v) ? 'checked' : ''} />
+                <span class="dica">${t}</span>
+              </label>`).join('')}
+          </div>
+        </div>
         <div class="cresce"></div>
         <button class="btn" id="tu-nova">+ Nova turma</button>
       </div>
@@ -54,7 +62,10 @@ window.PaginaTurmas = (function () {
     cursos.forEach((c) => selCurso.insertAdjacentHTML('beforeend', `<option value="${c.id}">${UI.escapar(c.nome)}</option>`));
 
     selCurso.addEventListener('change', (e) => { filtro.curso_id = e.target.value; listar(); });
-    container.querySelector('#tu-status').addEventListener('change', (e) => { filtro.status = e.target.value; listar(); });
+    container.querySelectorAll('[data-status-check]').forEach((cb) => cb.addEventListener('change', () => {
+      filtro.status = Array.from(container.querySelectorAll('[data-status-check]:checked')).map((c) => c.value);
+      listar();
+    }));
     container.querySelector('#tu-nova').addEventListener('click', () => {
       if (!cursos.length) { UI.erro('Cadastre ao menos um curso antes de criar turmas.'); return; }
       formulario(null);
@@ -75,7 +86,7 @@ window.PaginaTurmas = (function () {
     try {
       const q = new URLSearchParams();
       if (filtro.curso_id) q.set('curso_id', filtro.curso_id);
-      if (filtro.status) q.set('status', filtro.status);
+      if (filtro.status.length) q.set('status', filtro.status.join(','));
       turmas = await API.get('/api/turmas?' + q.toString());
     } catch (e) { alvo.innerHTML = `<p class="dica">${UI.escapar(e.message)}</p>`; return; }
 

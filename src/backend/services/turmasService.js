@@ -30,8 +30,18 @@ function instrumentosDaTurma(db, turmaId) {
 
 function listar({ curso_id, status, instrumento_id } = {}) {
   const where = [];
+  const params = { curso_id, instrumento_id };
+
   if (curso_id) where.push('t.curso_id = @curso_id');
-  if (status) where.push('t.status = @status');
+  // "status" aceita uma lista (separada por virgula, ou ja um array) pra dar
+  // pra marcar mais de uma situacao no filtro ao mesmo tempo.
+  const statusList = Array.isArray(status)
+    ? status.filter(Boolean)
+    : String(status || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (statusList.length) {
+    where.push(`t.status IN (${statusList.map((_, i) => `@status${i}`).join(',')})`);
+    statusList.forEach((s, i) => { params[`status${i}`] = s; });
+  }
   if (instrumento_id) where.push('EXISTS (SELECT 1 FROM turmas_instrumentos ti WHERE ti.turma_id = t.id AND ti.instrumento_id = @instrumento_id)');
 
   const turmas = getDb().prepare(`
@@ -42,7 +52,7 @@ function listar({ curso_id, status, instrumento_id } = {}) {
     JOIN cursos c ON c.id = t.curso_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY t.status, c.nome, t.nome
-  `).all({ curso_id, status, instrumento_id });
+  `).all(params);
 
   const db = getDb();
   turmas.forEach((t) => {
