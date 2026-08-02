@@ -116,7 +116,7 @@ window.PaginaAgenda = (function () {
           ${profissionais.map((p) => `<option value="${p.id}" ${String(filtroProf) === String(p.id) ? 'selected' : ''}>${UI.escapar(p.nome)}</option>`).join('')}
         </select>
         <div class="cresce"></div>
-        ${ehInstituto() ? '' : '<button class="btn btn--secundario" id="ag-equipe">👥 Equipe</button>'}
+        ${ehInstituto() ? '<button class="btn btn--secundario" id="ag-imprimir">🖨️ Imprimir escala do dia</button>' : '<button class="btn btn--secundario" id="ag-equipe">👥 Equipe</button>'}
         <button class="btn" id="ag-novo">+ Nov${rAula() === 'aula' ? 'a' : 'o'} ${rAula()}</button>
       </div>
       <div id="ag-resumo"></div>
@@ -129,6 +129,8 @@ window.PaginaAgenda = (function () {
     alvo.querySelector('#ag-prof-filtro').addEventListener('change', (e) => { filtroProf = e.target.value; listar(); });
     const btnEquipe = alvo.querySelector('#ag-equipe');
     if (btnEquipe) btnEquipe.addEventListener('click', gerenciarEquipe);
+    const btnImprimir = alvo.querySelector('#ag-imprimir');
+    if (btnImprimir) btnImprimir.addEventListener('click', () => Documentos.escalaDoDia(dia));
     alvo.querySelector('#ag-novo').addEventListener('click', () => abrirForm());
 
     await listar();
@@ -171,7 +173,7 @@ window.PaginaAgenda = (function () {
             <strong>${UI.escapar(nome)}</strong> ${badgeStatus(a)}${a.venda_id && !ehInstituto() ? ' <span class="badge badge--ok">faturado</span>' : ''}${a.aula_recorrente_id ? ` <span class="badge badge--muted" title="Gerado automaticamente de uma ${rAula()} fixa">🔁 fixa</span>` : ''}
             <div class="dica">${a.suspensa ? `Suspensa${a.motivo_suspensao ? ' — ' + UI.escapar(a.motivo_suspensao) : ''}` : `${UI.escapar(a.servico_nome || rServico(true))}${a.profissional_nome ? ' · ' + UI.escapar(a.profissional_nome) : ''}${tel ? ' · ' + UI.escapar(tel) : ''}`}</div>
           </div>
-          <div class="agenda-item__valor">${a.suspensa ? '' : UI.moeda(a.valor)}</div>
+          <div class="agenda-item__valor">${a.suspensa || ehInstituto() ? '' : UI.moeda(a.valor)}</div>
           <div class="agenda-item__acoes">
             ${tel ? `<button class="btn btn--secundario" data-zap="${a.id}" title="Enviar confirmação por WhatsApp">💬</button>` : ''}
             <button class="btn btn--secundario" data-editar="${a.id}">Abrir</button>
@@ -481,7 +483,9 @@ window.PaginaAgenda = (function () {
         </table>
         ${a.suspensa
           ? '<p class="dica mt-16">Este dia está suspenso — para reabrir, use a tela de Chamada.</p>'
-          : `<div class="campo mt-16"><label>Mudar status</label>
+          : ehInstituto()
+            ? '<p class="dica mt-16">Para suspender esta aula, use a tela de Chamada.</p>'
+            : `<div class="campo mt-16"><label>Mudar status</label>
               <select id="det-status" ${a.venda_id ? 'disabled' : ''}>
                 ${Object.keys(STATUS).map((s) => `<option value="${s}" ${a.status === s ? 'selected' : ''}>${STATUS[s][0]}</option>`).join('')}
               </select></div>`}`,
@@ -489,7 +493,7 @@ window.PaginaAgenda = (function () {
         const foot = el.querySelector('.modal__foot');
         foot.innerHTML = `
           <div class="flex gap-12" style="flex-wrap:wrap;width:100%">
-            ${!a.suspensa ? `<button class="btn btn--secundario" id="d-status" ${a.venda_id ? 'disabled' : ''}>Atualizar status</button>` : ''}
+            ${!a.suspensa && !ehInstituto() ? `<button class="btn btn--secundario" id="d-status" ${a.venda_id ? 'disabled' : ''}>Atualizar status</button>` : ''}
             ${tel ? '<button class="btn btn--secundario" id="d-zap">💬 WhatsApp</button>' : ''}
             <div class="cresce"></div>
             ${!a.venda_id ? '<button class="btn btn--secundario" id="d-editar">Editar</button>' : ''}

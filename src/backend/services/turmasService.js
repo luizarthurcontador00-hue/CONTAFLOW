@@ -301,6 +301,16 @@ function atualizar(id, dados) {
   // orfaos no calendario (trocar terça por quarta deixaria os dois).
   if (dados.horarios) limparEncontrosForaDoHorario(id);
   if (d.status === 'aberta' || d.status === 'planejada') gerarEncontros(id);
+  if ((d.status === 'encerrada' || d.status === 'cancelada') && atual.status !== d.status) {
+    // A edição genérica também permite encerrar/cancelar (sem passar pelo
+    // fluxo dedicado de encerrar()) — os encontros futuros sem chamada
+    // registrada precisam sumir da agenda, senão a turma continua
+    // aparecendo como se tivesse aula.
+    db.prepare(`
+      DELETE FROM agendamentos WHERE turma_id = ? AND date(data) > date('now','localtime')
+        AND NOT EXISTS (SELECT 1 FROM presencas p WHERE p.agendamento_id = agendamentos.id)
+    `).run(id);
+  }
   return obter(id);
 }
 
@@ -948,6 +958,34 @@ function encontrosDoInstrutor(profissionalId, { de, ate } = {}) {
   return encontros;
 }
 
+function escalaDoDia(data) {
+  const db = getDb();
+  const encontros = db.prepare(`
+    SELECT a.id, a.data, a.hora_inicio, a.hora_fim, a.suspensa, a.motivo_suspensao, a.turma_id,
+      t.nome AS turma_nome, t.sala, c.nome AS curso_nome,
+      p.nome AS profissional_nome
+    FROM agendamentos a
+    JOIN turmas t ON t.id = a.turma_id
+    JOIN cursos c ON c.id = t.curso_id
+    LEFT JOIN profissionais p ON p.id = a.profissional_id
+    WHERE a.turma_id IS NOT NULL AND a.data = @data
+    ORDER BY a.hora_inicio, t.nome
+  `).all({ data });
+
+  const alunosPorTurma = new Map();
+  const buscarAlunos = db.prepare(`
+    SELECT cl.nome FROM matriculas m JOIN clientes cl ON cl.id = m.aluno_id
+    WHERE m.turma_id = ? AND m.status = 'ativa' ORDER BY cl.nome
+  `);
+  encontros.forEach((e) => {
+    if (!alunosPorTurma.has(e.turma_id)) {
+      alunosPorTurma.set(e.turma_id, buscarAlunos.all(e.turma_id).map((r) => r.nome));
+    }
+    e.alunos = alunosPorTurma.get(e.turma_id);
+  });
+  return encontros;
+}
+
 module.exports = {
   listar, obter, criar, atualizar, excluir,
   encerrar, renovar, historicoDaTurma,
@@ -955,5 +993,6 @@ module.exports = {
   gerarEncontros, gerarEncontrosPendentes, limparEncontrosForaDoHorario,
   sugerirSubstitutos, definirInstrutorDoEncontro,
   comInstrumentoProprio, progressoTurma, suspenderEncontro, suspenderPeriodo, encontrosDoInstrutor,
+  escalaDoDia,
   STATUS_TURMA, STATUS_MATRICULA, DIAS,
 };
