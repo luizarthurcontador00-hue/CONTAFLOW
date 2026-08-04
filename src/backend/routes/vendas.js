@@ -11,6 +11,11 @@ router.get('/buscar-produto', asyncHandler((req, res) => {
   res.json(vendas.buscarProduto(req.query.termo));
 }));
 
+// Corrige o custo de vendas antigas cujo produto não tinha custo cadastrado na hora
+router.post('/sincronizar-custos', asyncHandler((req, res) => {
+  res.json(vendas.sincronizarCustoVendas());
+}));
+
 router.get('/', asyncHandler((req, res) => {
   res.json(vendas.listarVendas({
     inicio: req.query.inicio,

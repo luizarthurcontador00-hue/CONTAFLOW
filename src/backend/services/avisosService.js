@@ -295,6 +295,48 @@ function contasVencidas(db) {
   }];
 }
 
+/** Contas a receber vencidas (fiado, venda a prazo) — vale para instituto e para loja. */
+function contasReceberVencidas(db) {
+  const linhas = db.prepare(`
+    SELECT descricao, vencimento, valor FROM contas_receber
+    WHERE status = 'pendente' AND vencimento IS NOT NULL AND vencimento < date('now','localtime')
+    ORDER BY vencimento LIMIT 20
+  `).all();
+  if (!linhas.length) return [];
+  return [{
+    tipo: 'conta_receber_vencida',
+    gravidade: 'alerta',
+    icone: '🧾',
+    titulo: `${linhas.length} conta(s) a receber vencida(s)`,
+    detalhe: linhas.slice(0, 4).map((l) => `${l.descricao} — venceu em ${l.vencimento}`),
+    quantidade: linhas.length,
+    rota: '#/financeiro',
+  }];
+}
+
+/**
+ * Produto ativo sem custo cadastrado — vender assim distorce a margem e o
+ * CMV do DRE sem ninguem perceber na hora.
+ */
+function produtosSemCusto(db) {
+  const linhas = db.prepare(`
+    SELECT nome FROM produtos
+    WHERE ativo = 1 AND eh_kit = 0 AND (custo IS NULL OR custo <= 0)
+    ORDER BY nome COLLATE NOCASE LIMIT 50
+  `).all();
+  if (!linhas.length) return [];
+  return [{
+    tipo: 'produto_sem_custo',
+    gravidade: 'alerta',
+    icone: '💲',
+    titulo: `${linhas.length} produto(s) sem custo cadastrado`,
+    detalhe: linhas.slice(0, 4).map((l) => l.nome),
+    quantidade: linhas.length,
+    rota: '#/produtos',
+    ajuda: 'Vender sem custo cadastrado distorce a margem e o CMV do DRE.',
+  }];
+}
+
 /** Contribuição mensal de mantenedor que venceu e ainda não caiu — diferente de contas_pagar, é dinheiro que devia ter entrado. */
 function contribuicoesAtrasadas(db) {
   const linhas = db.prepare(`
@@ -333,7 +375,9 @@ function listar() {
 
   let avisos = [
     ...coletar('lembretes', () => lembretesVencidos()),
-    ...coletar('contas vencidas', () => contasVencidas(db)),
+    ...coletar('contas a pagar vencidas', () => contasVencidas(db)),
+    ...coletar('contas a receber vencidas', () => contasReceberVencidas(db)),
+    ...coletar('produtos sem custo', () => produtosSemCusto(db)),
   ];
 
   if (ehInstituto) {

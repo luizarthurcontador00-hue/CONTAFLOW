@@ -266,6 +266,12 @@ window.PaginaPDV = (function () {
     const existente = carrinho.find((i) => i.produto.id === produto.id);
     if (existente) existente.quantidade = arred(existente.quantidade + 1);
     else carrinho.push({ produto, quantidade: 1, preco: Number(produto.preco_venda) });
+    // Vender sem custo cadastrado nao trava a venda (pode ser proposital, tipo
+    // brinde), mas o CMV do DRE fica errado sem o usuario saber — melhor
+    // avisar na hora do que descobrir so no relatorio do mes.
+    if (!existente && (!produto.custo || Number(produto.custo) <= 0)) {
+      UI.alerta(`"${produto.nome}" está sem custo cadastrado — a margem e o CMV desta venda vão sair errados.`);
+    }
     limparBusca();
     renderCarrinho();
   }

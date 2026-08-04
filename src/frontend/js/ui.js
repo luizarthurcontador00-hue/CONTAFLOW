@@ -17,6 +17,7 @@ const UI = (function () {
 
   function sucesso(m) { toast(m, 'sucesso'); }
   function erro(m) { toast(m, 'erro'); }
+  function alerta(m) { toast(m, 'alerta'); }
 
   /**
    * Confirmacao para acoes destrutivas. Retorna Promise<boolean>.
@@ -153,5 +154,5 @@ const UI = (function () {
     }
   }
 
-  return { toast, sucesso, erro, confirmar, moeda, numero, dataHora, escapar, imprimir, baixarPDF, mascararDocumento, ligarMascaraDocumento };
+  return { toast, sucesso, erro, alerta, confirmar, moeda, numero, dataHora, escapar, imprimir, baixarPDF, mascararDocumento, ligarMascaraDocumento };
 })();

@@ -234,6 +234,7 @@ table.tabela th { color: var(--texto-suave); font-weight: 600; font-size: 12.5px
 .toast.sucesso { background: var(--sucesso); }
 .toast.erro { background: var(--perigo); }
 .toast.info { background: #334155; }
+.toast.alerta { background: var(--alerta); }
 
 /* ===================== Formularios ===================== */
 .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }

@@ -22,6 +22,7 @@ window.PaginaRelatorios = (function () {
       : [
         ...(temProdutos ? [['estoque', 'Estoque atual']] : []),
         ['vendas', 'Vendas detalhado'],
+        ...(temProdutos ? [['vendas-custo', 'Vendas × Custo (conferência DRE)']] : []),
         ['financeiro', 'Financeiro'],
         ...(temProdutos ? [['parados', 'Produtos parados']] : []),
         ...(temCRM ? [['crm', 'Funil do CRM'], ['viagens', 'Viagens']] : []),
@@ -106,6 +107,7 @@ window.PaginaRelatorios = (function () {
 
     if (relatorio === 'estoque') alvo.innerHTML = tabelaEstoque(dados);
     else if (relatorio === 'vendas') alvo.innerHTML = tabelaVendas(dados);
+    else if (relatorio === 'vendas-custo') alvo.innerHTML = tabelaVendasComCusto(dados);
     else if (relatorio === 'parados') alvo.innerHTML = tabelaParados(dados);
     else if (relatorio === 'crm') alvo.innerHTML = tabelaCRM(dados);
     else if (relatorio === 'viagens') alvo.innerHTML = tabelaViagens(dados);
@@ -194,6 +196,24 @@ window.PaginaRelatorios = (function () {
         <td>${v.id}</td><td>${UI.dataHora(v.data)}</td><td>${v.itens}</td><td>${UI.escapar(v.formas || '')}</td>
         <td>${UI.moeda(v.valor_total)}</td><td>${v.status}</td>
       </tr>`).join('')}</tbody></table></div>`;
+  }
+
+  function tabelaVendasComCusto(d) {
+    return `
+      <div class="flex gap-12 mb-16" style="flex-wrap:wrap">
+        ${mini('Itens vendidos', d.totais.itens)} ${mini('Valor total', UI.moeda(d.totais.valor_total))}
+        ${mini('Custo total', UI.moeda(d.totais.custo_total))} ${mini('Margem', UI.moeda(d.totais.margem))}
+      </div>
+      <p class="dica">Item a item, pra bater com o CMV/CSP do DRE do mesmo período: mesmas vendas concluídas, mesma janela de datas.</p>
+      <div id="print-area"><h2 class="print-titulo">Vendas × Custo</h2>
+      <table class="tabela"><thead><tr><th>Venda</th><th>Data</th><th>Produto/Serviço</th><th>Tipo</th><th>Qtd</th><th>Valor</th><th>Custo</th></tr></thead>
+      <tbody>${d.itens.length ? d.itens.map((i) => `<tr>
+        <td>${i.venda_id}</td><td>${UI.dataHora(i.data)}</td><td>${UI.escapar(i.produto_nome)}</td><td>${UI.escapar(i.tipo)}</td>
+        <td>${UI.numero(i.quantidade)}</td><td>${UI.moeda(i.valor_total)}</td>
+        <td${!i.custo_total ? ' style="color:var(--perigo)"' : ''}>${UI.moeda(i.custo_total)}</td>
+      </tr>`).join('') : '<tr><td colspan="7" class="muted">Nenhuma venda concluída nesse período.</td></tr>'}</tbody>
+      <tfoot><tr style="font-weight:bold"><td colspan="5" style="text-align:right">Total</td><td>${UI.moeda(d.totais.valor_total)}</td><td>${UI.moeda(d.totais.custo_total)}</td></tr></tfoot>
+      </table></div>`;
   }
 
   function tabelaFinanceiro(d) {

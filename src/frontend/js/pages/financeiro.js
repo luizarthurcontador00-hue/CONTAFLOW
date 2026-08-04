@@ -944,30 +944,82 @@ window.PaginaFinanceiro = (function () {
   }
 
   // ------------------------------- DRE -------------------------------
-  const dreFiltro = { mes: mesCorrente() };
+  // Por padrao a DRE olha o ano inteiro (visao mais usada pra fechar o ano
+  // com o contador) — mes e periodo personalizado ficam disponiveis pra
+  // quem quer o detalhe de um periodo menor.
+  function anoCorrente() { return new Date().getFullYear(); }
+  function periodoAno(ano) { return { inicio: `${ano}-01-01`, fim: `${ano}-12-31` }; }
+  const dreFiltro = {
+    tipo: 'ano',
+    mes: mesCorrente(),
+    ano: anoCorrente(),
+    de: mesCorrente() + '-01',
+    ate: new Date().toISOString().slice(0, 10),
+  };
+
+  function periodoDRE() {
+    if (dreFiltro.tipo === 'mes') return { ...periodoMes(dreFiltro.mes), label: mesLabel(dreFiltro.mes) };
+    if (dreFiltro.tipo === 'personalizado') return { inicio: dreFiltro.de, fim: dreFiltro.ate, label: `${UI.dataHora(dreFiltro.de)} até ${UI.dataHora(dreFiltro.ate)}` };
+    return { ...periodoAno(dreFiltro.ano), label: `Ano de ${dreFiltro.ano}` };
+  }
 
   async function renderDRE() {
     const alvo = alvoConteudo();
     alvo.innerHTML = `
       <div class="barra-ferramentas">
-        <div class="flex gap-12" style="align-items:center">
+        <div class="campo"><label class="dica">Período</label>
+          <select id="dre-tipo">
+            <option value="ano" ${dreFiltro.tipo === 'ano' ? 'selected' : ''}>Ano</option>
+            <option value="mes" ${dreFiltro.tipo === 'mes' ? 'selected' : ''}>Mês</option>
+            <option value="personalizado" ${dreFiltro.tipo === 'personalizado' ? 'selected' : ''}>Personalizado</option>
+          </select></div>
+        <div id="dre-nav-mes" class="flex gap-12" style="align-items:center;display:${dreFiltro.tipo === 'mes' ? 'flex' : 'none'}">
           <button class="btn btn--secundario" id="dre-ant">◀</button>
           <strong style="min-width:150px;text-align:center">${mesLabel(dreFiltro.mes)}</strong>
           <button class="btn btn--secundario" id="dre-prox">▶</button>
         </div>
+        <div id="dre-nav-ano" class="flex gap-12" style="align-items:center;display:${dreFiltro.tipo === 'ano' ? 'flex' : 'none'}">
+          <button class="btn btn--secundario" id="dre-ano-ant">◀</button>
+          <strong style="min-width:90px;text-align:center">${dreFiltro.ano}</strong>
+          <button class="btn btn--secundario" id="dre-ano-prox">▶</button>
+        </div>
+        <div id="dre-nav-personalizado" class="flex gap-12" style="align-items:end;display:${dreFiltro.tipo === 'personalizado' ? 'flex' : 'none'}">
+          <div class="campo"><label class="dica">De</label><input type="date" id="dre-de" value="${dreFiltro.de}" /></div>
+          <div class="campo"><label class="dica">Até</label><input type="date" id="dre-ate" value="${dreFiltro.ate}" /></div>
+        </div>
         <div class="cresce"></div>
+        <button class="btn btn--secundario" id="dre-sincronizar" title="Corrige o custo de vendas antigas cujo produto não tinha custo cadastrado na hora">🔄 Atualizar custos</button>
         <button class="btn btn--secundario" id="dre-categorias">🏷️ Categorias de despesa</button>
       </div>
       <div id="dre-resultado">Carregando…</div>`;
+    alvo.querySelector('#dre-tipo').addEventListener('change', (e) => { dreFiltro.tipo = e.target.value; renderDRE(); });
     alvo.querySelector('#dre-ant').addEventListener('click', () => { dreFiltro.mes = mudarMes(dreFiltro.mes, -1); renderDRE(); });
     alvo.querySelector('#dre-prox').addEventListener('click', () => { dreFiltro.mes = mudarMes(dreFiltro.mes, 1); renderDRE(); });
+    alvo.querySelector('#dre-ano-ant').addEventListener('click', () => { dreFiltro.ano -= 1; renderDRE(); });
+    alvo.querySelector('#dre-ano-prox').addEventListener('click', () => { dreFiltro.ano += 1; renderDRE(); });
+    const de = alvo.querySelector('#dre-de');
+    const ate = alvo.querySelector('#dre-ate');
+    if (de) de.addEventListener('change', () => { dreFiltro.de = de.value; carregarDRE(); });
+    if (ate) ate.addEventListener('change', () => { dreFiltro.ate = ate.value; carregarDRE(); });
     alvo.querySelector('#dre-categorias').addEventListener('click', gerenciarCategorias);
+    alvo.querySelector('#dre-sincronizar').addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      btn.disabled = true;
+      try {
+        const r = await API.post('/api/vendas/sincronizar-custos', {});
+        UI.sucesso(r.itens_atualizados > 0
+          ? `${r.itens_atualizados} item(ns) de venda atualizado(s) com o custo atual do produto.`
+          : 'Nenhum item precisava de atualização.');
+        await carregarDRE();
+      } catch (e) { UI.erro(e.message); }
+      finally { btn.disabled = false; }
+    });
     await carregarDRE();
   }
 
   async function carregarDRE() {
     const alvo = document.getElementById('dre-resultado');
-    const { inicio, fim } = periodoMes(dreFiltro.mes);
+    const { inicio, fim, label } = periodoDRE();
     let d;
     try { d = await API.get(`/api/financeiro/dre?inicio=${inicio}&fim=${fim}`); }
     catch (e) { alvo.innerHTML = UI.escapar(e.message); return; }
@@ -994,10 +1046,10 @@ window.PaginaFinanceiro = (function () {
       <div class="grid grid--cards mb-16">
         <div class="card stat"><span class="stat__label">Receita de vendas</span><span class="stat__value" style="color:var(--sucesso)">${UI.moeda(d.receita_bruta)}</span></div>
         <div class="card stat"><span class="stat__label">Lucro bruto <span class="dica">(margem ${d.margem_bruta_pct}%)</span></span><span class="stat__value">${UI.moeda(d.lucro_bruto)}</span></div>
-        <div class="card stat"><span class="stat__label">Resultado do mês</span><span class="stat__value" style="color:${d.resultado_liquido >= 0 ? 'var(--sucesso)' : 'var(--perigo)'}">${UI.moeda(d.resultado_liquido)}</span></div>
+        <div class="card stat"><span class="stat__label">Resultado do período</span><span class="stat__value" style="color:${d.resultado_liquido >= 0 ? 'var(--sucesso)' : 'var(--perigo)'}">${UI.moeda(d.resultado_liquido)}</span></div>
       </div>
       <div class="card">
-        <h3 style="margin-top:0">Demonstração do Resultado — ${mesLabel(dreFiltro.mes)}</h3>
+        <h3 style="margin-top:0">Demonstração do Resultado — ${UI.escapar(label)}</h3>
         <table class="tabela dre-tabela">
           <tbody>
             ${linha('Receita de vendas', d.receita_bruta, { sinal: '', cor: 'var(--sucesso)' })}
@@ -1006,10 +1058,10 @@ window.PaginaFinanceiro = (function () {
             <tr><td colspan="2" style="padding-top:12px"><strong>Despesas operacionais</strong></td></tr>
             ${despesasHTML}
             ${linha('Total de despesas', d.total_despesas, { forte: true, cor: 'var(--perigo)' })}
-            ${linha('= Resultado líquido do mês', d.resultado_liquido, { forte: true, cor: d.resultado_liquido >= 0 ? 'var(--sucesso)' : 'var(--perigo)' })}
+            ${linha('= Resultado líquido do período', d.resultado_liquido, { forte: true, cor: d.resultado_liquido >= 0 ? 'var(--sucesso)' : 'var(--perigo)' })}
           </tbody>
         </table>
-        <p class="dica mt-16">A receita vem das vendas concluídas no mês; ${temComercio && temServico ? 'o CMV usa o custo dos produtos vendidos e o CSP o custo dos serviços prestados' : temServico ? 'o CSP usa o custo dos serviços prestados' : 'o CMV usa o custo dos itens vendidos'}; as despesas vêm das contas a pagar do mês, agrupadas por categoria. Compras de mercadoria não entram como despesa (elas viram CMV ao vender). Margem líquida: <strong>${d.margem_liquida_pct}%</strong>.</p>
+        <p class="dica mt-16">A receita vem das vendas concluídas no período; ${temComercio && temServico ? 'o CMV usa o custo dos produtos vendidos e o CSP o custo dos serviços prestados' : temServico ? 'o CSP usa o custo dos serviços prestados' : 'o CMV usa o custo dos itens vendidos'}; as despesas vêm das contas a pagar do período, agrupadas por categoria. Compras de mercadoria não entram como despesa (elas viram CMV ao vender). Margem líquida: <strong>${d.margem_liquida_pct}%</strong>.</p>
       </div>`;
   }
 

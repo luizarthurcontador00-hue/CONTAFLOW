@@ -274,9 +274,33 @@ function listarVendas({ inicio, fim, forma_pagamento, produto_id, status } = {})
   return db.prepare(sql).all(params);
 }
 
+/**
+ * Corrige itens de venda antigos que saíram com custo zerado (produto sem
+ * custo cadastrado na hora da venda) e hoje já têm custo no cadastro.
+ *
+ * vendas_itens.custo_unitario é um retrato do custo no momento da venda —
+ * do jeito certo para não deixar uma correção de custo de hoje mudar a
+ * margem de vendas antigas por baixo dos panos. Mas quando esse retrato
+ * nasceu vazio por falta de cadastro (não porque o produto custava zero de
+ * verdade), o DRE fica com o CMV/CSP menor do que deveria até alguém
+ * lembrar de arrumar manualmente. Este botão faz essa arrumação de uma vez.
+ */
+function sincronizarCustoVendas() {
+  const db = getDb();
+  const info = db.prepare(`
+    UPDATE vendas_itens
+    SET custo_unitario = (SELECT p.custo FROM produtos p WHERE p.id = vendas_itens.produto_id)
+    WHERE (custo_unitario IS NULL OR custo_unitario = 0)
+      AND produto_id IS NOT NULL
+      AND EXISTS (SELECT 1 FROM produtos p WHERE p.id = vendas_itens.produto_id AND p.custo > 0)
+  `).run();
+  return { itens_atualizados: info.changes };
+}
+
 module.exports = {
   FORMAS,
   buscarProduto,
+  sincronizarCustoVendas,
   criarVenda,
   cancelarVenda,
   excluirVenda,

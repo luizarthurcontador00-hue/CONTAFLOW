@@ -52,6 +52,42 @@ function vendasDetalhado({ inicio, fim } = {}) {
   };
 }
 
+/**
+ * Vendas item a item (produto/serviço, valor e custo lado a lado), com o
+ * total de cada coluna no fim — pensado pra conferir com o CMV/CSP do DRE
+ * do mesmo período: mesmas vendas concluídas, mesma janela de datas, só que
+ * abertas item por item em vez de resumidas.
+ */
+function vendasComCusto({ inicio, fim } = {}) {
+  const db = getDb();
+  const ini = inicio || '0000-01-01';
+  const f = fim || '9999-12-31';
+  const itens = db.prepare(`
+    SELECT vi.id, v.id AS venda_id, v.data,
+      COALESCE(p.nome, vi.descricao, 'Item removido') AS produto_nome,
+      CASE WHEN p.eh_servico = 1 THEN 'Serviço' ELSE 'Produto' END AS tipo,
+      vi.quantidade, vi.preco_unitario, vi.custo_unitario, vi.valor_total,
+      (vi.custo_unitario * vi.quantidade) AS custo_total
+    FROM vendas_itens vi
+    JOIN vendas v ON v.id = vi.venda_id
+    LEFT JOIN produtos p ON p.id = vi.produto_id
+    WHERE v.status = 'concluida' AND date(v.data) BETWEEN date(?) AND date(?)
+    ORDER BY v.data, v.id
+  `).all(ini, f);
+
+  const valorTotal = arred(itens.reduce((s, i) => s + Number(i.valor_total), 0));
+  const custoTotal = arred(itens.reduce((s, i) => s + Number(i.custo_total), 0));
+  return {
+    itens: itens.map((i) => ({ ...i, custo_total: arred(i.custo_total) })),
+    totais: {
+      itens: itens.length,
+      valor_total: valorTotal,
+      custo_total: custoTotal,
+      margem: arred(valorTotal - custoTotal),
+    },
+  };
+}
+
 /** Relatorio financeiro (contas a pagar e a receber) por periodo de vencimento. */
 function financeiro({ inicio, fim } = {}) {
   const db = getDb();
@@ -421,7 +457,7 @@ function exportarContador({ inicio, fim } = {}) {
 }
 
 module.exports = {
-  estoqueAtual, vendasDetalhado, financeiro, produtosParados, exportarContador,
+  estoqueAtual, vendasDetalhado, vendasComCusto, financeiro, produtosParados, exportarContador,
   funilCRM, viagensRelatorio,
   ofertasRelatorio, turmasRelatorio,
   gerarCSV, gerarXLS,

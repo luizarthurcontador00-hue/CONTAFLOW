@@ -64,6 +64,24 @@ router.get('/vendas', asyncHandler((req, res) => {
   enviar(res, { formato: req.query.formato, titulo: 'Relatorio de Vendas', colunas, linhas, json: dados });
 }));
 
+// ------------------------- Vendas × Custo (conferência DRE) -------------------------
+router.get('/vendas-custo', asyncHandler((req, res) => {
+  const dados = rel.vendasComCusto(req.query);
+  const colunas = [
+    { chave: 'venda_id', titulo: 'Venda' },
+    { chave: 'data', titulo: 'Data' },
+    { chave: 'produto_nome', titulo: 'Produto/Serviço' },
+    { chave: 'tipo', titulo: 'Tipo' },
+    { chave: 'quantidade', titulo: 'Qtd' },
+    { chave: 'valor_total', titulo: 'Valor' },
+    { chave: 'custo_total', titulo: 'Custo' },
+  ];
+  const linhas = dados.itens.map((i) => ({
+    ...i, valor_total: money(i.valor_total), custo_total: money(i.custo_total),
+  }));
+  enviar(res, { formato: req.query.formato, titulo: 'Vendas x Custo', colunas, linhas, json: dados });
+}));
+
 // ---------------------------- Financeiro ---------------------------
 router.get('/financeiro', asyncHandler((req, res) => {
   const dados = rel.financeiro(req.query);
