@@ -372,12 +372,17 @@ function listar() {
   const db = getDb();
   const cfg = db.prepare("SELECT valor FROM config WHERE chave = 'ramo_servico'").get();
   const ehInstituto = cfg && cfg.valor === 'instituto';
+  const perfilCfg = db.prepare("SELECT valor FROM config WHERE chave = 'perfil_negocio'").get();
+  // "Produto sem custo" so faz sentido pra quem vende produto de verdade —
+  // instituto nao vende, e prestador de servico puro nao cadastra produto
+  // com custo (o "servico" dele pode nem ter custo direto).
+  const temProdutos = !ehInstituto && ['comercio', 'ambos'].includes(perfilCfg && perfilCfg.valor);
 
   let avisos = [
     ...coletar('lembretes', () => lembretesVencidos()),
     ...coletar('contas a pagar vencidas', () => contasVencidas(db)),
     ...coletar('contas a receber vencidas', () => contasReceberVencidas(db)),
-    ...coletar('produtos sem custo', () => produtosSemCusto(db)),
+    ...(temProdutos ? coletar('produtos sem custo', () => produtosSemCusto(db)) : []),
   ];
 
   if (ehInstituto) {
