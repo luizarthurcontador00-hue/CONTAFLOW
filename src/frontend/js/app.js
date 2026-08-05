@@ -22,6 +22,7 @@
     chamada: { titulo: 'Chamada', pagina: () => window.PaginaChamada },
     ordens: { titulo: 'Ordens & Orçamentos', pagina: () => window.PaginaOrdens },
     lote: { titulo: 'Cadastro em Lote', pagina: () => window.PaginaLote },
+    conferencia: { titulo: 'Conferência de Mercadoria', pagina: () => window.PaginaConferencia },
     clientes: { titulo: 'Clientes', pagina: () => window.PaginaClientes },
     fornecedores: { titulo: 'Fornecedores', pagina: () => window.PaginaFornecedores },
     etiquetas: { titulo: 'Etiquetas', pagina: () => window.PaginaEtiquetas },
@@ -77,7 +78,7 @@
   // O Dashboard tambem sai: ele e inteiro sobre venda, faturamento e curva ABC
   // de produto. Quem faz esse papel aqui e o panorama da tela inicial e o
   // Relatorio de impacto.
-  const ESCONDIDAS_NO_INSTITUTO = ['pdv', 'vendas', 'sacolas', 'precificacao', 'comissoes', 'ordens', 'compras', 'produtos', 'catalogo', 'etiquetas', 'lote', 'dashboard', 'servicos'];
+  const ESCONDIDAS_NO_INSTITUTO = ['pdv', 'vendas', 'sacolas', 'precificacao', 'comissoes', 'ordens', 'compras', 'produtos', 'catalogo', 'etiquetas', 'lote', 'conferencia', 'dashboard', 'servicos'];
 
   // O instituto usa as telas de "serviço" (agenda, turmas, chamada...), então
   // conta como serviço na hora de filtrar rota por perfil.
@@ -112,7 +113,7 @@
       'cursos', 'instrumentos', 'voluntarios', 'turmas', 'chamada', 'membros',
       'lista-espera', 'autorizacoes', 'atas', 'impacto',
       'produtos', 'sacolas', 'precificacao', 'compras', 'fornecedores',
-      'servicos', 'catalogo', 'etiquetas', 'lote'].forEach((nome) => {
+      'servicos', 'catalogo', 'etiquetas', 'lote', 'conferencia'].forEach((nome) => {
       const link = document.querySelector(`.nav-item[data-rota="${nome}"]`);
       if (link) link.style.display = rotaVisivel(nome) ? '' : 'none';
     });

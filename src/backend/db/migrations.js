@@ -1723,6 +1723,34 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 47,
+    name: 'conferencia-de-mercadoria',
+    up(db) {
+      // Fila de conferencia: quando o produto e cadastrado em lote (antes da
+      // mercadoria fisica chegar), cada item entra aqui tambem -- alem de ir
+      // pra Precificacao -- pra alguem bater, item a item, o que realmente
+      // chegou na caixa contra o que foi cadastrado no sistema.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS conferencia_mercadoria (
+          id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+          produto_id           INTEGER REFERENCES produtos(id) ON DELETE CASCADE,
+          referencia           TEXT,
+          descricao            TEXT NOT NULL,
+          quantidade_esperada  REAL NOT NULL DEFAULT 0,
+          quantidade_conferida REAL,
+          conferido            INTEGER NOT NULL DEFAULT 0,
+          observacao           TEXT,
+          lote                 TEXT,
+          lote_data            TEXT,
+          ordem                INTEGER NOT NULL DEFAULT 0,
+          criado_em            TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_conferencia_lote ON conferencia_mercadoria(lote);
+        CREATE INDEX IF NOT EXISTS idx_conferencia_produto ON conferencia_mercadoria(produto_id);
+      `);
+    },
+  },
 ];
 
 /**

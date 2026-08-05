@@ -207,16 +207,19 @@ window.PaginaLote = (function () {
     alvoResumo.innerHTML = `<div class="card">
       <span class="badge ${resultado.erros ? 'badge--alerta' : 'badge--ok'}">${resultado.criados} de ${resultado.total} cadastrados</span>
       ${resultado.erros ? `<span class="dica" style="margin-left:8px">Corrija as linhas marcadas com ✕ e clique em Salvar todos novamente.</span>` : ''}
+      ${resultado.lote_precificacao || resultado.lote_conferencia ? `
+        <div class="flex gap-12 mt-16" style="flex-wrap:wrap">
+          ${resultado.lote_precificacao ? '<button class="btn" id="lt-ir-precificacao">🏷️ Ir para Precificação</button>' : ''}
+          ${resultado.lote_conferencia ? '<button class="btn btn--secundario" id="lt-ir-conferencia">🔍 Ir para Conferência de Mercadoria</button>' : ''}
+        </div>` : ''}
     </div>`;
+    const btnPrecificacao = alvoResumo.querySelector('#lt-ir-precificacao');
+    if (btnPrecificacao) btnPrecificacao.addEventListener('click', () => { window.__precAbrirProdutos = true; location.hash = '#/precificacao'; });
+    const btnConferencia = alvoResumo.querySelector('#lt-ir-conferencia');
+    if (btnConferencia) btnConferencia.addEventListener('click', () => { location.hash = '#/conferencia'; });
 
     if (resultado.erros) UI.toast(`${resultado.criados} cadastrados, ${resultado.erros} com erro.`, 'erro');
-    else UI.sucesso(`${resultado.criados} produto(s) cadastrado(s)! Enviados para a Precificação.`);
-
-    // Se houver produtos cadastrados, leva para a aba de Precificacao (grupo do lote).
-    if (resultado.criados > 0 && !resultado.erros) {
-      window.__precAbrirProdutos = true;
-      setTimeout(() => { location.hash = '#/precificacao'; }, 900);
-    }
+    else UI.sucesso(`${resultado.criados} produto(s) cadastrado(s)! Enviados para a Precificação e para a Conferência de Mercadoria.`);
   }
 
   return { titulo: 'Cadastro em Lote', render };

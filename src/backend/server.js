@@ -126,6 +126,7 @@ function createApp() {
   montarRota(app, '/api/caixa', './routes/caixa');
   montarRota(app, '/api/precificacao', './routes/precificacao');
   montarRota(app, '/api/precificacao-avancada', './routes/precAvancada');
+  montarRota(app, '/api/conferencia', './routes/conferencia');
   montarRota(app, '/api/financeiro', './routes/financeiro');
   montarRota(app, '/api/conciliacao', './routes/conciliacao');
   montarRota(app, '/api/comissoes', './routes/comissoes');

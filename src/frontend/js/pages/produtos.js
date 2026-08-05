@@ -46,6 +46,7 @@ window.PaginaProdutos = (function () {
         <button class="btn btn--secundario" id="btn-categorias">🏷️ Categorias</button>
         <button class="btn btn--secundario" id="btn-fornecedores">🚚 Fornecedores</button>
         <button class="btn btn--secundario" id="btn-lote">📋 Cadastro em Lote</button>
+        <button class="btn btn--secundario" id="btn-conferencia">🔍 Conferência de Mercadoria</button>
         <button class="btn btn--secundario" id="btn-etiquetas">🔖 Etiquetas</button>
         <button class="btn btn--secundario" id="btn-catalogo">📢 Catálogo</button>
         <button class="btn btn--secundario" id="btn-modo-selecao">☑️ Selecionar vários</button>
@@ -68,6 +69,7 @@ window.PaginaProdutos = (function () {
     container.querySelector('#btn-categorias').addEventListener('click', abrirGerenciadorCategorias);
     container.querySelector('#btn-fornecedores').addEventListener('click', abrirGerenciadorFornecedores);
     container.querySelector('#btn-lote').addEventListener('click', () => { location.hash = '#/lote'; });
+    container.querySelector('#btn-conferencia').addEventListener('click', () => { location.hash = '#/conferencia'; });
     container.querySelector('#btn-etiquetas').addEventListener('click', () => { location.hash = '#/etiquetas'; });
     container.querySelector('#btn-catalogo').addEventListener('click', () => { location.hash = '#/catalogo'; });
     container.querySelector('#btn-modo-selecao').addEventListener('click', alternarModoSelecao);
