@@ -56,30 +56,101 @@ function obter(id) {
   return pedido;
 }
 
-/** Valida que cada item e' de um produto do fornecedor do pedido, e calcula os totais. */
+/**
+ * Valida que cada item e' de um produto do fornecedor do pedido, e calcula
+ * os totais. Itens sem produto_id (vindos da importacao de planilha, sem
+ * correspondencia num produto ja cadastrado desse fornecedor) tem o produto
+ * criado na hora — sem preco de venda ainda, sera definido na Precificacao.
+ */
 function validarEPrepararItens(db, fornecedorId, itens) {
   if (!Array.isArray(itens) || !itens.length) throw new AppError('Adicione ao menos um item ao pedido.');
-  return itens.map((it) => {
-    const produtoId = Number(it.produto_id);
+  // eslint-disable-next-line global-require
+  const produtosService = require('./produtosService');
+  const criadosNovos = [];
+
+  const preparados = itens.map((it) => {
+    let produtoId = Number(it.produto_id) || null;
     const quantidade = Number(it.quantidade);
-    if (!produtoId || !(quantidade > 0)) throw new AppError('Item inválido: informe produto e quantidade maior que zero.');
+    if (!(quantidade > 0)) throw new AppError('Item inválido: informe produto e quantidade maior que zero.');
+
+    if (!produtoId) {
+      const nome = ((it.novo && it.novo.nome) || it.nome || '').toString().trim();
+      if (!nome) throw new AppError('Item inválido: informe produto e quantidade maior que zero.');
+      const codigoBarras = ((it.novo && it.novo.codigo_barras) || it.codigo_barras || '').toString().trim() || null;
+      // Reconfere no momento de salvar (evita duplicar se o produto foi
+      // cadastrado por outro caminho entre a importacao da planilha e o salvar).
+      let existente = null;
+      if (codigoBarras) {
+        existente = db.prepare('SELECT id FROM produtos WHERE ativo = 1 AND fornecedor_id = ? AND codigo_barras = ?').get(fornecedorId, codigoBarras);
+      }
+      if (!existente) {
+        existente = db.prepare("SELECT id FROM produtos WHERE ativo = 1 AND fornecedor_id = ? AND LOWER(TRIM(nome)) = ?").get(fornecedorId, nome.toLowerCase());
+      }
+      if (existente) {
+        produtoId = existente.id;
+      } else {
+        const custoUnitario = arred(Number(it.custo_unitario || 0));
+        const novoProduto = produtosService.criar({
+          nome, codigo_barras: codigoBarras, fornecedor_id: fornecedorId,
+          custo: custoUnitario, estoque_atual: 0, _semPrecoAuto: true,
+        });
+        produtoId = novoProduto.id;
+        criadosNovos.push(novoProduto);
+      }
+    }
+
     const produto = db.prepare('SELECT id, nome, fornecedor_id, custo FROM produtos WHERE id = ?').get(produtoId);
     if (!produto) throw new AppError('Produto não encontrado.', 404);
     if (Number(produto.fornecedor_id) !== Number(fornecedorId)) {
       throw new AppError(`O produto "${produto.nome}" não é cadastrado com esse fornecedor.`);
     }
     const custoUnitario = arred(it.custo_unitario !== undefined && it.custo_unitario !== '' ? Number(it.custo_unitario) : Number(produto.custo || 0));
-    return { produto_id: produtoId, quantidade, custo_unitario: custoUnitario, valor_total: arred(quantidade * custoUnitario) };
+    return {
+      produto_id: produtoId, quantidade, custo_unitario: custoUnitario,
+      valor_total: arred(quantidade * custoUnitario), _nome: produto.nome,
+    };
   });
+
+  return { preparados, criadosNovos };
+}
+
+/** Rotulo estavel do pedido, usado pra agrupar seus itens na fila de Conferência de Mercadoria. */
+function rotuloConferencia(pedidoId, fornecedorNome) {
+  return `Pedido de compra #${pedidoId} — ${fornecedorNome}`;
+}
+
+/**
+ * Manda os itens do pedido pra fila de Conferência de Mercadoria (quantidade
+ * pedida = quantidade esperada, pra bater contra o que chegar de verdade) e
+ * os produtos novos criados na hora pra Precificacao (ainda sem preco de
+ * venda). Reimporta do zero a cada chamada (idempotente), pra manter a fila
+ * sincronizada quando o pedido e' editado.
+ */
+function sincronizarFilas(pedidoId, fornecedorNome, preparados, criadosNovos) {
+  // eslint-disable-next-line global-require
+  const conferencia = require('./conferenciaService');
+  const rotulo = rotuloConferencia(pedidoId, fornecedorNome);
+  conferencia.excluirLote(rotulo);
+  conferencia.importarProdutos(preparados.map((i) => ({
+    produto_id: i.produto_id, descricao: i._nome, quantidade: i.quantidade,
+  })), rotulo);
+
+  if (criadosNovos.length) {
+    // eslint-disable-next-line global-require
+    const prec = require('./precAvancadaService');
+    prec.importarProdutos(criadosNovos.map((p) => ({
+      produto_id: p.id, referencia: p.codigo_barras, descricao: p.nome, quantidade: 1, valor_pedido: Number(p.custo || 0),
+    })), rotulo);
+  }
 }
 
 function criar({ fornecedor_id, observacao, itens }) {
   const db = getDb();
   const fornecedorId = Number(fornecedor_id);
-  const fornecedor = db.prepare('SELECT id FROM fornecedores WHERE id = ?').get(fornecedorId);
+  const fornecedor = db.prepare('SELECT id, nome FROM fornecedores WHERE id = ?').get(fornecedorId);
   if (!fornecedor) throw new AppError('Selecione um fornecedor.');
 
-  const preparados = validarEPrepararItens(db, fornecedorId, itens);
+  const { preparados, criadosNovos } = validarEPrepararItens(db, fornecedorId, itens);
   const valorTotal = arred(preparados.reduce((s, i) => s + i.valor_total, 0));
 
   const id = db.transaction(() => {
@@ -94,16 +165,21 @@ function criar({ fornecedor_id, observacao, itens }) {
     preparados.forEach((i) => ins.run(pedidoId, i.produto_id, i.quantidade, i.custo_unitario, i.valor_total));
     return pedidoId;
   })();
+
+  sincronizarFilas(id, fornecedor.nome, preparados, criadosNovos);
   return obter(id);
 }
 
 function atualizar(id, { observacao, itens }) {
   const db = getDb();
-  const pedido = db.prepare('SELECT * FROM pedidos_compra WHERE id = ?').get(id);
+  const pedido = db.prepare(`
+    SELECT pc.*, f.nome AS fornecedor_nome FROM pedidos_compra pc
+    JOIN fornecedores f ON f.id = pc.fornecedor_id WHERE pc.id = ?
+  `).get(id);
   if (!pedido) throw new AppError('Pedido de compra não encontrado.', 404);
   if (pedido.status !== 'aberto') throw new AppError('Só é possível editar um pedido em aberto.');
 
-  const preparados = validarEPrepararItens(db, pedido.fornecedor_id, itens);
+  const { preparados, criadosNovos } = validarEPrepararItens(db, pedido.fornecedor_id, itens);
   const valorTotal = arred(preparados.reduce((s, i) => s + i.valor_total, 0));
 
   db.transaction(() => {
@@ -116,12 +192,17 @@ function atualizar(id, { observacao, itens }) {
     `);
     preparados.forEach((i) => ins.run(id, i.produto_id, i.quantidade, i.custo_unitario, i.valor_total));
   })();
+
+  sincronizarFilas(id, pedido.fornecedor_nome, preparados, criadosNovos);
   return obter(id);
 }
 
 function mudarStatus(id, status) {
   const db = getDb();
-  const pedido = db.prepare('SELECT * FROM pedidos_compra WHERE id = ?').get(id);
+  const pedido = db.prepare(`
+    SELECT pc.*, f.nome AS fornecedor_nome FROM pedidos_compra pc
+    JOIN fornecedores f ON f.id = pc.fornecedor_id WHERE pc.id = ?
+  `).get(id);
   if (!pedido) throw new AppError('Pedido de compra não encontrado.', 404);
   const permitidas = TRANSICOES[pedido.status] || [];
   if (!permitidas.includes(status)) {
@@ -132,16 +213,61 @@ function mudarStatus(id, status) {
   if (status === 'recebido') campos.recebido_em = new Date().toISOString().slice(0, 19).replace('T', ' ');
   const sets = Object.keys(campos).map((k) => `${k} = @${k}`).join(', ');
   db.prepare(`UPDATE pedidos_compra SET ${sets} WHERE id = @id`).run({ ...campos, id });
+  if (status === 'cancelado') {
+    // eslint-disable-next-line global-require
+    require('./conferenciaService').excluirLote(rotuloConferencia(id, pedido.fornecedor_nome));
+  }
   return obter(id);
 }
 
 function excluir(id) {
   const db = getDb();
-  const pedido = db.prepare('SELECT * FROM pedidos_compra WHERE id = ?').get(id);
+  const pedido = db.prepare(`
+    SELECT pc.*, f.nome AS fornecedor_nome FROM pedidos_compra pc
+    JOIN fornecedores f ON f.id = pc.fornecedor_id WHERE pc.id = ?
+  `).get(id);
   if (!pedido) throw new AppError('Pedido de compra não encontrado.', 404);
   if (pedido.status !== 'aberto') throw new AppError('Só é possível excluir um pedido em aberto.');
   db.prepare('DELETE FROM pedidos_compra WHERE id = ?').run(id);
+  // eslint-disable-next-line global-require
+  require('./conferenciaService').excluirLote(rotuloConferencia(id, pedido.fornecedor_nome));
   return { ok: true };
+}
+
+/**
+ * Casa cada linha da planilha importada com um produto ja cadastrado desse
+ * fornecedor (por codigo de barras ou nome); o que nao bater volta marcado
+ * como "novo" pro usuario revisar antes de salvar o pedido. Nao persiste
+ * nada — quem cria os produtos novos de verdade e' validarEPrepararItens,
+ * no momento de salvar.
+ */
+function resolverItensDaPlanilha(fornecedorId, linhas) {
+  const db = getDb();
+  return linhas.map((l) => {
+    const codigo = String(l.codigo_barras || '').trim();
+    const nomeNorm = String(l.nome || '').trim().toLowerCase();
+    let produto = null;
+    if (codigo) {
+      produto = db.prepare('SELECT id, nome, codigo_barras, unidade, custo FROM produtos WHERE ativo = 1 AND fornecedor_id = ? AND codigo_barras = ?').get(fornecedorId, codigo);
+    }
+    if (!produto && nomeNorm) {
+      produto = db.prepare("SELECT id, nome, codigo_barras, unidade, custo FROM produtos WHERE ativo = 1 AND fornecedor_id = ? AND LOWER(TRIM(nome)) = ?").get(fornecedorId, nomeNorm);
+    }
+    const quantidade = Number(l.quantidade) > 0 ? Number(l.quantidade) : 1;
+    const custoPlanilha = l.custo_unitario !== undefined && l.custo_unitario !== '' && !Number.isNaN(Number(l.custo_unitario))
+      ? Number(l.custo_unitario) : null;
+
+    if (produto) {
+      return {
+        produto_id: produto.id, nome: produto.nome, unidade: produto.unidade,
+        quantidade, custo_unitario: custoPlanilha != null ? custoPlanilha : Number(produto.custo || 0),
+      };
+    }
+    return {
+      produto_id: null, novo: true, nome: l.nome, codigo_barras: l.codigo_barras || null,
+      unidade: 'UN', quantidade, custo_unitario: custoPlanilha || 0,
+    };
+  });
 }
 
 /** Sugere itens para um novo pedido: produtos do fornecedor abaixo do estoque mínimo. */
@@ -160,4 +286,4 @@ function sugerirItens(fornecedor_id) {
   }));
 }
 
-module.exports = { listar, obter, criar, atualizar, mudarStatus, excluir, sugerirItens };
+module.exports = { listar, obter, criar, atualizar, mudarStatus, excluir, sugerirItens, resolverItensDaPlanilha };

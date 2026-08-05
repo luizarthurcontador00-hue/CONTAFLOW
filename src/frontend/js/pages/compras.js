@@ -360,9 +360,14 @@ window.PaginaCompras = (function () {
           ? `<input readonly value="${UI.escapar(pedido.fornecedor_nome)}" />`
           : `<select id="pc-fornecedor"><option value="">Selecione…</option>${fornecedores.map((f) => `<option value="${f.id}">${UI.escapar(f.nome)}</option>`).join('')}</select>`}
       </div>
-      <div class="flex flex--between mt-16" style="align-items:center">
+      <div class="flex flex--between mt-16" style="align-items:center;flex-wrap:wrap;gap:8px">
         <label style="margin:0">Itens do pedido</label>
-        <button type="button" class="btn btn--secundario" id="pc-sugerir" ${fornecedorId ? '' : 'disabled'}>💡 Sugerir itens em falta</button>
+        <div class="flex gap-12" style="flex-wrap:wrap">
+          <a href="/api/pedidos-compra/planilha/modelo" class="btn btn--secundario">⬇️ Modelo da planilha</a>
+          <input type="file" id="pc-planilha-file" accept=".xlsx,.xls,.csv" style="display:none" />
+          <button type="button" class="btn btn--secundario" id="pc-planilha" ${fornecedorId ? '' : 'disabled'}>📊 Importar planilha</button>
+          <button type="button" class="btn btn--secundario" id="pc-sugerir" ${fornecedorId ? '' : 'disabled'}>💡 Sugerir itens em falta</button>
+        </div>
       </div>
       <div class="barra-ferramentas mt-16" style="margin-bottom:8px">
         <input type="search" id="pc-busca" class="cresce" placeholder="Buscar produto deste fornecedor…" autocomplete="off" ${fornecedorId ? '' : 'disabled'} />
@@ -380,7 +385,7 @@ window.PaginaCompras = (function () {
           el.querySelector('#pc-itens').innerHTML = itens.length ? `<table class="tabela">
             <thead><tr><th>Produto</th><th>Qtd</th><th>Custo unit.</th><th>Total</th><th></th></tr></thead>
             <tbody>${itens.map((i, idx) => `<tr>
-              <td>${UI.escapar(i.nome)}</td>
+              <td>${UI.escapar(i.nome)}${i.novo ? ' <span class="badge badge--alerta">🆕 Novo produto</span>' : ''}</td>
               <td><input type="number" min="0.01" step="0.01" data-qtd="${idx}" value="${i.quantidade}" style="width:80px" /></td>
               <td><input type="number" min="0" step="0.01" data-custo="${idx}" value="${i.custo_unitario}" style="width:100px" /></td>
               <td>${UI.moeda(i.quantidade * i.custo_unitario)}</td>
@@ -434,6 +439,34 @@ window.PaginaCompras = (function () {
           }, 250);
         });
 
+        const planilhaInput = el.querySelector('#pc-planilha-file');
+        el.querySelector('#pc-planilha').addEventListener('click', () => planilhaInput.click());
+        planilhaInput.addEventListener('change', async () => {
+          const arquivo = planilhaInput.files[0];
+          if (!arquivo || !fornecedorId) return;
+          const fd = new FormData();
+          fd.append('planilha', arquivo);
+          fd.append('fornecedor_id', fornecedorId);
+          try {
+            const resp = await fetch('/api/pedidos-compra/planilha/importar', { method: 'POST', body: fd });
+            const texto = await resp.text();
+            const linhas = texto ? JSON.parse(texto) : [];
+            if (!resp.ok) throw new Error((linhas && linhas.erro) || 'Falha ao ler a planilha.');
+            let novos = 0;
+            linhas.forEach((l) => {
+              if (l.produto_id) { adicionarItem({ produto_id: l.produto_id, nome: l.nome, unidade: l.unidade, custo: l.custo_unitario }, l.quantidade); return; }
+              novos += 1;
+              itens.push({
+                produto_id: null, novo: true, nome: l.nome, codigo_barras: l.codigo_barras || null,
+                unidade: l.unidade || 'UN', quantidade: l.quantidade, custo_unitario: l.custo_unitario || 0,
+              });
+            });
+            renderItens();
+            UI.sucesso(`${linhas.length} linha(s) importada(s)${novos ? `, ${novos} como produto novo` : ''}. Revise antes de salvar.`);
+          } catch (err) { UI.erro(err.message); }
+          planilhaInput.value = '';
+        });
+
         el.querySelector('#pc-sugerir').addEventListener('click', async () => {
           if (!fornecedorId) return;
           let sugestoes;
@@ -450,6 +483,7 @@ window.PaginaCompras = (function () {
             if (itens.length) { itens.length = 0; renderItens(); UI.toast('Itens limpos: fornecedor trocado.', 'info'); }
             el.querySelector('#pc-busca').disabled = !fornecedorId;
             el.querySelector('#pc-sugerir').disabled = !fornecedorId;
+            el.querySelector('#pc-planilha').disabled = !fornecedorId;
           });
         }
       },
@@ -459,12 +493,14 @@ window.PaginaCompras = (function () {
         const payload = {
           fornecedor_id: fornecedorId,
           observacao: el.querySelector('#pc-obs').value,
-          itens: itens.map((i) => ({ produto_id: i.produto_id, quantidade: i.quantidade, custo_unitario: i.custo_unitario })),
+          itens: itens.map((i) => (i.produto_id
+            ? { produto_id: i.produto_id, quantidade: i.quantidade, custo_unitario: i.custo_unitario }
+            : { novo: { nome: i.nome, codigo_barras: i.codigo_barras || null }, quantidade: i.quantidade, custo_unitario: i.custo_unitario })),
         };
         try {
           if (editando) await API.put(`/api/pedidos-compra/${pedido.id}`, payload);
           else await API.post('/api/pedidos-compra', payload);
-          UI.sucesso(editando ? 'Pedido atualizado.' : 'Pedido criado.');
+          UI.sucesso((editando ? 'Pedido atualizado.' : 'Pedido criado.') + ' Itens enviados para a Conferência de Mercadoria.');
           await listarPedidos();
         } catch (e) { UI.erro(e.message); return false; }
       },
@@ -498,6 +534,7 @@ window.PaginaCompras = (function () {
         const foot = el.querySelector('.modal__foot');
         const botoes = [];
         botoes.push('<button class="btn btn--secundario" id="pd-pdf">⬇️ Baixar PDF</button>');
+        botoes.push('<button class="btn btn--secundario" id="pd-conferencia">🔍 Ver na Conferência de Mercadoria</button>');
         if (pedido.status === 'aberto') botoes.push('<button class="btn btn--secundario" id="pd-editar">Editar</button>');
         if (pedido.status === 'aberto') botoes.push('<button class="btn" id="pd-enviar">📤 Marcar como enviado</button>');
         if (pedido.status === 'enviado') botoes.push('<button class="btn" id="pd-receber">✅ Marcar como recebido</button>');
@@ -505,6 +542,7 @@ window.PaginaCompras = (function () {
         foot.innerHTML = `<div class="flex gap-12" style="flex-wrap:wrap;width:100%">${botoes.join('')}</div>`;
 
         foot.querySelector('#pd-pdf').addEventListener('click', () => baixarPdfPedido(pedido));
+        foot.querySelector('#pd-conferencia').addEventListener('click', () => { location.hash = '#/conferencia'; });
         const btnEditar = foot.querySelector('#pd-editar');
         if (btnEditar) btnEditar.addEventListener('click', () => { el.remove(); formPedido(pedido); });
         const btnEnviar = foot.querySelector('#pd-enviar');

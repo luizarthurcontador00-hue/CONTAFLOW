@@ -82,4 +82,67 @@ function analisarPlanilha(buffer) {
   return linhas;
 }
 
-module.exports = { gerarModelo, analisarPlanilha };
+// ----------------------- Planilha de itens de Pedido de Compra -----------------------
+
+const COLUNAS_MODELO_PEDIDO = ['Nome', 'Código de Barras', 'Quantidade', 'Custo Unitário'];
+
+const LINHAS_EXEMPLO_PEDIDO = [
+  ['Refrigerante Cola 2L', '7891234567890', 24, 4.5],
+  ['Produto Novo Exemplo', '', 10, 12.9],
+];
+
+/** Gera o .xlsx modelo de itens de pedido de compra (Nome, Código, Quantidade, Custo). */
+function gerarModeloPedido() {
+  const ws = XLSX.utils.aoa_to_sheet([COLUNAS_MODELO_PEDIDO, ...LINHAS_EXEMPLO_PEDIDO]);
+  ws['!cols'] = COLUNAS_MODELO_PEDIDO.map((c) => ({ wch: Math.max(14, c.length + 4) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Itens do pedido');
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+}
+
+const MAPA_CAMPOS_PEDIDO = {
+  nome: 'nome', produto: 'nome',
+  codigodebarras: 'codigo_barras', codigobarras: 'codigo_barras', ean: 'codigo_barras', codigo: 'codigo_barras',
+  quantidade: 'quantidade', qtd: 'quantidade', qtde: 'quantidade',
+  custounitario: 'custo_unitario', custo: 'custo_unitario', precocusto: 'custo_unitario', valorcusto: 'custo_unitario', valorunitario: 'custo_unitario',
+};
+
+/**
+ * Le uma planilha de itens de pedido de compra. Nao persiste nada — so
+ * devolve as linhas mapeadas para o fornecedor casar (ou nao) com produtos
+ * ja cadastrados desse mesmo fornecedor, na tela de Pedido de Compra.
+ */
+function analisarPlanilhaPedido(buffer) {
+  let wb;
+  try {
+    wb = XLSX.read(buffer, { type: 'buffer' });
+  } catch (e) {
+    throw new AppError('Nao foi possivel ler o arquivo. Verifique se e uma planilha valida (.xlsx, .xls ou .csv).');
+  }
+
+  const nomeAba = wb.SheetNames[0];
+  if (!nomeAba) throw new AppError('A planilha esta vazia.');
+  const ws = wb.Sheets[nomeAba];
+  const linhasBrutas = XLSX.utils.sheet_to_json(ws, { defval: '' });
+  if (!linhasBrutas.length) throw new AppError('A planilha nao tem nenhuma linha de dados.');
+
+  const linhas = linhasBrutas
+    .map((bruta) => {
+      const linha = {};
+      for (const [chaveOriginal, valor] of Object.entries(bruta)) {
+        const campo = MAPA_CAMPOS_PEDIDO[normalizarCabecalho(chaveOriginal)];
+        if (campo) linha[campo] = typeof valor === 'string' ? valor.trim() : valor;
+      }
+      return linha;
+    })
+    .filter((l) => l.nome);
+
+  if (!linhas.length) {
+    throw new AppError(
+      'Nenhuma linha valida encontrada. Confira se a planilha usa as colunas do modelo (ao menos a coluna "Nome" precisa estar preenchida).'
+    );
+  }
+  return linhas;
+}
+
+module.exports = { gerarModelo, analisarPlanilha, gerarModeloPedido, analisarPlanilhaPedido };
