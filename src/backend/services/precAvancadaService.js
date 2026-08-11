@@ -130,7 +130,7 @@ function calcularTudo() {
   const grupos = Array.from(mapaGrupos.values()).map((g) => ({
     ...g,
     qtd: g.itens.length,
-    aplicaveis: g.itens.filter((i) => i.produto_id && !i.markup_invalido && i.preco_sugerido > 0).length,
+    aplicaveis: g.itens.filter((i) => i.produto_id && validoParaAplicar(i)).length,
   }));
 
   return {
@@ -197,6 +197,12 @@ function calcularProduto(p, ctx) {
   };
   const provaReal = dinheiro(precoSugerido - (pr.frete + pr.cartao + pr.impostos + pr.margem + pr.despesas + pr.custo_produto));
 
+  // Preco de venda que o usuario quer, digitado direto (sobrepoe o sugerido
+  // quando preenchido). Vazio/null continua usando o calculo automatico.
+  const precoManual = p.preco_venda_manual != null && p.preco_venda_manual !== '' ? Number(p.preco_venda_manual) : null;
+  const manual = precoManual != null;
+  const precoFinal = manual ? dinheiro(precoManual) : precoSugerido;
+
   return {
     ...p,
     custo_unitario: custoUnit,
@@ -206,9 +212,16 @@ function calcularProduto(p, ctx) {
     markup: Number(markup.toFixed(4)),
     markup_invalido: denomPct <= 0,
     preco_sugerido: precoSugerido,
+    manual,
+    preco_final: precoFinal,
     margem_atual_pct: pct1(margemAtual),
     prova_real: { ...pr, total: provaReal },
   };
+}
+
+/** Uma linha pode ser aplicada se tiver preco manual valido, ou (na falta dele) um preco sugerido valido. */
+function validoParaAplicar(calc) {
+  return calc.manual ? calc.preco_final > 0 : (!calc.markup_invalido && calc.preco_final > 0);
 }
 
 // ------------------------------- Escrita -------------------------------
@@ -274,7 +287,12 @@ function excluirDespesa(id) {
 const CAMPOS_PRODUTO = [
   'referencia', 'descricao', 'quantidade', 'valor_pedido', 'custo_embalagem',
   'custo_frete_fixo', 'frete_pct', 'taxa_cartao_pct', 'margem_pct',
-  'usar_margem_setor', 'preco_mercado', 'preco_praticado',
+  'usar_margem_setor', 'preco_mercado', 'preco_praticado', 'preco_venda_manual',
+];
+
+/** Campos "de configuracao" (nao especificos do produto) que dao pra replicar de uma linha pras outras do mesmo grupo. */
+const CAMPOS_REPLICAVEIS = [
+  'custo_embalagem', 'custo_frete_fixo', 'frete_pct', 'taxa_cartao_pct', 'margem_pct', 'usar_margem_setor',
 ];
 
 function criarProduto(dados = {}) {
@@ -315,7 +333,8 @@ function atualizarProduto(id, dados) {
       referencia=@referencia, descricao=@descricao, quantidade=@quantidade, valor_pedido=@valor_pedido,
       custo_embalagem=@custo_embalagem, custo_frete_fixo=@custo_frete_fixo, frete_pct=@frete_pct,
       taxa_cartao_pct=@taxa_cartao_pct, margem_pct=@margem_pct, usar_margem_setor=@usar_margem_setor,
-      preco_mercado=@preco_mercado, preco_praticado=@preco_praticado, atualizado_em=datetime('now','localtime')
+      preco_mercado=@preco_mercado, preco_praticado=@preco_praticado, preco_venda_manual=@preco_venda_manual,
+      atualizado_em=datetime('now','localtime')
     WHERE id=@id
   `).run({
     referencia: m.referencia || null,
@@ -330,6 +349,7 @@ function atualizarProduto(id, dados) {
     usar_margem_setor: (m.usar_margem_setor === false || m.usar_margem_setor === 0 || m.usar_margem_setor === '0') ? 0 : 1,
     preco_mercado: m.preco_mercado != null && m.preco_mercado !== '' ? Number(m.preco_mercado) : null,
     preco_praticado: m.preco_praticado != null && m.preco_praticado !== '' ? Number(m.preco_praticado) : null,
+    preco_venda_manual: m.preco_venda_manual != null && m.preco_venda_manual !== '' ? Number(m.preco_venda_manual) : null,
     id,
   });
   return calcularTudo();
@@ -389,22 +409,22 @@ function adicionarProdutoExistente(produtoId) {
   return { ok: true, estado: calcularTudo() };
 }
 
-/** Grava o preco sugerido de uma linha no produto real vinculado. */
+/** Grava o preco (manual, se informado, senao o sugerido) de uma linha no produto real vinculado. */
 function aplicarPreco(id) {
   const db = getDb();
   const row = db.prepare('SELECT * FROM precificacao_produtos WHERE id=?').get(id);
   if (!row) throw new AppError('Linha de precificação não encontrada.', 404);
   if (!row.produto_id) throw new AppError('Esta linha não está vinculada a um produto do cadastro.');
   const calc = calcularProduto(row, contextoCalculo());
-  if (calc.markup_invalido || !(calc.preco_sugerido > 0)) {
-    throw new AppError('Preço sugerido inválido — revise os percentuais (a soma não pode chegar a 100%).');
+  if (!validoParaAplicar(calc)) {
+    throw new AppError('Preço inválido — revise os percentuais (a soma não pode chegar a 100%) ou informe um preço de venda.');
   }
   db.prepare("UPDATE produtos SET preco_venda=?, atualizado_em=datetime('now','localtime') WHERE id=?")
-    .run(calc.preco_sugerido, row.produto_id);
-  return { ok: true, produto_id: row.produto_id, preco: calc.preco_sugerido, estado: calcularTudo() };
+    .run(calc.preco_final, row.produto_id);
+  return { ok: true, produto_id: row.produto_id, preco: calc.preco_final, estado: calcularTudo() };
 }
 
-/** Aplica o preco sugerido de todas as linhas vinculadas de um lote. */
+/** Aplica o preco (manual ou sugerido) de todas as linhas vinculadas de um lote. */
 function aplicarPrecoLote(lote) {
   const db = getDb();
   const rows = lote
@@ -416,13 +436,43 @@ function aplicarPrecoLote(lote) {
   const tx = db.transaction(() => {
     rows.forEach((row) => {
       const calc = calcularProduto(row, ctx);
-      if (calc.markup_invalido || !(calc.preco_sugerido > 0)) { ignorados++; return; }
-      upd.run(calc.preco_sugerido, row.produto_id);
+      if (!validoParaAplicar(calc)) { ignorados++; return; }
+      upd.run(calc.preco_final, row.produto_id);
       aplicados++;
     });
   });
   tx();
   return { aplicados, ignorados, estado: calcularTudo() };
+}
+
+/**
+ * Copia os campos "de configuracao" (frete, cartao, margem, embalagem etc.)
+ * de uma linha pras demais linhas do mesmo grupo/lote — evita ter que
+ * preencher produto por produto quando o lote inteiro usa os mesmos
+ * percentuais. Nao mexe em referencia/descricao/quantidade/valor/preco manual,
+ * que sao especificos de cada produto.
+ */
+function replicarParaGrupo(origemId) {
+  const db = getDb();
+  const origem = db.prepare('SELECT * FROM precificacao_produtos WHERE id = ?').get(origemId);
+  if (!origem) throw new AppError('Linha de precificação não encontrada.', 404);
+
+  const outras = origem.lote
+    ? db.prepare('SELECT id FROM precificacao_produtos WHERE lote = ? AND id != ?').all(origem.lote, origemId)
+    : db.prepare('SELECT id FROM precificacao_produtos WHERE lote IS NULL AND id != ?').all(origemId);
+
+  if (!outras.length) return { atualizadas: 0, estado: calcularTudo() };
+
+  const sets = CAMPOS_REPLICAVEIS.map((c) => `${c} = @${c}`).join(', ');
+  const upd = db.prepare(`UPDATE precificacao_produtos SET ${sets}, atualizado_em = datetime('now','localtime') WHERE id = @id`);
+  const valores = {};
+  CAMPOS_REPLICAVEIS.forEach((c) => { valores[c] = origem[c]; });
+
+  const tx = db.transaction(() => {
+    outras.forEach((o) => upd.run({ ...valores, id: o.id }));
+  });
+  tx();
+  return { atualizadas: outras.length, estado: calcularTudo() };
 }
 
 /** Exclui todas as linhas de um lote. */
@@ -440,4 +490,5 @@ module.exports = {
   criarDespesa, atualizarDespesa, excluirDespesa,
   criarProduto, atualizarProduto, excluirProduto,
   importarProdutos, adicionarProdutoExistente, aplicarPreco, aplicarPrecoLote, excluirLote,
+  replicarParaGrupo,
 };

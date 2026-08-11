@@ -25,6 +25,8 @@ router.delete('/produto/:id', asyncHandler((req, res) => res.json(svc.excluirPro
 
 // Aplicar o preco sugerido de volta ao produto do cadastro (uma linha ou um lote inteiro).
 router.post('/produto/:id/aplicar-preco', asyncHandler((req, res) => res.json(svc.aplicarPreco(req.params.id))));
+// Replicar os campos de configuracao de uma linha pras demais do mesmo grupo.
+router.post('/produto/:id/replicar', asyncHandler((req, res) => res.json(svc.replicarParaGrupo(req.params.id))));
 router.post('/aplicar-lote', asyncHandler((req, res) => res.json(svc.aplicarPrecoLote(req.body && req.body.lote))));
 router.post('/excluir-lote', asyncHandler((req, res) => res.json(svc.excluirLote(req.body && req.body.lote))));
 

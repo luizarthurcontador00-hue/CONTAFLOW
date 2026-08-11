@@ -311,13 +311,15 @@ window.PrecAvancada = (function () {
             <button class="btn btn--secundario" data-excluir-lote="${esc(g.lote)}">Remover grupo</button>` : ''}
           </div>
         </div>
-        ${aberto ? `<div class="prec-scroll mt-16"><table class="prec-tabela" style="min-width:1700px">
+        ${aberto ? `
+        <div class="prec-scroll-topo" data-scroll-topo><div data-scroll-topo-largura></div></div>
+        <div class="prec-scroll mt-16" data-scroll-tabela><table class="prec-tabela" style="min-width:1850px">
           <thead><tr>
             <th>Ref.</th><th>Descrição</th><th>Qtd</th><th>Valor pedido</th>
             <th>Custo unit.</th><th>Embalagem</th><th>Frete fixo</th><th>Custo total</th>
             <th>Frete %</th><th>Cartão %</th><th>Impostos %</th><th>Margem %</th><th>Margem setor?</th>
-            <th>Markup</th><th>⭐ Preço sugerido</th><th>Preço mercado</th><th>Preço praticado</th><th>Margem atual</th>
-            <th>Prova Real</th><th>Aplicar</th><th></th>
+            <th>Markup</th><th>⭐ Sugerido</th><th>Preço de venda</th><th>Preço mercado</th><th>Preço praticado</th><th>Margem atual</th>
+            <th>Prova Real</th><th>Aplicar</th><th title="Copiar embalagem/frete/cartão/margem desta linha pras outras do grupo">Replicar</th><th></th>
           </tr></thead>
           <tbody>${g.itens.map(linhaProduto).join('')}</tbody>
         </table></div>` : ''}
@@ -327,10 +329,10 @@ window.PrecAvancada = (function () {
   function linhaProduto(p) {
     const pr = p.prova_real;
     const provaOk = Math.abs(pr.total) < 0.005;
-    const podeAplicar = p.produto_id && !p.markup_invalido && p.preco_sugerido > 0;
+    const podeAplicar = p.produto_id && (p.manual ? p.preco_final > 0 : (!p.markup_invalido && p.preco_final > 0));
     return `<tr data-linha="${p.id}">
       <td style="min-width:80px"><input data-pp="referencia" value="${esc(p.referencia || '')}" /></td>
-      <td style="min-width:140px"><input data-pp="descricao" value="${esc(p.descricao || '')}" /></td>
+      <td style="min-width:140px"><input data-pp="descricao" value="${esc(p.descricao || '')}" title="${esc(p.descricao || '')}" /></td>
       <td style="width:70px"><input type="number" step="0.001" data-pp="quantidade" value="${p.quantidade}" /></td>
       <td style="width:110px"><input type="number" step="0.01" data-pp="valor_pedido" value="${p.valor_pedido}" /></td>
       <td class="celula-calc">${moeda(p.custo_unitario)}</td>
@@ -343,12 +345,14 @@ window.PrecAvancada = (function () {
       <td style="width:80px"><input type="number" step="0.1" data-pp="margem_pct" value="${p.margem_pct}" /></td>
       <td style="width:90px"><select data-pp="usar_margem_setor"><option value="1" ${p.usar_margem_setor ? 'selected' : ''}>Sim</option><option value="0" ${!p.usar_margem_setor ? 'selected' : ''}>Não</option></select></td>
       <td class="celula-calc ${p.markup_invalido ? 'celula-calc--erro' : ''}">${p.markup_invalido ? '—' : p.markup.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-      <td class="celula-calc celula-calc--destaque ${p.markup_invalido ? 'celula-calc--erro' : ''}">${p.markup_invalido ? 'inválido' : moeda(p.preco_sugerido)}</td>
+      <td class="celula-calc ${p.markup_invalido ? 'celula-calc--erro' : ''}">${p.markup_invalido ? 'inválido' : moeda(p.preco_sugerido)}</td>
+      <td style="width:120px"><input type="number" step="0.01" data-pp="preco_venda_manual" class="${p.manual ? 'input-manual' : ''}" placeholder="${p.preco_sugerido > 0 ? p.preco_sugerido.toFixed(2) : ''}" value="${p.preco_venda_manual != null ? p.preco_venda_manual : ''}" title="Deixe em branco para usar o preço sugerido, ou digite o preço de venda que você quer" /></td>
       <td style="width:110px"><input type="number" step="0.01" data-pp="preco_mercado" value="${p.preco_mercado != null ? p.preco_mercado : ''}" /></td>
       <td style="width:110px"><input type="number" step="0.01" data-pp="preco_praticado" value="${p.preco_praticado != null ? p.preco_praticado : ''}" /></td>
       <td class="celula-calc">${p.preco_praticado ? pct(p.margem_atual_pct) : '—'}</td>
       <td class="celula-calc ${provaOk ? '' : 'celula-calc--erro'}" title="Frete ${moeda(pr.frete)} · Cartão ${moeda(pr.cartao)} · Impostos ${moeda(pr.impostos)} · Margem ${moeda(pr.margem)} · Despesas ${moeda(pr.despesas)} · Custo ${moeda(pr.custo_produto)}">${moeda(pr.total)} ${provaOk ? '✓' : '⚠️'}</td>
-      <td style="width:90px">${p.produto_id ? `<button class="btn ${podeAplicar ? '' : 'btn--secundario'}" data-aplicar="${p.id}" ${podeAplicar ? '' : 'disabled'} title="Gravar preço sugerido no produto">Aplicar</button>` : '<span class="dica">avulso</span>'}</td>
+      <td style="width:90px">${p.produto_id ? `<button class="btn ${podeAplicar ? '' : 'btn--secundario'}" data-aplicar="${p.id}" ${podeAplicar ? '' : 'disabled'} title="Gravar ${p.manual ? 'o preço de venda digitado' : 'o preço sugerido'} no produto">Aplicar</button>` : '<span class="dica">avulso</span>'}</td>
+      <td style="width:50px"><button class="btn btn--secundario" data-replicar="${p.id}" title="Copiar embalagem, frete, cartão, margem e 'margem do setor' desta linha para as outras do grupo">📋</button></td>
       <td style="width:40px"><button class="btn btn--secundario" data-pp-del="${p.id}">✕</button></td>
     </tr>`;
   }
@@ -407,6 +411,38 @@ window.PrecAvancada = (function () {
       const del = tr.querySelector('[data-pp-del]');
       if (del) del.addEventListener('click', async () => {
         try { await recarregar(await API.del('/api/precificacao-avancada/produto/' + del.dataset.ppDel)); } catch (e) { UI.erro(e.message); }
+      });
+      const replicar = tr.querySelector('[data-replicar]');
+      if (replicar) replicar.addEventListener('click', async () => {
+        try {
+          const r = await API.post('/api/precificacao-avancada/produto/' + replicar.dataset.replicar + '/replicar', {});
+          if (r.atualizadas) UI.sucesso(`Valores replicados para ${r.atualizadas} outra(s) linha(s) do grupo.`);
+          else UI.toast('Não há outras linhas neste grupo para replicar.', 'info');
+          await recarregar(r.estado);
+        } catch (e) { UI.erro(e.message); }
+      });
+    });
+    ligarScrollDuplo(alvo);
+  }
+
+  // Espelha a barra de rolagem horizontal no topo de cada tabela larga, pra
+  // não precisar descer até o fim da planilha só pra rolar pros lados.
+  function ligarScrollDuplo(alvo) {
+    alvo.querySelectorAll('[data-grupo]').forEach((cartao) => {
+      const topo = cartao.querySelector('[data-scroll-topo]');
+      const largura = cartao.querySelector('[data-scroll-topo-largura]');
+      const tabelaBox = cartao.querySelector('[data-scroll-tabela]');
+      if (!topo || !largura || !tabelaBox) return;
+      const tabela = tabelaBox.querySelector('table');
+      largura.style.width = tabela.scrollWidth + 'px';
+      let sincronizando = false;
+      topo.addEventListener('scroll', () => {
+        if (sincronizando) return;
+        sincronizando = true; tabelaBox.scrollLeft = topo.scrollLeft; sincronizando = false;
+      });
+      tabelaBox.addEventListener('scroll', () => {
+        if (sincronizando) return;
+        sincronizando = true; topo.scrollLeft = tabelaBox.scrollLeft; sincronizando = false;
       });
     });
   }

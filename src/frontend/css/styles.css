@@ -434,6 +434,11 @@ kbd { background: var(--fundo-tabela-cabecalho); color: var(--texto); border: 1p
 .prec-legenda { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--texto-suave); margin-right: 16px; }
 .prec-legenda .amostra { width: 16px; height: 16px; border-radius: 4px; display: inline-block; border: 1px solid var(--borda); }
 .prec-scroll { overflow-x: auto; }
+/* Espelho da barra de rolagem no topo da tabela (alem da nativa, no fim) —
+   evita ter que descer ate o rodape da planilha so' pra rolar pros lados. */
+.prec-scroll-topo { overflow-x: auto; overflow-y: hidden; height: 14px; }
+.prec-scroll-topo > div { height: 1px; }
+.input-manual { border-color: var(--alerta, #f59e0b) !important; background: #fffbeb !important; }
 .prec-aviso {
   background: #fffbeb; border: 1px solid #fde68a; color: #92400e; border-radius: 10px;
   padding: 14px 16px; font-size: 13.5px; line-height: 1.5;

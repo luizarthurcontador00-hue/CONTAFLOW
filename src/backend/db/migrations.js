@@ -1751,6 +1751,16 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 48,
+    name: 'precificacao-preco-manual',
+    up(db) {
+      // Permite digitar o preco de venda que o usuario quer, em vez de aceitar
+      // so' o sugerido pelo markup divisor. Quando preenchido, "Aplicar" grava
+      // esse valor no produto; quando vazio, continua usando o sugerido.
+      db.exec(`ALTER TABLE precificacao_produtos ADD COLUMN preco_venda_manual REAL;`);
+    },
+  },
 ];
 
 /**
