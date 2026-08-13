@@ -1,0 +1,3 @@
+# .bat precisa de quebra de linha do Windows, senao a janela abre e fecha.
+*.bat text eol=crlf
+*.cmd text eol=crlf
