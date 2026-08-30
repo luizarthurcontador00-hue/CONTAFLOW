@@ -100,8 +100,8 @@ uma fase de transição.
 
 1. **Navegador puro.** Site acessado por endereço, sem instalador, sem
    `.exe`, sem Electron. Destino final confirmado.
-2. **Repositório novo**, separado do CONTAFLOW, chamado **`icmb`**. Criar o
-   repositório é parte deste trabalho.
+2. **Repositório novo**, separado do CONTAFLOW, chamado **`icmb`** — já
+   criado pelo usuário, privado. Não é mais parte do trabalho a criar.
 3. **Hospedagem: Cloudflare Pages (telas) + Supabase (todo o resto).**
    **Não existe backend próprio.** As telas conversam direto com o Supabase.
    Custo: R$ 0/mês nos planos gratuitos.
