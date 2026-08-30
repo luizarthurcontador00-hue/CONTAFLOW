@@ -100,8 +100,8 @@ uma fase de transição.
 
 1. **Navegador puro.** Site acessado por endereço, sem instalador, sem
    `.exe`, sem Electron. Destino final confirmado.
-2. **Repositório novo**, separado do CONTAFLOW. Criar o repositório é parte
-   deste trabalho. *(Nome a confirmar — sugestão: `contaflow-ong`.)*
+2. **Repositório novo**, separado do CONTAFLOW, chamado **`icmb`**. Criar o
+   repositório é parte deste trabalho.
 3. **Hospedagem: Cloudflare Pages (telas) + Supabase (todo o resto).**
    **Não existe backend próprio.** As telas conversam direto com o Supabase.
    Custo: R$ 0/mês nos planos gratuitos.
@@ -420,16 +420,15 @@ licença intacto.
 
 Não impedem começar, mas precisam de resposta antes de fechar:
 
-1. **Nome do repositório novo** (sugestão: `contaflow-ong`).
-2. **CRM e Viagens**: confirmar que ficam fora (o código diz que sim; a
+1. **CRM e Viagens**: confirmar que ficam fora (o código diz que sim; a
    spec anterior dizia que não).
-3. **Lista das travas sensíveis**: a proposta acima foi adaptada de uma
+2. **Lista das travas sensíveis**: a proposta acima foi adaptada de uma
    lista pensada para comércio — confirmar se cobre o que a ONG precisa.
-4. **Google Agenda**: confirmar que a sincronização fica fora da primeira
+3. **Google Agenda**: confirmar que a sincronização fica fora da primeira
    versão.
-5. **Endereço do site** (domínio próprio ou o endereço gratuito do
+4. **Endereço do site** (domínio próprio ou o endereço gratuito do
    Cloudflare Pages).
-6. **`categorias` e `avisos_enviados`**: decidir tabela por tabela se
+5. **`categorias` e `avisos_enviados`**: decidir tabela por tabela se
    migram.
-7. **Conflito de edição simultânea**: definir o comportamento para Chamada,
+6. **Conflito de edição simultânea**: definir o comportamento para Chamada,
    Caixa e Matrículas.
