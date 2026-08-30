@@ -5,6 +5,9 @@ dist/
 .DS_Store
 puppeteer-cache/
 
+# Worktrees isolados criados por agentes (Agent tool, isolation: "worktree")
+.claude/worktrees/
+
 # Banco de dados local e artefatos
 *.db
 *.db-shm
