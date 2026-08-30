@@ -28,7 +28,6 @@ directories:
 #  para nao excluir express/better-sqlite3.)
 files:
   - "**/*"
-  - "!_legado/**"
   - "!data/**"
   - "!dist/**"
   - "!**/*.md"

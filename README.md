@@ -80,6 +80,3 @@ instalador (com `latest.yml`), e os apps instalados se atualizam sozinhos.
 6. ✅ Financeiro (contas a pagar/receber)
 7. ✅ Dashboards e relatórios
 8. ✅ Empacotamento final e backup
-
-> A pasta `_legado/` contém o projeto anterior (ContaFlow, gestão de tarefas
-> contábeis) arquivado — não faz parte deste sistema.
