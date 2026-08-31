@@ -80,14 +80,17 @@ Mais três telas **novas**, que não existem hoje:
 - **CRM e Viagens.** A versão anterior desta spec listava as duas no escopo
   da ONG, mas isso estava errado: em `app.js:71`, `crm` e `viagens` são
   exclusivas do ramo `agencia_viagem` e **não aparecem no modo instituto**.
-  Ficam fora. *(Ponto a confirmar com o usuário — se ele quiser CRM na ONG,
-  é uma adição consciente, não uma migração.)*
+  Ficam fora — confirmado.
 - **Envio de e-mail (Brevo)** — descartado. Se em algum momento for preciso
   recuperar senha, o próprio Supabase faz isso.
 - **Sistema de licença por máquina** (`scripts/licenca/`) — não existe no
   produto web. Ver "Licenciamento" abaixo.
 - **Modo offline.** O sistema exige internet o tempo todo. Não há fila de
   operações nem sincronização posterior.
+- **Sincronização com Google Agenda** (`googleAgendaService.js`) — fica fora
+  da primeira versão, confirmado. A Agenda funciona normalmente, só não
+  sincroniza com o Google. O fluxo atual depende de um servidor local
+  (`127.0.0.1`) que não existe sem programa instalado.
 
 ### O que continua exatamente como está
 
@@ -157,8 +160,7 @@ Plataforma (Luiz, super-admin)
   altera nada) e `mexer` (cria, edita, exclui). Sem marcação = a tela nem
   aparece no menu.
 - Além disso existem **travas separadas** para ações sensíveis, marcadas
-  uma a uma por usuário. Lista proposta *(a confirmar — a lista original
-  discutida era de comércio e foi adaptada para a realidade da ONG)*:
+  uma a uma por usuário. Lista confirmada com o usuário:
   - ver valores financeiros (saldos, contas, caixa)
   - abrir e fechar caixa
   - excluir registros (turma, matrícula, pessoa, lançamento)
@@ -189,6 +191,8 @@ Security ligada.
   Substitui as pastas em disco de `src/backend/paths.js`.
 - **Sem servidor próprio.** As telas usam `supabase-js` e falam direto com
   o banco.
+- **Endereço do site**: o endereço gratuito do próprio Cloudflare Pages
+  (ex: `icmb.pages.dev`), sem domínio próprio — confirmado.
 
 ### Onde mora a regra de negócio — o ponto crítico desta migração
 
@@ -249,10 +253,13 @@ Todas ganham `organizacao_id` + RLS:
 | Documentos | `modelos_documento` |
 | Configurações | `config` |
 
-**A avaliar durante a construção** (uso ambíguo, compartilhado com módulos
-de comércio): `categorias`, `avisos_enviados`. A `avisos_enviados` em
-particular pode existir só por causa dos avisos de WhatsApp — se for esse o
-caso, **não migra**.
+**Resolvido**: `categorias` (a tabela com `markup_padrao`, de categoria de
+produto/comércio) **não migra** — o usuário confirmou que a categoria que a
+ONG usa para lançar despesa é `categorias_despesa`, que já está na lista
+acima, em Financeiro. `avisos_enviados` **não migra**: conferido no código
+(`avisosWhatsappService.js`), é usada exclusivamente pelo controle de
+duplicidade dos avisos automáticos de WhatsApp, que saiu do escopo por
+completo.
 
 ## Migração dos dados que já existem
 
@@ -306,8 +313,8 @@ uma passa a funcionar:
 fluxo de autorização que abre um servidor em `127.0.0.1` — isso **não
 funciona sem programa instalado**. Refazer no padrão web exige registrar um
 endereço de retorno no Google Cloud Console. **Fica fora da primeira
-versão**; a Agenda funciona normalmente, só não sincroniza com o Google.
-*(Decisão a confirmar.)*
+versão** (confirmado); a Agenda funciona normalmente, só não sincroniza com
+o Google.
 
 ## Licenciamento
 
@@ -332,10 +339,17 @@ licença intacto.
 - **Sessão expirada no meio do trabalho.** Ex: a pessoa passa 40 minutos
   preenchendo uma chamada e o login vence. Não pode perder o que digitou
   sem aviso — precisa pedir para entrar de novo e preservar o preenchimento.
-- **Duas pessoas na mesma tela ao mesmo tempo.** Agora que é multiusuário,
-  dois instrutores podem abrir a chamada da mesma turma. Definir o
-  comportamento: o último a salvar vence, ou avisa que alguém já alterou.
-  Vale principalmente para Chamada, Caixa e Matrículas.
+- **Duas pessoas na mesma tela ao mesmo tempo — resolvido.** O usuário
+  propôs travar por registro: ao abrir um lançamento (turma, movimento de
+  caixa, matrícula etc.) para editar, ele fica marcado como "em uso"; se
+  outra pessoa tentar abrir o mesmo registro nesse meio-tempo, o sistema não
+  deixa (ela é direcionada a criar/abrir outro, em vez de disputar o mesmo).
+  Vale para Chamada, Caixa e Matrículas — os pontos de maior risco de
+  choque. *Detalhe a resolver na construção, não coberto pela resposta do
+  usuário:* o que acontece se quem travou o registro fechar a aba ou perder
+  a conexão sem salvar — precisa de um destravamento automático por tempo
+  (ex: a trava expira sozinha depois de alguns minutos sem atividade), senão
+  o registro fica preso indefinidamente.
 - **Rodar a migração duas vezes.** Não pode duplicar. Precisa de trava:
   verificar se a organização já tem dados antes de inserir.
 - **Migração interrompida no meio** (queda de internet). Precisa poder
@@ -416,19 +430,9 @@ licença intacto.
 - [ ] Nenhum arquivo, chave ou script de licenciamento do desktop foi
       copiado para o repositório novo.
 
-## Pontos ainda em aberto
+## Pontos em aberto
 
-Não impedem começar, mas precisam de resposta antes de fechar:
-
-1. **CRM e Viagens**: confirmar que ficam fora (o código diz que sim; a
-   spec anterior dizia que não).
-2. **Lista das travas sensíveis**: a proposta acima foi adaptada de uma
-   lista pensada para comércio — confirmar se cobre o que a ONG precisa.
-3. **Google Agenda**: confirmar que a sincronização fica fora da primeira
-   versão.
-4. **Endereço do site** (domínio próprio ou o endereço gratuito do
-   Cloudflare Pages).
-5. **`categorias` e `avisos_enviados`**: decidir tabela por tabela se
-   migram.
-6. **Conflito de edição simultânea**: definir o comportamento para Chamada,
-   Caixa e Matrículas.
+Todos os pontos levantados na entrevista foram respondidos pelo usuário.
+Único detalhe que sobra para a construção decidir sozinha, por não ter sido
+coberto pela resposta do usuário: o mecanismo de destravamento automático
+por tempo do lock de edição simultânea (ver "Casos extremos a tratar").
