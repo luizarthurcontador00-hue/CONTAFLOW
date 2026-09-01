@@ -9,9 +9,11 @@ window.PaginaClientes = (function () {
   const ehProfessor = () => window.__ramoServico === 'professor';
   // No instituto nao ha venda nem fiado: a pessoa e aluno ou mantenedor.
   const ehInstituto = () => window.__ramoServico === 'instituto';
+  // Creche cobra mensalidade, nao fiado; usa os mesmos campos de aluno do instituto.
+  const ehCreche = () => window.__ramoServico === 'creche';
   const rotulo = (maiusc) => {
     if (ehInstituto()) return maiusc ? 'Pessoa' : 'pessoa';
-    return ehProfessor() ? (maiusc ? 'Aluno' : 'aluno') : (maiusc ? 'Cliente' : 'cliente');
+    return (ehProfessor() || ehCreche()) ? (maiusc ? 'Aluno' : 'aluno') : (maiusc ? 'Cliente' : 'cliente');
   };
 
   async function render(container) {
@@ -70,8 +72,8 @@ window.PaginaClientes = (function () {
         <div class="campo"><label>Telefone</label><input name="telefone" value="${UI.escapar(c.telefone || '')}" /></div>
         <div class="campo"><label>CPF</label><input name="cpf" value="${UI.escapar(c.cpf || '')}" /></div>
         <div class="campo"><label>E-mail</label><input name="email" type="email" value="${UI.escapar(c.email || '')}" /></div>
-        ${ehInstituto() ? '' : `<div class="campo"><label>Limite de crédito (fiado) R$</label><input name="limite_credito" type="number" step="0.01" min="0" value="${c.limite_credito != null ? c.limite_credito : 0}" /></div>`}
-        ${window.__ramoServico === 'instituto' ? `
+        ${(ehInstituto() || ehCreche()) ? '' : `<div class="campo"><label>Limite de crédito (fiado) R$</label><input name="limite_credito" type="number" step="0.01" min="0" value="${c.limite_credito != null ? c.limite_credito : 0}" /></div>`}
+        ${ehInstituto() ? `
         <div class="campo"><label>Natureza do cadastro</label>
           <select name="natureza">
             <option value="aluno" ${(c.natureza || 'aluno') === 'aluno' ? 'selected' : ''}>Aluno</option>
@@ -79,6 +81,8 @@ window.PaginaClientes = (function () {
             <option value="ambos" ${c.natureza === 'ambos' ? 'selected' : ''}>Aluno e mantenedor</option>
           </select>
           <span class="dica">Mantenedores aparecem em Arrecadação.</span></div>
+        ` : ''}
+        ${(ehInstituto() || ehCreche()) ? `
         <div class="campo"><label>Data de nascimento</label>
           <input name="data_nascimento" type="date" value="${UI.escapar(c.data_nascimento || '')}" /></div>
         <div class="campo"><label>Nome do responsável</label>
@@ -86,6 +90,8 @@ window.PaginaClientes = (function () {
           <span class="dica">Obrigatório na prática para alunos menores de idade.</span></div>
         <div class="campo"><label>Telefone do responsável</label>
           <input name="responsavel_telefone" value="${UI.escapar(c.responsavel_telefone || '')}" /></div>
+        ` : ''}
+        ${ehInstituto() ? `
         <div class="campo col-2" id="cli-instr-proprios" style="border-top:1px solid var(--borda);padding-top:14px">
           <label>Instrumentos próprios do aluno</label>
           <span class="dica">Aluno que traz o próprio instrumento não ocupa vaga do acervo — é o que permite a turma ser maior que a quantidade de instrumentos do instituto.</span>
@@ -165,7 +171,7 @@ window.PaginaClientes = (function () {
     let c;
     try { c = await API.get('/api/clientes/' + id); } catch (e) { UI.erro(e.message); return; }
     const corpo = `
-      ${ehInstituto() ? '' : `<div class="grid grid--cards mb-16">
+      ${(ehInstituto() || ehCreche()) ? '' : `<div class="grid grid--cards mb-16">
         <div class="card stat"><span class="stat__label">Deve (fiado)</span><span class="stat__value" style="font-size:22px;color:${Number(c.saldo_devedor) > 0 ? 'var(--alerta)' : 'var(--sucesso)'}">${UI.moeda(c.saldo_devedor)}</span></div>
         <div class="card stat"><span class="stat__label">Limite de crédito</span><span class="stat__value" style="font-size:22px">${UI.moeda(c.limite_credito)}</span></div>
         <div class="card stat"><span class="stat__label">Compras</span><span class="stat__value" style="font-size:22px">${c.compras.length}</span></div>
@@ -174,12 +180,12 @@ window.PaginaClientes = (function () {
         <tr><th>Telefone</th><td>${UI.escapar(c.telefone || '—')}</td><th>CPF</th><td>${UI.escapar(c.cpf || '—')}</td></tr>
         <tr><th>E-mail</th><td>${UI.escapar(c.email || '—')}</td><th>Endereço</th><td>${UI.escapar(c.endereco || '—')}</td></tr>
       </table>
-      <h3>${ehInstituto() ? 'Cobranças a receber' : 'Contas a receber (fiado)'}</h3>
+      <h3>${(ehInstituto() || ehCreche()) ? 'Cobranças a receber' : 'Contas a receber (fiado)'}</h3>
       ${c.contas.length ? `<table class="tabela"><thead><tr><th>Descrição</th><th>Venc.</th><th>Valor</th><th>Situação</th></tr></thead>
         <tbody>${c.contas.map((ct) => `<tr><td>${UI.escapar(ct.descricao)}</td><td>${ct.vencimento ? UI.dataHora(ct.vencimento) : '—'}</td><td>${UI.moeda(ct.valor)}</td>
           <td>${ct.status === 'pendente' ? '<span class="badge badge--alerta">Pendente</span>' : ct.status === 'recebido' ? '<span class="badge badge--ok">Recebido</span>' : '<span class="badge badge--muted">Cancelada</span>'}</td></tr>`).join('')}</tbody></table>`
         : '<p class="muted">Nenhuma conta.</p>'}
-      ${ehInstituto() ? '' : `<h3 class="mt-16">Últimas compras</h3>
+      ${(ehInstituto() || ehCreche()) ? '' : `<h3 class="mt-16">Últimas compras</h3>
       ${c.compras.length ? `<table class="tabela"><thead><tr><th>#</th><th>Data</th><th>Total</th><th>Status</th></tr></thead>
         <tbody>${c.compras.map((v) => `<tr><td>${v.id}</td><td>${UI.dataHora(v.data)}</td><td>${UI.moeda(v.valor_total)}</td><td>${v.status}</td></tr>`).join('')}</tbody></table>`
         : '<p class="muted">Nenhuma compra.</p>'}`}`;

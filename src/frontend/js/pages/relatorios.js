@@ -13,7 +13,7 @@ window.PaginaRelatorios = (function () {
     // "Estoque atual" e "Produtos parados" so fazem sentido para quem vende produtos
     // (nunca para o ramo "professor", mesmo que o perfil esteja como "ambos").
     const ehInstituto = window.__ramoServico === 'instituto';
-    const temProdutos = window.__perfilNegocio !== 'servico' && window.__ramoServico !== 'professor' && !ehInstituto;
+    const temProdutos = window.__perfilNegocio !== 'servico' && window.__ramoServico !== 'professor' && window.__ramoServico !== 'creche' && !ehInstituto;
     const temCRM = window.__ramoServico === 'agencia_viagem';
     // Num instituto sem fins lucrativos nao ha venda nem produto: o que se
     // relata e a doacao que entrou e quem esta sendo atendido.

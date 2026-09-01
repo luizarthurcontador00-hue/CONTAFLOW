@@ -30,9 +30,13 @@ window.PaginaAgenda = (function () {
   // Num instituto sem fins lucrativos a aula nao vira venda: nao ha o que
   // faturar, nem valor ou servico a cobrar do aluno.
   const ehInstituto = () => window.__ramoServico === 'instituto';
-  const rCliente = (m) => ((ehProfessor() || ehInstituto()) ? (m ? 'Aluno' : 'aluno') : (m ? 'Cliente' : 'cliente'));
+  // Creche cobra mensalidade fixa (Financeiro > Mensalidades), nunca por
+  // agendamento avulso: nao ha o que faturar aqui, como no instituto.
+  const ehCreche = () => window.__ramoServico === 'creche';
+  const crecheComTurma = () => ehCreche() && !!window.__crecheComTurma;
+  const rCliente = (m) => ((ehProfessor() || ehInstituto() || ehCreche()) ? (m ? 'Aluno' : 'aluno') : (m ? 'Cliente' : 'cliente'));
   const rServico = (m) => (ehInstituto() ? (m ? 'Atividade' : 'atividade') : ehProfessor() ? (m ? 'Matéria' : 'matéria') : (m ? 'Serviço' : 'serviço'));
-  const rAula = (m) => ((ehProfessor() || ehInstituto()) ? (m ? 'Aula' : 'aula') : (m ? 'Agendamento' : 'agendamento'));
+  const rAula = (m) => ((ehProfessor() || ehInstituto() || ehCreche()) ? (m ? 'Aula' : 'aula') : (m ? 'Agendamento' : 'agendamento'));
   const rProf = (m) => (ehInstituto() ? (m ? 'Instrutor' : 'instrutor') : (m ? 'Profissional' : 'profissional'));
   const rProfs = () => (ehInstituto() ? 'instrutores' : 'profissionais');
 
@@ -79,13 +83,13 @@ window.PaginaAgenda = (function () {
       API.get('/api/produtos?eh_servico=1').catch(() => []),
     ]);
     if (!ehInstituto()) await API.post('/api/agenda/aulas-recorrentes/gerar-pendentes', {}).catch(() => {});
-    if (ehInstituto() && vista === 'recorrentes') vista = 'dia';
+    if ((ehInstituto() || crecheComTurma()) && vista === 'recorrentes') vista = 'dia';
 
     container.innerHTML = `
       <div class="subtabs">
         <button class="subtab ${vista === 'dia' ? 'subtab--ativa' : ''}" data-vista="dia">📋 Dia</button>
         <button class="subtab ${vista === 'mes' ? 'subtab--ativa' : ''}" data-vista="mes">📆 Mês</button>
-        ${ehInstituto() ? '' : `<button class="subtab ${vista === 'recorrentes' ? 'subtab--ativa' : ''}" data-vista="recorrentes">🔁 ${rAula(true)} fixa</button>`}
+        ${(ehInstituto() || crecheComTurma()) ? '' : `<button class="subtab ${vista === 'recorrentes' ? 'subtab--ativa' : ''}" data-vista="recorrentes">🔁 ${rAula(true)} fixa</button>`}
       </div>
       <div id="ag-corpo"></div>`;
     container.querySelectorAll('[data-vista]').forEach((b) => b.addEventListener('click', () => {
@@ -170,10 +174,10 @@ window.PaginaAgenda = (function () {
         return `<div class="agenda-item" style="border-left-color:${a.profissional_cor || 'var(--primaria)'}${a.suspensa ? ';opacity:.55' : ''}">
           <div class="agenda-item__hora">${UI.escapar(a.hora_inicio)}${a.hora_fim ? `<span class="dica">até ${UI.escapar(a.hora_fim)}</span>` : ''}</div>
           <div class="agenda-item__info">
-            <strong>${UI.escapar(nome)}</strong> ${badgeStatus(a)}${a.venda_id && !ehInstituto() ? ' <span class="badge badge--ok">faturado</span>' : ''}${a.aula_recorrente_id ? ` <span class="badge badge--muted" title="Gerado automaticamente de uma ${rAula()} fixa">🔁 fixa</span>` : ''}
+            <strong>${UI.escapar(nome)}</strong> ${badgeStatus(a)}${a.venda_id && !ehInstituto() && !ehCreche() ? ' <span class="badge badge--ok">faturado</span>' : ''}${a.aula_recorrente_id ? ` <span class="badge badge--muted" title="Gerado automaticamente de uma ${rAula()} fixa">🔁 fixa</span>` : ''}
             <div class="dica">${a.suspensa ? `Suspensa${a.motivo_suspensao ? ' — ' + UI.escapar(a.motivo_suspensao) : ''}` : `${UI.escapar(a.servico_nome || rServico(true))}${a.profissional_nome ? ' · ' + UI.escapar(a.profissional_nome) : ''}${tel ? ' · ' + UI.escapar(tel) : ''}`}</div>
           </div>
-          <div class="agenda-item__valor">${a.suspensa || ehInstituto() ? '' : UI.moeda(a.valor)}</div>
+          <div class="agenda-item__valor">${a.suspensa || ehInstituto() || ehCreche() ? '' : UI.moeda(a.valor)}</div>
           <div class="agenda-item__acoes">
             ${tel ? `<button class="btn btn--secundario" data-zap="${a.id}" title="Enviar confirmação por WhatsApp">💬</button>` : ''}
             <button class="btn btn--secundario" data-editar="${a.id}">Abrir</button>
@@ -303,12 +307,12 @@ window.PaginaAgenda = (function () {
     catch (e) { alvo.innerHTML = UI.escapar(e.message); return; }
     if (!aulasRecorrentes.length) { alvo.innerHTML = `<p class="muted">Nenhum${rAula() === 'aula' ? 'a' : ''} ${rAula()} fixa cadastrada.</p>`; return; }
     alvo.innerHTML = `<table class="tabela">
-      <thead><tr><th>${rCliente(true)}</th><th>${rServico(true)}</th><th>Dia/Horário</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>${rCliente(true)}</th>${ehCreche() ? '' : `<th>${rServico(true)}</th>`}<th>Dia/Horário</th>${ehCreche() ? '' : '<th>Valor</th>'}<th>Status</th><th></th></tr></thead>
       <tbody>${aulasRecorrentes.map((r) => `<tr style="${r.ativa ? '' : 'opacity:.55'}">
         <td>${UI.escapar(r.aluno_cadastro_nome || r.aluno_nome || '—')}</td>
-        <td>${UI.escapar(r.materia_nome || '—')}</td>
+        ${ehCreche() ? '' : `<td>${UI.escapar(r.materia_nome || '—')}</td>`}
         <td>${DIAS_SEMANA[r.dia_semana]} · ${UI.escapar(r.hora_inicio)}${r.hora_fim ? ' às ' + UI.escapar(r.hora_fim) : ''}</td>
-        <td>${UI.moeda(r.valor)}</td>
+        ${ehCreche() ? '' : `<td>${UI.moeda(r.valor)}</td>`}
         <td>${r.ativa ? '<span class="badge badge--ok">Ativa</span>' : '<span class="badge badge--muted">Pausada</span>'}</td>
         <td style="text-align:right;white-space:nowrap">
           <button class="btn btn--secundario" data-rec-pausar="${r.id}" data-ativa="${r.ativa}">${r.ativa ? 'Pausar' : 'Reativar'}</button>
@@ -348,12 +352,12 @@ window.PaginaAgenda = (function () {
           </select></div>
           <div class="campo"><label>Ou nome do ${rCliente()}</label><input id="rec-aluno-nome" value="${UI.escapar(r ? r.aluno_nome || '' : '')}" placeholder="${rCliente(true)} sem cadastro" /></div>
         </div>
-        <div class="form-grid mt-16">
+        ${ehCreche() ? '' : `<div class="form-grid mt-16">
           <div class="campo"><label>${rServico(true)}</label><select id="rec-materia">
             <option value="">— selecione —</option>${servicos.map((s) => `<option value="${s.id}" data-preco="${s.preco_venda}" ${r && String(r.produto_id) === String(s.id) ? 'selected' : ''}>${UI.escapar(s.nome)}</option>`).join('')}
           </select></div>
           <div class="campo"><label>Valor (R$)</label><input id="rec-valor" type="number" step="0.01" min="0" value="${r ? r.valor : ''}" /></div>
-        </div>
+        </div>`}
         ${profissionais.length ? `<div class="campo mt-16"><label>Profissional</label><select id="rec-prof">
           <option value="">—</option>${profissionais.map((p) => `<option value="${p.id}" ${r && String(r.profissional_id) === String(p.id) ? 'selected' : ''}>${UI.escapar(p.nome)}</option>`).join('')}
         </select></div>` : ''}
@@ -375,7 +379,7 @@ window.PaginaAgenda = (function () {
       aoAbrir: (el) => {
         const materia = el.querySelector('#rec-materia');
         const valor = el.querySelector('#rec-valor');
-        materia.addEventListener('change', () => {
+        if (materia && valor) materia.addEventListener('change', () => {
           const opt = materia.selectedOptions[0];
           if (opt && opt.dataset.preco && !valor.value) valor.value = opt.dataset.preco;
         });
@@ -390,8 +394,8 @@ window.PaginaAgenda = (function () {
         const dados = {
           aluno_id: el.querySelector('#rec-aluno').value || null,
           aluno_nome: el.querySelector('#rec-aluno-nome').value,
-          produto_id: el.querySelector('#rec-materia').value || null,
-          valor: el.querySelector('#rec-valor').value,
+          produto_id: el.querySelector('#rec-materia') ? el.querySelector('#rec-materia').value || null : null,
+          valor: el.querySelector('#rec-valor') ? el.querySelector('#rec-valor').value : 0,
           profissional_id: el.querySelector('#rec-prof') ? el.querySelector('#rec-prof').value || null : null,
           dia_semana: el.querySelector('#rec-dia').value,
           hora_inicio: el.querySelector('#rec-hora-ini').value,
@@ -425,7 +429,7 @@ window.PaginaAgenda = (function () {
           <div class="campo"><label>${rProf(true)}</label><select name="profissional_id">
             <option value="">—</option>${profissionais.map((p) => `<option value="${p.id}" ${String(a.profissional_id) === String(p.id) ? 'selected' : ''}>${UI.escapar(p.nome)}</option>`).join('')}
           </select></div>
-          ${ehInstituto() ? '' : `
+          ${(ehInstituto() || ehCreche()) ? '' : `
           <div class="campo"><label>${rServico(true)}</label><select name="produto_id" id="ag-serv">
             <option value="">— selecione —</option>${servicos.map((s) => `<option value="${s.id}" data-preco="${s.preco_venda}" ${String(a.produto_id) === String(s.id) ? 'selected' : ''}>${UI.escapar(s.nome)}</option>`).join('')}
           </select><span class="dica">Necessário para faturar o atendimento.</span></div>
@@ -473,19 +477,19 @@ window.PaginaAgenda = (function () {
       titulo: `${a.hora_inicio} — ${nome}`, tamanho: 'modal--pequeno', mostrarConfirmar: false,
       corpoHTML: `
         <table class="tabela">
-          <tr><th>Status</th><td>${badgeStatus(a)}${a.venda_id && !ehInstituto() ? ' <span class="badge badge--ok">faturado (venda #' + a.venda_id + ')</span>' : ''}${a.aula_recorrente_id ? ` <span class="badge badge--muted">🔁 ${rAula()} fixa</span>` : ''}</td></tr>
+          <tr><th>Status</th><td>${badgeStatus(a)}${a.venda_id && !ehInstituto() && !ehCreche() ? ' <span class="badge badge--ok">faturado (venda #' + a.venda_id + ')</span>' : ''}${a.aula_recorrente_id ? ` <span class="badge badge--muted">🔁 ${rAula()} fixa</span>` : ''}</td></tr>
           ${a.suspensa ? `<tr><th>Motivo</th><td>${UI.escapar(a.motivo_suspensao || '—')}</td></tr>` : ''}
           <tr><th>Data</th><td>${diaLabel(a.data)}</td></tr>
           <tr><th>Horário</th><td>${UI.escapar(a.hora_inicio)}${a.hora_fim ? ' às ' + UI.escapar(a.hora_fim) : ''}</td></tr>
-          ${ehInstituto() ? '' : `<tr><th>${rServico(true)}</th><td>${UI.escapar(a.servico_nome || '—')}</td></tr>`}
+          ${(ehInstituto() || ehCreche()) ? '' : `<tr><th>${rServico(true)}</th><td>${UI.escapar(a.servico_nome || '—')}</td></tr>`}
           <tr><th>${ehInstituto() ? 'Instrutor' : 'Profissional'}</th><td>${UI.escapar(a.profissional_nome || '—')}</td></tr>
           <tr><th>Telefone</th><td>${UI.escapar(tel || '—')}</td></tr>
-          ${ehInstituto() ? '' : `<tr><th>Valor</th><td><strong>${UI.moeda(a.valor)}</strong></td></tr>`}
+          ${(ehInstituto() || ehCreche()) ? '' : `<tr><th>Valor</th><td><strong>${UI.moeda(a.valor)}</strong></td></tr>`}
           ${a.observacao ? `<tr><th>Obs.</th><td>${UI.escapar(a.observacao)}</td></tr>` : ''}
         </table>
         ${a.suspensa
           ? '<p class="dica mt-16">Este dia está suspenso — para reabrir, use a tela de Chamada.</p>'
-          : ehInstituto()
+          : (ehInstituto() || crecheComTurma())
             ? '<p class="dica mt-16">Para suspender esta aula, use a tela de Chamada.</p>'
             : `<div class="campo mt-16"><label>Mudar status</label>
               <select id="det-status" ${a.venda_id ? 'disabled' : ''}>
@@ -495,12 +499,12 @@ window.PaginaAgenda = (function () {
         const foot = el.querySelector('.modal__foot');
         foot.innerHTML = `
           <div class="flex gap-12" style="flex-wrap:wrap;width:100%">
-            ${!a.suspensa && !ehInstituto() ? `<button class="btn btn--secundario" id="d-status" ${a.venda_id ? 'disabled' : ''}>Atualizar status</button>` : ''}
+            ${!a.suspensa && !ehInstituto() && !crecheComTurma() ? `<button class="btn btn--secundario" id="d-status" ${a.venda_id ? 'disabled' : ''}>Atualizar status</button>` : ''}
             ${tel ? '<button class="btn btn--secundario" id="d-zap">💬 WhatsApp</button>' : ''}
             <div class="cresce"></div>
             ${!a.venda_id ? '<button class="btn btn--secundario" id="d-editar">Editar</button>' : ''}
             ${!a.venda_id ? '<button class="btn btn--perigo" id="d-excluir">Excluir</button>' : ''}
-            ${!a.venda_id && !ehInstituto() ? '<button class="btn" id="d-faturar">💲 Faturar</button>' : ''}
+            ${!a.venda_id && !ehInstituto() && !ehCreche() ? '<button class="btn" id="d-faturar">💲 Faturar</button>' : ''}
           </div>`;
         const btnStatus = foot.querySelector('#d-status');
         if (btnStatus) btnStatus.addEventListener('click', async () => {

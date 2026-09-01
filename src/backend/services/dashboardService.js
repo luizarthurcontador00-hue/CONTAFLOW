@@ -464,7 +464,9 @@ function centralAtencao() {
   // Num instituto sem fins lucrativos nao existe venda, estoque nem meta de
   // faturamento: o panorama dele e outro (painelInstituto) e os alertas do
   // dia a dia ficam no sino de avisos. Aqui sobram so as contas e lembretes.
-  if (ramoServico === 'instituto') {
+  // Creche tambem cobra mensalidade fixa e nao vende produto — mesmo
+  // tratamento do instituto: so contas e lembretes, sem venda/estoque/meta.
+  if (ramoServico === 'instituto' || ramoServico === 'creche') {
     // eslint-disable-next-line global-require
     const lembretesInstituto = require('./lembretesService').pendentesVencidos();
     if (lembretesInstituto.length > 0) {

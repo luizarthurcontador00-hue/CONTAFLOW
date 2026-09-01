@@ -118,7 +118,7 @@ window.PaginaInicio = (function () {
     if (!alvo) return;
     if (window.__ramoServico === 'professor') return carregarResumoProfessor(alvo);
 
-    const temProdutos = window.__perfilNegocio !== 'servico';
+    const temProdutos = window.__perfilNegocio !== 'servico' && window.__ramoServico !== 'creche';
     let r;
     try { r = await API.get('/api/dashboard/resumo'); } catch { alvo.innerHTML = ''; return; }
     alvo.innerHTML = `

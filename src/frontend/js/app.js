@@ -80,6 +80,10 @@
   // Relatorio de impacto.
   const ESCONDIDAS_NO_INSTITUTO = ['pdv', 'vendas', 'sacolas', 'precificacao', 'comissoes', 'ordens', 'compras', 'produtos', 'catalogo', 'etiquetas', 'lote', 'conferencia', 'dashboard', 'servicos'];
 
+  // Creche/escolinha: cobra mensalidade, não vende produto. Mesma lógica de
+  // esconder comércio que o instituto já usa.
+  const ESCONDIDAS_NA_CRECHE = ['pdv', 'vendas', 'sacolas', 'precificacao', 'comissoes', 'ordens', 'compras', 'produtos', 'catalogo', 'etiquetas', 'lote', 'conferencia', 'dashboard', 'servicos'];
+
   // O instituto usa as telas de "serviço" (agenda, turmas, chamada...), então
   // conta como serviço na hora de filtrar rota por perfil.
   function perfilAtende(p) {
@@ -93,10 +97,19 @@
   // gráfica) — e a despesa se amarra a ele. Por isso o cadastro fica visível
   // mesmo sendo, na origem, um módulo de comércio.
   const EXTRAS_NO_INSTITUTO = ['fornecedores'];
+  // Mesmo raciocínio pra creche: paga merenda, material didático etc.
+  const EXTRAS_NA_CRECHE = ['fornecedores'];
 
   function rotaVisivel(nome) {
     if (ramo === 'instituto' && ESCONDIDAS_NO_INSTITUTO.includes(nome)) return false;
     if (ramo === 'instituto' && EXTRAS_NO_INSTITUTO.includes(nome)) return true;
+    if (ramo === 'creche' && ESCONDIDAS_NA_CRECHE.includes(nome)) return false;
+    if (ramo === 'creche' && EXTRAS_NA_CRECHE.includes(nome)) return true;
+    // Creche organizada por turma usa Cursos/Turmas/Chamada como o instituto;
+    // sem turma, a chamada é feita pela própria Agenda (aula fixa por criança).
+    if ((nome === 'cursos' || nome === 'turmas' || nome === 'chamada') && ramo === 'creche') {
+      return !!window.__crecheComTurma;
+    }
     if (nome === 'ordens' && (perfil === 'servico' || perfil === 'ambos') && (ramo === 'salao' || ramo === 'agencia_viagem' || ramo === 'professor')) return false;
     if (nome === 'agenda' && (perfil === 'servico' || perfil === 'ambos') && ramo === 'agencia_viagem') return false;
     if ((nome === 'pdv' || nome === 'vendas' || nome === 'comissoes' || nome === 'dashboard') && (perfil === 'servico' || perfil === 'ambos') && ramo === 'professor') return false;
@@ -190,6 +203,13 @@
       if (nome === 'inicio') return 'Panorama do instituto';
       return tituloPadrao;
     }
+    if (ramo === 'creche') {
+      if (nome === 'clientes') return 'Alunos e responsáveis';
+      if (nome === 'financeiro') return 'Financeiro da creche';
+      if (nome === 'inicio') return 'Panorama da creche';
+      if (nome === 'agenda' && !window.__crecheComTurma) return 'Chamada';
+      return tituloPadrao;
+    }
     if (ramo !== 'professor') return tituloPadrao;
     if (nome === 'clientes') return 'Alunos';
     if (nome === 'agenda') return 'Aulas';
@@ -245,12 +265,13 @@
     let cfg = {};
     try { cfg = await API.get('/api/config'); } catch (_) { cfg = {}; }
     perfil = PERFIS.includes(cfg.perfil_negocio) ? cfg.perfil_negocio : 'ambos';
-    ramo = ['salao', 'oficina', 'agencia_viagem', 'professor', 'instituto', 'geral'].includes(cfg.ramo_servico) ? cfg.ramo_servico : 'geral';
+    ramo = ['salao', 'oficina', 'agencia_viagem', 'professor', 'instituto', 'creche', 'geral'].includes(cfg.ramo_servico) ? cfg.ramo_servico : 'geral';
     // A categoria "instituto" define o ramo sozinha — não existe ONG de salão.
     if (perfil === 'instituto') ramo = 'instituto';
     else if (ramo === 'instituto') perfil = 'instituto';
     window.__perfilNegocio = perfil;
     window.__ramoServico = ramo;
+    window.__crecheComTurma = cfg.creche_com_turma === '1';
     aplicarPerfil();
     aplicarRotulosRamo();
     aplicarAparencia(cfg);
@@ -271,6 +292,10 @@
       if (clientesTxt) clientesTxt.textContent = 'Alunos';
       if (clientesIc) clientesIc.textContent = '🎓';
       if (agendaTxt) agendaTxt.textContent = 'Aulas';
+    } else if (ramo === 'creche') {
+      if (clientesTxt) clientesTxt.textContent = 'Alunos';
+      if (clientesIc) clientesIc.textContent = '🧒';
+      if (agendaTxt) agendaTxt.textContent = window.__crecheComTurma ? 'Agenda' : 'Chamada';
     } else {
       if (clientesTxt) clientesTxt.textContent = 'Clientes';
       if (clientesIc) clientesIc.textContent = '👥';
@@ -351,7 +376,15 @@
             <button type="button" class="ob-opcao" data-r="oficina"><span class="ob-opcao__ic">🔧</span><strong>Oficina / Assistência técnica</strong><span class="dica">Ordens de serviço, pátio e peças</span></button>
             <button type="button" class="ob-opcao" data-r="agencia_viagem"><span class="ob-opcao__ic">✈️</span><strong>Agência de viagem</strong><span class="dica">CRM de leads e calendário de viagens</span></button>
             <button type="button" class="ob-opcao" data-r="professor"><span class="ob-opcao__ic">🎓</span><strong>Professor particular / Aulas</strong><span class="dica">Alunos, aula fixa recorrente e mensalidade</span></button>
+            <button type="button" class="ob-opcao" data-r="creche"><span class="ob-opcao__ic">🧒</span><strong>Creche / Escolinha</strong><span class="dica">Turmas ou horário por criança, matrícula, chamada e mensalidade</span></button>
             <button type="button" class="ob-opcao" data-r="geral"><span class="ob-opcao__ic">💼</span><strong>Outros serviços</strong><span class="dica">Consultoria, autônomo, geral</span></button>
+          </div>
+        </div>
+        <div class="campo mt-16" id="ob-creche-turma-wrap" style="display:none">
+          <label>Você organiza as crianças em turmas/salas?</label>
+          <div id="ob-creche-turma" class="ob-perfil">
+            <button type="button" class="ob-opcao ativa" data-ct="1"><span class="ob-opcao__ic">🏫</span><strong>Sim, por turma</strong><span class="dica">Turmas, matrícula e chamada por turma</span></button>
+            <button type="button" class="ob-opcao" data-ct="0"><span class="ob-opcao__ic">🧒</span><strong>Não, só por criança</strong><span class="dica">Horário fixo e chamada individual, sem agrupar em turma</span></button>
           </div>
         </div>
         <div class="dica mt-16" id="ob-instituto-aviso" style="display:none">
@@ -361,11 +394,13 @@
         </div>`;
       let escolha = 'ambos';
       let ramoEscolha = 'salao';
+      let crecheComTurmaEscolha = '1';
       Modal.abrir({
         titulo: 'Configuração inicial', tamanho: 'modal--grande', corpoHTML: corpo, textoConfirmar: 'Concluir',
         aoAbrir: (el) => {
           const ramoWrap = el.querySelector('#ob-ramo-wrap');
           const aviso = el.querySelector('#ob-instituto-aviso');
+          const crecheTurmaWrap = el.querySelector('#ob-creche-turma-wrap');
           const nomeLabel = el.querySelector('#ob-nome-label');
           const nomeInput = el.querySelector('#ob-nome');
           UI.ligarMascaraDocumento(el.querySelector('#ob-doc'));
@@ -374,6 +409,7 @@
             aviso.style.display = escolha === 'instituto' ? '' : 'none';
             nomeLabel.textContent = escolha === 'instituto' ? 'Nome do instituto *' : 'Nome da empresa *';
             nomeInput.placeholder = escolha === 'instituto' ? 'Ex.: Instituto Harmonia' : 'Ex.: Barbearia do João';
+            crecheTurmaWrap.style.display = ((escolha === 'servico' || escolha === 'ambos') && ramoEscolha === 'creche') ? '' : 'none';
           };
           el.querySelectorAll('#ob-perfil .ob-opcao').forEach((b) => b.addEventListener('click', () => {
             escolha = b.dataset.p;
@@ -383,6 +419,11 @@
           el.querySelectorAll('#ob-ramo .ob-opcao').forEach((b) => b.addEventListener('click', () => {
             ramoEscolha = b.dataset.r;
             el.querySelectorAll('#ob-ramo .ob-opcao').forEach((x) => x.classList.toggle('ativa', x === b));
+            atualizarRamoWrap();
+          }));
+          el.querySelectorAll('#ob-creche-turma .ob-opcao').forEach((b) => b.addEventListener('click', () => {
+            crecheComTurmaEscolha = b.dataset.ct;
+            el.querySelectorAll('#ob-creche-turma .ob-opcao').forEach((x) => x.classList.toggle('ativa', x === b));
           }));
           atualizarRamoWrap();
           // Sem botão de cancelar: o onboarding é obrigatório no primeiro uso.
@@ -401,6 +442,7 @@
               loja_cnpj: el.querySelector('#ob-doc').value,
               perfil_negocio: escolha,
               ramo_servico: ramoDoPerfil(escolha, ramoEscolha),
+              creche_com_turma: crecheComTurmaEscolha,
               onboarding_ok: '1',
             });
             // Alinha a atividade da precificação ao perfil escolhido.

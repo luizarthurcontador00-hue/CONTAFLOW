@@ -447,6 +447,15 @@ function exportarContador({ inicio, fim } = {}) {
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   }
 
+  // Creche cobra mensalidade (contas a receber), nao vende produto: as abas
+  // de Vendas/Compras ficariam sempre vazias, entao saem da planilha.
+  if (ramoCfg && ramoCfg.valor === 'creche') {
+    addSheet('Contas Pagas', contasPagas);
+    addSheet('Contas Recebidas', contasRecebidas);
+    addSheet('Extrato Conciliado', extratoConciliado);
+    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  }
+
   addSheet('Vendas', vendas);
   addSheet('Compras', compras);
   addSheet('Contas Pagas', contasPagas);

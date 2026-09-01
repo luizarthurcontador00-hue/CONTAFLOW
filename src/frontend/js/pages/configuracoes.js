@@ -85,9 +85,17 @@ window.PaginaConfiguracoes = (function () {
               <option value="oficina" ${cfg.ramo_servico === 'oficina' ? 'selected' : ''}>🔧 Oficina / Assistência técnica</option>
               <option value="agencia_viagem" ${cfg.ramo_servico === 'agencia_viagem' ? 'selected' : ''}>✈️ Agência de viagem</option>
               <option value="professor" ${cfg.ramo_servico === 'professor' ? 'selected' : ''}>🎓 Professor particular / Aulas</option>
+              <option value="creche" ${cfg.ramo_servico === 'creche' ? 'selected' : ''}>🧒 Creche / Escolinha infantil</option>
               <option value="geral" ${cfg.ramo_servico === 'geral' ? 'selected' : ''}>💼 Outros serviços</option>
             </select>
             <span class="dica">Refina o que aparece no menu — ex.: "Ordens & Orçamentos" (Pátio/OS) fica escondido para Salão.</span>
+          </div>
+          <div class="campo col-2" id="cfg-creche-turma-wrap" style="display:${cfg.ramo_servico === 'creche' ? '' : 'none'}">
+            <label>As crianças são organizadas em turmas/salas?</label>
+            <select name="creche_com_turma">
+              <option value="1" ${(cfg.creche_com_turma ?? '1') === '1' ? 'selected' : ''}>Sim — turmas, matrícula e chamada por turma</option>
+              <option value="0" ${cfg.creche_com_turma === '0' ? 'selected' : ''}>Não — horário fixo e chamada por criança</option>
+            </select>
           </div>
           <div class="campo col-2 dica" id="cfg-instituto-aviso" style="display:${perfilAtual === 'instituto' ? '' : 'none'}">
             🎼 No modo Instituto o sistema não mostra venda, PDV, estoque nem lucro:
@@ -151,6 +159,9 @@ window.PaginaConfiguracoes = (function () {
       const ehInst = e.target.value === 'instituto';
       alvo.querySelector('#cfg-ramo-wrap').style.display = (e.target.value === 'servico' || e.target.value === 'ambos') ? '' : 'none';
       alvo.querySelector('#cfg-instituto-aviso').style.display = ehInst ? '' : 'none';
+    });
+    alvo.querySelector('select[name="ramo_servico"]').addEventListener('change', (e) => {
+      alvo.querySelector('#cfg-creche-turma-wrap').style.display = e.target.value === 'creche' ? '' : 'none';
     });
 
     alvo.querySelector('#form-cfg').addEventListener('submit', async (ev) => {

@@ -372,11 +372,14 @@ function listar() {
   const db = getDb();
   const cfg = db.prepare("SELECT valor FROM config WHERE chave = 'ramo_servico'").get();
   const ehInstituto = cfg && cfg.valor === 'instituto';
+  const ehCreche = cfg && cfg.valor === 'creche';
+  const crecheComTurmaCfg = db.prepare("SELECT valor FROM config WHERE chave = 'creche_com_turma'").get();
+  const crecheComTurma = ehCreche && crecheComTurmaCfg && crecheComTurmaCfg.valor === '1';
   const perfilCfg = db.prepare("SELECT valor FROM config WHERE chave = 'perfil_negocio'").get();
   // "Produto sem custo" so faz sentido pra quem vende produto de verdade —
-  // instituto nao vende, e prestador de servico puro nao cadastra produto
-  // com custo (o "servico" dele pode nem ter custo direto).
-  const temProdutos = !ehInstituto && ['comercio', 'ambos'].includes(perfilCfg && perfilCfg.valor);
+  // instituto/creche nao vendem, e prestador de servico puro nao cadastra
+  // produto com custo (o "servico" dele pode nem ter custo direto).
+  const temProdutos = !ehInstituto && !ehCreche && ['comercio', 'ambos'].includes(perfilCfg && perfilCfg.valor);
 
   let avisos = [
     ...coletar('lembretes', () => lembretesVencidos()),
@@ -385,15 +388,23 @@ function listar() {
     ...(temProdutos ? coletar('produtos sem custo', () => produtosSemCusto(db)) : []),
   ];
 
+  // Avisos de turma/chamada valem pra instituto e pra creche organizada por
+  // turma — os exclusivos do instituto (emprestimo de instrumento, lista de
+  // espera, autorizacao, mandato, contribuicao de mantenedor) ficam so nele.
+  if (ehInstituto || crecheComTurma) {
+    avisos = avisos.concat(
+      coletar('chamadas pendentes', () => chamadasPendentes(db)),
+      coletar('alunos em risco', () => alunosEmRisco()),
+      coletar('turmas sem instrutor', () => turmasSemInstrutor(db)),
+      coletar('aulas de amanha', () => aulasDeAmanha(db))
+    );
+  }
+
   if (ehInstituto) {
     avisos = avisos.concat(
       coletar('emprestimos atrasados', () => emprestimosAtrasados(db)),
       coletar('emprestimos vencendo', () => emprestimosVencendo(db)),
-      coletar('chamadas pendentes', () => chamadasPendentes(db)),
-      coletar('alunos em risco', () => alunosEmRisco()),
       coletar('lista de espera', () => listaDeEspera()),
-      coletar('turmas sem instrutor', () => turmasSemInstrutor(db)),
-      coletar('aulas de amanha', () => aulasDeAmanha(db)),
       coletar('autorizacoes', () => autorizacoesPendentes(db)),
       coletar('mandatos', () => mandatosVencidos(db)),
       coletar('contribuicoes atrasadas', () => contribuicoesAtrasadas(db))

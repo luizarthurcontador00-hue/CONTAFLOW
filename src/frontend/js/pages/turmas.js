@@ -23,6 +23,8 @@ window.PaginaTurmas = (function () {
   let cursos = [];
   let instrumentos = [];
   let equipe = [];
+  // Creche nao usa o conceito de instrumento/acervo do instituto.
+  const ehCreche = () => window.__ramoServico === 'creche';
   // Por regra, ao abrir o modulo so mostra turma em andamento ou planejada —
   // encerrada/cancelada so aparece quando o usuario pede explicitamente
   // marcando a caixinha (senao a lista some do dia a dia).
@@ -55,7 +57,7 @@ window.PaginaTurmas = (function () {
 
     [cursos, instrumentos, equipe] = await Promise.all([
       API.get('/api/cursos').catch(() => []),
-      API.get('/api/instrumentos').catch(() => []),
+      ehCreche() ? Promise.resolve([]) : API.get('/api/instrumentos').catch(() => []),
       API.get('/api/agenda/profissionais').catch(() => []),
     ]);
 
@@ -565,6 +567,7 @@ window.PaginaTurmas = (function () {
           <div class="campo"><label>Nome da turma *</label>
             <input id="tf-nome" value="${ed ? UI.escapar(turma.nome) : ''}" placeholder="Ex.: Violão Iniciante — Turma A" /></div>
 
+          ${ehCreche() ? '' : `
           <div class="campo col-2"><label>Instrumentos usados <span class="dica">(pode marcar mais de um — ex.: turma de banda)</span></label>
             <div id="tf-instrumentos" style="display:flex;flex-wrap:wrap;gap:12px">
               ${instrumentos.map((i) => `<label class="flex gap-12" style="align-items:center;cursor:pointer">
@@ -575,6 +578,7 @@ window.PaginaTurmas = (function () {
             <span class="dica">Informática e reforço normalmente ficam sem nenhum marcado.</span></div>
           <div class="campo"><label>Instrumentos por aluno</label>
             <input id="tf-por-aluno" type="number" min="1" step="1" value="${ed ? turma.instrumentos_por_aluno : 1}" /></div>
+          `}
           <div class="campo"><label>Vagas *</label>
             <input id="tf-vagas" type="number" min="0" step="1" value="${ed ? turma.vagas : ''}" />
             <span class="dica" id="tf-aviso-vagas"></span></div>
@@ -705,8 +709,10 @@ window.PaginaTurmas = (function () {
           instrutores.push({ profissional_id: equipe[0].id, papel: instrutores.length ? 'auxiliar' : 'titular' });
           desenharInstrutores();
         });
-        el.querySelector('#tf-instrumentos').addEventListener('change', () => conferirVagas(true));
-        el.querySelector('#tf-por-aluno').addEventListener('change', () => conferirVagas(true));
+        const tfInstrumentos = el.querySelector('#tf-instrumentos');
+        const tfPorAluno = el.querySelector('#tf-por-aluno');
+        if (tfInstrumentos) tfInstrumentos.addEventListener('change', () => conferirVagas(true));
+        if (tfPorAluno) tfPorAluno.addEventListener('change', () => conferirVagas(true));
         el.querySelector('#tf-vagas').addEventListener('input', () => conferirVagas(false));
 
         desenharHorarios();
@@ -719,7 +725,7 @@ window.PaginaTurmas = (function () {
           curso_id: el.querySelector('#tf-curso').value,
           nome: el.querySelector('#tf-nome').value,
           instrumentos_ids: Array.from(el.querySelectorAll('#tf-instrumentos input:checked')).map((c) => c.value),
-          instrumentos_por_aluno: el.querySelector('#tf-por-aluno').value,
+          instrumentos_por_aluno: el.querySelector('#tf-por-aluno') ? el.querySelector('#tf-por-aluno').value : 1,
           vagas: el.querySelector('#tf-vagas').value,
           sala: el.querySelector('#tf-sala').value,
           periodo_inicio: el.querySelector('#tf-inicio').value,
